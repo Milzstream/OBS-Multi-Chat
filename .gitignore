@@ -1,0 +1,7 @@
+production.env
+deploy/
+dist-package/
+relay-chat-dock.exe
+relay-chat-dock-test.exe
+relay-chat-dock-debug.exe
+data/

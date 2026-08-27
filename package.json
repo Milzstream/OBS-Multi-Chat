@@ -9,7 +9,7 @@
     "start": "tsx server/server.ts",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
-    "package:win": "npm run build && pkg dist-server/server.js --targets node18-win-x64 --output relay-chat-dock.exe"
+    "package:win": "npm run build && tsc -p tsconfig.package.json && node -e \"require('fs').cpSync('dist','dist-package/dist',{recursive:true}); require('fs').copyFileSync('package-runtime.json','dist-package/package.json')\" && pkg dist-package/server.js --targets node18-win-x64 --output relay-chat-dock.build.exe && node scripts/finish-win-package.cjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -17,17 +17,23 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "lucide-react": "^0.468.0",
+    "playwright-core": "^1.49.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.18.0"
   },
   "bin": "dist-server/server.js",
+  "pkg": {
+    "assets": [
+      "dist/**/*"
+    ]
+  },
   "devDependencies": {
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
     "pkg": "^5.8.1",
     "tsx": "^4.19.2",

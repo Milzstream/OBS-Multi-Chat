@@ -1,0 +1,6 @@
+{
+  "type": "commonjs",
+  "pkg": {
+    "assets": ["dist/**/*"]
+  }
+}

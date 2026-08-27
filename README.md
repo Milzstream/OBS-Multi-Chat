@@ -9,6 +9,7 @@ A responsive OBS Browser Source that combines Twitch, Kick, and YouTube live cha
 - Server-side token persistence in the local `data/tokens.json` file
 - Twitch live detection, viewer count, IRC chat reading, message sending, and title/category updates
 - YouTube live detection, viewer count, and live-chat polling
+- Kick chat reading over Kick's public chat WebSocket (with a local browser lookup only if the chatroom id cannot be resolved from the channel API)
 - SSE updates from the backend to the browser source
 - Unified Twitch + Kick stream title/category controls
 - Windows background executable packaging
@@ -26,9 +27,9 @@ http://localhost:4173/oauth/callback
 1. Visit https://dev.twitch.tv/console/apps.
 2. Create a new application.
 3. Set the OAuth redirect URL to the callback URL above.
-4. Copy the client ID and generate a client secret.
+4. Set the client type to **Confidential/Private**, copy the client ID, and generate a client secret.
 
-The app requests email, chat read/write, and broadcast metadata permissions.
+The app requests email, IRC chat, EventSub chat read/write, and broadcast metadata permissions. After updating the app, disconnect and reconnect Twitch so the new chat scopes can be granted. The client secret stays in the backend environment file and is never sent to OBS.
 
 ### Google / YouTube
 
@@ -47,17 +48,17 @@ The app requests YouTube read access and YouTube live metadata/chat access.
 1. Create an application in the Kick developer portal: https://dev.kick.com/.
 2. Set the OAuth redirect URL to the callback URL above.
 3. Copy the client ID and client secret.
-4. Confirm that your account has access to the current Kick chat and channel API endpoints.
+4. Confirm that your account has access to the current Kick chat and channel API endpoints. The app requests `channel:write` so it can update stream metadata.
 
-Kick API access can vary by developer account and API version, so the backend accepts `KICK_API_BASE` for the current public API base URL.
+Kick API access can vary by developer account and API version, so the backend accepts `KICK_API_BASE` for the current public API base URL. It defaults to `https://api.kick.com/public/v1`. Incoming Kick chat uses Kick's public Pusher WebSocket; sending still uses the official chat API.
 
 ## Configure the backend
 
-Create the environment file from the included template:
+Create the environment file from the included template. For the packaged Windows executable, name it `production.env` and place it beside the `.exe`:
 
 ```powershell
-copy .env.example .env
-notepad .env
+copy .env.example production.env
+notepad production.env
 ```
 
 Fill in the values:
@@ -72,6 +73,8 @@ TWITCH_CLIENT_SECRET=your_twitch_client_secret
 KICK_CLIENT_ID=your_kick_client_id
 KICK_CLIENT_SECRET=your_kick_client_secret
 KICK_API_BASE=
+# Optional if Edge/Chrome is installed in a non-standard location:
+# KICK_BROWSER_PATH=C:\\Path\\To\\msedge.exe
 
 YOUTUBE_CLIENT_ID=your_google_client_id
 YOUTUBE_CLIENT_SECRET=your_google_client_secret
@@ -105,11 +108,13 @@ Build the executable:
 npm run package:win
 ```
 
-This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `.env` beside the executable, then run:
+This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` beside the executable, then run:
 
 ```powershell
 .\relay-chat-dock.exe
 ```
+
+The same command also creates a ready-to-copy `deploy` folder containing the latest executable, frontend `dist` files, and `production.env`. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`. When a root `production.env` exists, it is copied into `deploy` on each build, so edit the root file before packaging.
 
 The executable serves the dock at `http://localhost:4173`. Start it before opening OBS.
 
@@ -118,11 +123,12 @@ The executable serves the dock at `http://localhost:4173`. Start it before openi
 - `GET /api/state` - current accounts, stream info, and recent messages
 - `GET /events` - Server-Sent Events stream for dock updates
 - `POST /api/messages` - send a message to selected platforms
-- `POST /api/stream-info` - apply the unified title/category to Twitch and Kick
+- `GET /api/categories/:platform` - search Twitch or Kick categories
+- `POST /api/stream-info/:platform` - apply title/category to one platform
 - `POST /api/disconnect/:platform` - remove a saved platform connection
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
 - `GET /oauth/callback` - exchange the provider authorization code server-side
 
 ## Current platform status
 
-Twitch has the most complete adapter: live detection, viewer counts, IRC chat reading, sending, and metadata updates are implemented. YouTube OAuth, live detection, viewer counts, and chat polling are implemented. Kick OAuth and the adapter hooks are included, but its chat, viewer, and metadata requests require the current Kick API base URL and the corresponding developer permissions.
+Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth, live detection, viewer counts, and chat polling are implemented. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's public chat WebSocket after resolving the channel's chatroom id.
