@@ -167,23 +167,73 @@ function MessageItem({ message, onModerate }: { message: ChatMessage; onModerate
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {
   const [options, setOptions] = useState<CategoryOption[]>([])
   const [open, setOpen] = useState(false)
+  const typingRef = useRef(false)
   const pickedRef = useRef(false)
   useEffect(() => {
     if (disabled || details.category.trim().length < 2) { setOptions([]); setOpen(false); return }
     if (pickedRef.current) { pickedRef.current = false; setOpen(false); return }
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      void fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(details.category.trim())}`, { signal: controller.signal }).then((response) => response.ok ? response.json() as Promise<CategoryOption[]> : Promise.reject()).then((items) => { setOptions(items); if (!pickedRef.current) setOpen(items.length > 0) }).catch((error: { name?: string }) => { if (error.name !== 'AbortError') { setOptions([]); setOpen(false) } })
+      void fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(details.category.trim())}`, { signal: controller.signal }).then((response) => response.ok ? response.json() as Promise<CategoryOption[]> : Promise.reject()).then((items) => { setOptions(items); setOpen(typingRef.current && items.length > 0) }).catch((error: { name?: string }) => { if (error.name !== 'AbortError') { setOptions([]); setOpen(false) } })
     }, 200)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [details.category, disabled, platform])
-  const pick = (option: CategoryOption) => { pickedRef.current = true; setOpen(false); setOptions([]); onChange({ ...details, category: option.name, categoryId: option.id }) }
-  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onFocus={() => { if (options.length && !pickedRef.current) setOpen(true) }} onBlur={() => window.setTimeout(() => setOpen(false), 120)} placeholder={`${platform} category / game`} />{open && options.length > 0 && <ul className="category-options">{options.slice(0, 8).map((option) => <li key={option.id}><button type="button" onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+  const pick = (option: CategoryOption) => { pickedRef.current = true; typingRef.current = false; setOpen(false); setOptions([]); onChange({ ...details, category: option.name, categoryId: option.id }) }
+  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} />{open && options.length > 0 && <ul className="category-options">{options.slice(0, 8).map((option) => <li key={option.id}><button type="button" onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+}
+
+function seedStreamDetails(details: StreamDetailsByPlatform): StreamDetailsByPlatform {
+  const twitch = details.Twitch.category.trim()
+  const kick = details.Kick.category.trim()
+  const source = twitch || kick
+  return {
+    Twitch: { ...details.Twitch, category: twitch || source },
+    Kick: { ...details.Kick, category: kick || source },
+  }
+}
+
+function bestCategoryMatch(query: string, options: CategoryOption[]) {
+  const lower = query.trim().toLowerCase()
+  if (!options.length) return
+  const exact = options.find((option) => option.name.toLowerCase() === lower)
+  if (exact) return exact
+  return options.filter((option) => {
+    const name = option.name.toLowerCase()
+    return name.startsWith(lower) || lower.startsWith(name) || name.includes(lower) || lower.includes(name)
+  }).sort((left, right) => Math.abs(left.name.length - query.length) - Math.abs(right.name.length - query.length))[0] || options[0]
+}
+
+async function resolveCategory(platform: StreamPlatform, query: string) {
+  const text = query.trim()
+  if (text.length < 2) return
+  try {
+    const response = await fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(text)}`)
+    if (!response.ok) return
+    return bestCategoryMatch(text, await response.json() as CategoryOption[])
+  } catch {
+    return
+  }
 }
 
 function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => void; onClose: () => void }) {
   const [draftTitle, setDraftTitle] = useState(title)
-  const [draftDetails, setDraftDetails] = useState(details)
+  const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const seeded = seedStreamDetails(details)
+      const [twitchMatch, kickMatch] = await Promise.all([
+        seeded.Twitch.categoryId ? undefined : resolveCategory('Twitch', seeded.Twitch.category),
+        seeded.Kick.categoryId ? undefined : resolveCategory('Kick', seeded.Kick.category),
+      ])
+      if (cancelled) return
+      setDraftDetails((current) => ({
+        Twitch: twitchMatch ? { ...current.Twitch, category: twitchMatch.name, categoryId: twitchMatch.id } : current.Twitch,
+        Kick: kickMatch ? { ...current.Kick, category: kickMatch.name, categoryId: kickMatch.id } : current.Kick,
+      }))
+    })()
+    return () => { cancelled = true }
+  }, [])
   return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => setDraftDetails((current) => ({ ...current, [platform]: next }))} />)}<button className="update-stream" onClick={() => onSave(draftTitle, draftDetails)}>Set title and categories</button></aside>
 }
 
