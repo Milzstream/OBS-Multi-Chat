@@ -182,7 +182,16 @@ export class KickChat {
         const emotes = message?.emotes || message?.metadata?.emotes;
         if (!text && !emotes?.length)
             return;
-        this.onMessage?.({ id: message?.id ? String(message.id) : undefined, user, text: text || ' ', userId: message?.sender?.id != null ? String(message.sender.id) : undefined, emotes });
+        this.onMessage?.({
+            id: message?.id ? String(message.id) : undefined,
+            user,
+            text: text || ' ',
+            userId: message?.sender?.id != null ? String(message.sender.id) : undefined,
+            color: message?.sender?.identity?.color,
+            avatar: message?.sender?.profile_picture || message?.sender?.profilepic || message?.sender?.avatar,
+            badges: message?.sender?.identity?.badges,
+            emotes,
+        });
     }
     startPing() {
         if (this.pingTimer)

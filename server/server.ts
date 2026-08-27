@@ -23,7 +23,8 @@ type StreamPlatform = 'Twitch' | 'Kick'
 type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[] }
 type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; deleted?: boolean }
+type ChatBadge = { title: string; url?: string; label?: string }
+type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
 type StreamDetails = { title: string; category: string; categoryId?: string }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health> }
@@ -39,6 +40,11 @@ const tokens: Partial<Record<Platform, Token>> = loadTokens()
 const oauthStates = new Map<string, { platform: Platform; createdAt: number; codeVerifier?: string }>()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
+const twitchBadgeUrls = new Map<string, string>()
+const twitchAvatars = new Map<string, string>()
+const twitchAvatarPending = new Set<string>()
+let twitchBadgesLoaded = false
+let twitchAvatarTimer: NodeJS.Timeout | undefined
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
@@ -348,6 +354,8 @@ async function youtubeApi(endpoint: string, token: Token, retried = false): Prom
 function startAdapter(platform: Platform) {
   if (platform === 'Twitch') {
     twitchEventSubUnsupported = false
+    twitchBadgesLoaded = false
+    void ensureTwitchBadges()
     connectTwitchEventSub()
     setTimeout(() => { if (!twitchEventSubReady) connectTwitchIrc() }, 4_000)
   }
@@ -365,6 +373,9 @@ function startKickChat(slug: string) {
     platform: 'Kick',
     user: message.user,
     userId: message.userId,
+    color: message.color,
+    avatar: normalizeAvatar(message.avatar),
+    badges: kickBadges(message.badges),
     text: message.text,
     time: new Date().toISOString(),
     parts: parseKickParts(message.text, message.emotes),
@@ -415,6 +426,9 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
         platform: 'Twitch',
         user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
         userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
+        color: event?.color || undefined,
+        badges: twitchBadgesFromList(event?.badges),
+        avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
         text: event?.message?.text || '',
         time: new Date().toISOString(),
         parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
@@ -557,9 +571,134 @@ function parseTwitchLines(raw: string): ChatMessage[] {
     if (line.startsWith('PING')) { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
     const match = line.match(/^(?:@([^ ]+) )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/)
     if (!match) return []
-    const tags = Object.fromEntries((match[1] || '').split(';').filter(Boolean).map((item) => item.split('=')))
-    return [{ id: tags.id || crypto.randomUUID(), platform: 'Twitch' as Platform, user: tags['display-name'] || match[2], userId: tags['user-id'] || undefined, text: match[3], time: new Date().toISOString(), parts: parseTwitchEmoteParts(match[3], tags.emotes), emotes: tags.emotes ? tags.emotes.split('/').map((item: string) => item.split(':')[0]) : [] }]
+    const tags = parseIrcTags(match[1] || '')
+    const userId = tags['user-id'] || undefined
+    return [{ id: tags.id || crypto.randomUUID(), platform: 'Twitch' as Platform, user: tags['display-name'] || match[2], userId, color: tags.color || undefined, badges: twitchBadgesFromTag(tags.badges), avatar: userId ? twitchAvatars.get(userId) : undefined, text: match[3], time: new Date().toISOString(), parts: parseTwitchEmoteParts(match[3], tags.emotes), emotes: tags.emotes ? tags.emotes.split('/').map((item: string) => item.split(':')[0]) : [] }]
   })
+}
+
+function parseIrcTags(raw: string) {
+  return Object.fromEntries((raw || '').split(';').filter(Boolean).map((item) => {
+    const index = item.indexOf('=')
+    return index === -1 ? [item, ''] : [item.slice(0, index), item.slice(index + 1)]
+  }))
+}
+
+function twitchBadgeLabel(set: string) {
+  const name = set.toLowerCase()
+  if (name === 'broadcaster') return 'HOST'
+  if (name === 'moderator') return 'MOD'
+  if (name === 'subscriber' || name === 'founder') return 'SUB'
+  if (name === 'vip') return 'VIP'
+  if (name === 'premium' || name === 'turbo') return 'PRIME'
+  if (name === 'staff' || name === 'admin') return 'STAFF'
+  if (name === 'partner' || name === 'verified') return '✓'
+  if (name.includes('bit')) return 'BITS'
+  if (name.includes('gift')) return 'GIFT'
+  return ''
+}
+
+function twitchBadge(set: string, version: string): ChatBadge {
+  return { title: set, url: twitchBadgeUrls.get(`${set}/${version || '1'}`), label: twitchBadgeLabel(set) }
+}
+
+function twitchBadgesFromTag(tag?: string): ChatBadge[] {
+  return (tag || '').split(',').filter(Boolean).map((item) => {
+    const [set, version] = item.split('/')
+    return twitchBadge(set, version || '1')
+  }).filter((badge) => badge.url || badge.label).slice(0, 5)
+}
+
+function twitchBadgesFromList(badges?: { set_id?: string; id?: string }[]): ChatBadge[] {
+  return (badges || []).map((badge) => twitchBadge(String(badge.set_id || ''), String(badge.id || '1'))).filter((badge) => badge.url || badge.label).slice(0, 5)
+}
+
+async function ensureTwitchBadges() {
+  const token = await ensureToken('Twitch')
+  if (!token?.userId || twitchBadgesLoaded) return
+  try {
+    const [globalBadges, channelBadges] = await Promise.all([
+      twitchApi('/helix/chat/badges/global', token),
+      twitchApi(`/helix/chat/badges?broadcaster_id=${token.userId}`, token),
+    ])
+    twitchBadgeUrls.clear()
+    for (const set of [...(globalBadges.data || []), ...(channelBadges.data || [])]) {
+      for (const version of set.versions || []) {
+        twitchBadgeUrls.set(`${set.set_id}/${version.id}`, version.image_url_2x || version.image_url_1x)
+      }
+    }
+    twitchBadgesLoaded = true
+  } catch (error) {
+    console.error('Twitch badges:', error instanceof Error ? error.message : error)
+  }
+}
+
+function queueTwitchAvatar(userId?: string) {
+  if (!userId || twitchAvatars.has(userId) || twitchAvatarPending.has(userId)) return
+  twitchAvatarPending.add(userId)
+  if (twitchAvatarTimer) clearTimeout(twitchAvatarTimer)
+  twitchAvatarTimer = setTimeout(() => { void flushTwitchAvatars() }, 400)
+}
+
+async function flushTwitchAvatars() {
+  const token = await ensureToken('Twitch')
+  if (!token) return
+  const ids = [...twitchAvatarPending].slice(0, 80)
+  ids.forEach((id) => twitchAvatarPending.delete(id))
+  if (!ids.length) return
+  try {
+    const result = await twitchApi(`/helix/users?${ids.map((id) => `id=${encodeURIComponent(id)}`).join('&')}`, token)
+    for (const user of result.data || []) {
+      const avatar = normalizeAvatar(user.profile_image_url)
+      if (user.id && avatar) twitchAvatars.set(String(user.id), avatar)
+    }
+    let changed = false
+    state.messages = state.messages.map((item) => {
+      if (item.platform !== 'Twitch' || !item.userId) return item
+      const avatar = twitchAvatars.get(item.userId)
+      if (!avatar || item.avatar === avatar) return item
+      changed = true
+      return { ...item, avatar }
+    })
+    if (changed) broadcast()
+  } catch (error) {
+    console.error('Twitch avatars:', error instanceof Error ? error.message : error)
+  }
+  if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
+}
+
+function kickBadges(badges?: { type?: string; text?: string }[]): ChatBadge[] {
+  return (badges || []).map((badge) => {
+    const type = String(badge.type || '').toLowerCase()
+    let label = ''
+    if (type.includes('broadcaster') || type === 'og') label = 'HOST'
+    else if (type.includes('mod')) label = 'MOD'
+    else if (type.includes('sub')) label = 'SUB'
+    else if (type.includes('vip')) label = 'VIP'
+    else if (type.includes('verified')) label = '✓'
+    else if (type.includes('staff')) label = 'STAFF'
+    else if (type.includes('founder')) label = 'OG'
+    return { title: badge.text || badge.type || label, label }
+  }).filter((badge) => badge.label).slice(0, 4)
+}
+
+function normalizeAvatar(url?: string) {
+  if (!url) return
+  let next = String(url).trim()
+  if (!next) return
+  if (next.startsWith('//')) next = `https:${next}`
+  else if (next.startsWith('http://')) next = `https://${next.slice(7)}`
+  if (/default-user|\/photo\.jpg(\?|$)/i.test(next)) return
+  return next.replace(/=s\d+/i, '=s88')
+}
+
+function youtubeBadges(author?: { isChatOwner?: boolean; isChatModerator?: boolean; isChatSponsor?: boolean; isVerified?: boolean }): ChatBadge[] {
+  const badges: ChatBadge[] = []
+  if (author?.isChatOwner) badges.push({ title: 'Owner', label: 'HOST' })
+  if (author?.isChatModerator) badges.push({ title: 'Moderator', label: 'MOD' })
+  if (author?.isChatSponsor) badges.push({ title: 'Member', label: 'MEM' })
+  if (author?.isVerified) badges.push({ title: 'Verified', label: '✓' })
+  return badges
 }
 
 function twitchEmoteUrl(id: string) {
@@ -750,6 +889,7 @@ function addMessage(message: ChatMessage) {
   state.messages = [...state.messages.slice(-199), stored]
   broadcast()
   queueTranslation(stored)
+  if (stored.platform === 'Twitch') queueTwitchAvatar(stored.userId)
 }
 
 async function pollLiveState() {
@@ -788,6 +928,7 @@ async function pollTwitch() {
     const info = channel.data?.[0]
     if (info) state.streamInfo.Twitch = { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined }
   }
+  void ensureTwitchBadges()
   ensureTwitchChat()
 }
 
@@ -829,8 +970,10 @@ async function pollYouTube() {
         addMessage({
           id: item.id,
           platform: 'YouTube',
-          user: item.authorDetails?.displayName || 'YouTube user',
+          user: String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, ''),
           userId: item.authorDetails?.channelId,
+          avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
+          badges: youtubeBadges(item.authorDetails),
           sourceId: chatId,
           sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
           text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',

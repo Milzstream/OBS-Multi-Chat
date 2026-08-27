@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
 
-export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; emotes?: any[] }
+export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
 
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
 const BROWSER_HEADERS = {
@@ -170,7 +170,16 @@ export class KickChat {
     const user = String(message?.sender?.username || message?.sender?.slug || 'Kick user')
     const emotes = message?.emotes || message?.metadata?.emotes
     if (!text && !emotes?.length) return
-    this.onMessage?.({ id: message?.id ? String(message.id) : undefined, user, text: text || ' ', userId: message?.sender?.id != null ? String(message.sender.id) : undefined, emotes })
+    this.onMessage?.({
+      id: message?.id ? String(message.id) : undefined,
+      user,
+      text: text || ' ',
+      userId: message?.sender?.id != null ? String(message.sender.id) : undefined,
+      color: message?.sender?.identity?.color,
+      avatar: message?.sender?.profile_picture || message?.sender?.profilepic || message?.sender?.avatar,
+      badges: message?.sender?.identity?.badges,
+      emotes,
+    })
   }
 
   private startPing() {

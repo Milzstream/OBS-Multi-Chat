@@ -8,7 +8,8 @@ type StreamDetails = { title: string; category: string; categoryId?: string }
 type StreamDetailsByPlatform = Record<StreamPlatform, StreamDetails>
 type CategoryOption = { id: string; name: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; deleted?: boolean }
+type ChatBadge = { title: string; url?: string; label?: string }
+type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health> }
 
@@ -145,10 +146,22 @@ function PlatformStat({ connection, health, onConnect }: { connection: Connectio
   return <button type="button" className={`platform-stat${connection.connected ? ' connected' : ''}${connection.live ? ' live' : ''}${issue ? ' issue' : ''}`} style={{ color: meta.color, borderColor: issue ? '#f3af61' : connection.live ? meta.color : `${meta.color}66`, background: `${meta.color}18` }} title={issue ? health.message : undefined} onClick={() => { if (!connection.connected) onConnect() }} aria-label={`${connection.platform} ${connection.live ? 'live' : connection.connected ? 'offline' : 'connect'} ${connection.connected ? `${connection.viewers} viewers` : ''}`}><span className="platform-stat-top">{platformIcon(connection.platform, 13)}<span className="platform-stat-name">{handle}</span>{issue ? <span className="issue-dot" /> : connection.live ? <span className="live-dot" /> : null}</span><strong>{connection.connected ? connection.viewers.toLocaleString() : '—'}</strong></button>
 }
 
+function displayLetter(name: string) {
+  const cleaned = name.replace(/^@+/, '')
+  return (cleaned.match(/[\p{L}\p{N}]/u)?.[0] || cleaned[0] || '?').toUpperCase()
+}
+
+function Avatar({ name, src, color }: { name: string; src?: string; color: string }) {
+  const [failed, setFailed] = useState(false)
+  const showImage = Boolean(src) && !failed
+  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
+}
+
 function MessageItem({ message, onModerate }: { message: ChatMessage; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
   const platforms = message.platforms || [message.platform]
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
-  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><div className="avatar" style={{ backgroundColor: platformMeta[platforms[0]].color }}>{message.user.slice(0, 1).toUpperCase()}</div><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}<strong>{message.user}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={message.originalText || undefined}>{message.deleted ? <span className="deleted-text">Message deleted</span> : parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
+  const name = message.user.replace(/^@+/, '')
+  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={message.avatar} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={message.originalText || undefined}>{message.deleted ? <span className="deleted-text">Message deleted</span> : parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {
