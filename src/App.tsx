@@ -44,6 +44,7 @@ function App() {
   const [connections, setConnections] = useState(initialConnections)
   const [activeFilter, setActiveFilter] = useState<'All' | Platform>('All')
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([])
+  const sendOptOutRef = useRef<Set<Platform>>(new Set())
   const [composer, setComposer] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [compactMode, setCompactMode] = useState(true)
@@ -52,6 +53,7 @@ function App() {
   const [streamTitle, setStreamTitle] = useState('')
   const [backendOnline, setBackendOnline] = useState(false)
     const [sendStatus, setSendStatus] = useState('')
+  const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
     const [messages, setMessages] = useState<ChatMessage[]>([])
   const [health, setHealth] = useState(initialHealth)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
@@ -82,6 +84,11 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const connected = connections.filter((connection) => connection.connected).map((connection) => connection.platform)
+    setSelectedPlatforms((['Twitch', 'Kick', 'YouTube'] as Platform[]).filter((platform) => connected.includes(platform) && !sendOptOutRef.current.has(platform)))
+  }, [connections])
+
+  useEffect(() => {
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then((remote) => { setConnections(remote.accounts); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true) }).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
     events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); if (!editingStreamRef.current) { setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) } }
@@ -94,12 +101,20 @@ function App() {
   }
   const disconnectPlatform = (platform: Platform) => {
     setConnections((current) => current.map((connection) => connection.platform === platform ? { ...connection, connected: false, live: false, viewers: 0, handle: '' } : connection))
+    sendOptOutRef.current.delete(platform)
     setSelectedPlatforms((current) => current.filter((item) => item !== platform))
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const togglePlatform = (platform: Platform) => {
     if (!connections.find((connection) => connection.platform === platform)?.connected) return
-    setSelectedPlatforms((current) => current.includes(platform) ? current.filter((item) => item !== platform) : [...current, platform])
+    setSelectedPlatforms((current) => {
+      if (current.includes(platform)) {
+        sendOptOutRef.current.add(platform)
+        return current.filter((item) => item !== platform)
+      }
+      sendOptOutRef.current.delete(platform)
+      return [...current, platform]
+    })
   }
   const sendMessage = (event: FormEvent) => {
     event.preventDefault()
@@ -119,10 +134,29 @@ function App() {
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => setSendStatus('Moderation request failed'))
   }
-  const saveStreamInfo = (title: string, details: StreamDetailsByPlatform) => {
+  const flashNotice = (text: string, kind: 'ok' | 'error') => {
+    setNotice({ text, kind })
+    setSendStatus(text)
+    window.setTimeout(() => { setNotice(null); setSendStatus('') }, 4500)
+  }
+  const saveStreamInfo = async (title: string, details: StreamDetailsByPlatform) => {
     setStreamTitle(title)
     setStreamDetails(details)
-    void fetch('/api/stream-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, Twitch: details.Twitch, Kick: details.Kick }) }).then((response) => response.json()).then((result: { results: { platform: StreamPlatform; ok: boolean; error?: string }[] }) => { const failed = result.results.filter((item) => !item.ok); setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ') : 'Stream info updated'); window.setTimeout(() => setSendStatus(''), 4000) }).catch(() => setSendStatus('Stream info request failed'))
+    try {
+      const response = await fetch('/api/stream-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, Twitch: details.Twitch, Kick: details.Kick }) })
+      const result = await response.json() as { results: { platform: StreamPlatform; ok: boolean; error?: string }[] }
+      const ok = (result.results || []).filter((item) => item.ok).map((item) => item.platform)
+      const failed = (result.results || []).filter((item) => !item.ok)
+      const text = failed.length
+        ? (ok.length ? `Updated ${ok.join(' + ')}. ${failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')}` : failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | '))
+        : `Title and categories set on ${ok.join(' + ') || 'Twitch + Kick'}`
+      flashNotice(text, failed.length ? 'error' : 'ok')
+      return { ok: failed.length === 0, message: text }
+    } catch {
+      const message = 'Could not set title and categories'
+      flashNotice(message, 'error')
+      return { ok: false, message }
+    }
   }
 
   return (
@@ -134,6 +168,7 @@ function App() {
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
       {showSettings && <aside className="settings-popover"><div className="popover-title"><span>CONNECTION SETTINGS</span><button onClick={() => setShowSettings(false)} aria-label="Close settings">×</button></div><p className="settings-note">Connect with OAuth. Title and category live under the gamepad. Reconnect Twitch and Kick once to grant timeout, ban, and delete permissions.</p>{connections.map((connection) => <div className="connection-row" key={connection.platform}><span style={{ color: platformMeta[connection.platform].color }}>{platformIcon(connection.platform, 14)}</span><div><strong>{connection.platform}</strong><small>{connection.connected ? connection.handle : 'Not connected'}</small></div>{connection.connected ? <button className="disconnect" onClick={() => disconnectPlatform(connection.platform)}>Disconnect</button> : <button className="connect" onClick={() => connectPlatform(connection.platform)}>Connect</button>}</div>)}</aside>}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - 190)) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></div>}
+      {notice && <div className={`app-toast ${notice.kind}`}>{notice.text}</div>}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
   )
@@ -215,9 +250,11 @@ async function resolveCategory(platform: StreamPlatform, query: string) {
   }
 }
 
-function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => void; onClose: () => void }) {
+function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; message: string }>; onClose: () => void }) {
   const [draftTitle, setDraftTitle] = useState(title)
   const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -234,7 +271,13 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
     })()
     return () => { cancelled = true }
   }, [])
-  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => setDraftDetails((current) => ({ ...current, [platform]: next }))} />)}<button className="update-stream" onClick={() => onSave(draftTitle, draftDetails)}>Set title and categories</button></aside>
+  const save = async () => {
+    setSaving(true)
+    const result = await onSave(draftTitle, draftDetails)
+    setStatus({ text: result.message, ok: result.ok })
+    setSaving(false)
+  }
+  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => setDraftDetails((current) => ({ ...current, [platform]: next }))} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
 }
 
 export default App

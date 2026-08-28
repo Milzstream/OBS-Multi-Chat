@@ -870,7 +870,17 @@ function addMessage(message: ChatMessage) {
   const incomingIsOwn = ownHandles().has(message.user.toLowerCase())
   const tracked = recentOutgoing.find((item) => item.text === message.text && Math.abs(incomingTime - item.at) < 20_000)
 
-  const mergeAt = tracked ? state.messages.findIndex((item) => item.id === tracked.id || (item.text === message.text && Math.abs(Date.parse(item.time) - incomingTime) < 20_000 && (incomingIsOwn || item.id === tracked.id))) : -1
+  const mergeAt = state.messages.findIndex((item) => {
+    if (item.text !== message.text) return false
+    if (Math.abs(Date.parse(item.time) - incomingTime) > 90_000) return false
+    const itemIsOwn = ownHandles().has(item.user.toLowerCase())
+    const itemPlatforms = item.platforms || [item.platform]
+    if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) return true
+    if (!itemIsOwn || !incomingIsOwn) return false
+    const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
+    if (!samePlatforms) return true
+    return message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId)
+  })
 
   if (mergeAt >= 0) {
     const current = state.messages[mergeAt]
@@ -878,9 +888,19 @@ function addMessage(message: ChatMessage) {
     const platforms = [...new Set([...preferred, ...(current.platforms || [current.platform]), ...incomingPlatforms])]
     const already = current.platforms || [current.platform]
     const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
+    const dualYouTube = current.platform === 'YouTube' && message.platform === 'YouTube' && current.sourceId !== message.sourceId
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
-    if (platformsUnchanged && parts === current.parts) return
-    state.messages = state.messages.map((item, index) => index === mergeAt ? { ...item, platform: platforms[0], platforms, ...(parts ? { parts } : {}) } : item)
+    if (platformsUnchanged && parts === current.parts && !dualYouTube) return
+    state.messages = state.messages.map((item, index) => index === mergeAt ? {
+      ...item,
+      platform: platforms[0],
+      platforms,
+      ...(parts ? { parts } : {}),
+      avatar: item.avatar || message.avatar,
+      badges: item.badges?.length ? item.badges : message.badges,
+      color: item.color || message.color,
+      sourceLabel: dualYouTube ? undefined : item.sourceLabel || message.sourceLabel,
+    } : item)
     broadcast()
     return
   }
