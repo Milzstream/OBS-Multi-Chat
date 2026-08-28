@@ -1,0 +1,130 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to publish (for example v0.1.0). Leave empty to use package.json.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $input = "${{ github.event.inputs.version }}"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ($input) {
+            $tag = $input
+          } else {
+            $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+            $tag = "v$($pkg.version)"
+          }
+          if ($tag -notmatch '^v') { $tag = "v$tag" }
+          $version = $tag.TrimStart('v')
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Release tag $tag"
+
+      - name: Skip if this version is already released from main
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $publish = "true"
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+            gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+            if ($LASTEXITCODE -eq 0) {
+              $publish = "false"
+              Write-Host "Release $tag already exists; skipping republish from main. Push a new v* tag or bump package.json to ship another build."
+            } else {
+              Write-Host "No existing $tag release; publishing from main."
+            }
+          }
+          "publish=$publish" >> $env:GITHUB_OUTPUT
+          exit 0
+
+      - name: Package Windows executable
+        if: steps.gate.outputs.publish == 'true'
+        run: npm run package:win
+
+      - name: Stage release files
+        if: steps.gate.outputs.publish == 'true'
+        id: stage
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        shell: pwsh
+        run: |
+          node scripts/stage-release.cjs
+          $zip = "obs-multi-chat-v$env:RELEASE_VERSION-windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path "release-staging\*" -DestinationPath $zip
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          Get-Item $zip | Select-Object Name, Length
+
+      - name: Publish GitHub Release
+        if: steps.gate.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Relay Chat Dock ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          body: |
+            Windows x64 build of Relay Chat Dock.
+
+            1. Unzip the archive
+            2. Fill in `production.env` with your Twitch, Kick, and YouTube API credentials
+            3. Run `relay-chat-dock.exe`
+            4. In OBS, add a Browser Source or custom dock pointed at `http://localhost:4173`
+
+            Do not commit or share `production.env` or the `data` folder that appears beside the executable.
+          files: |
+            ${{ steps.stage.outputs.zip }}

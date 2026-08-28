@@ -1,7 +1,28 @@
+# Secrets and local runtime. Never commit these.
+.env
+.env.*
+!.env.example
 production.env
-deploy/
-dist-package/
-relay-chat-dock.exe
-relay-chat-dock-test.exe
-relay-chat-dock-debug.exe
 data/
+
+# Dependencies and build output
+node_modules/
+dist/
+dist-server/
+dist-package/
+deploy/
+release-staging/
+
+# Packaged binaries and release zips
+*.exe
+*.lnk
+*.zip
+
+# TypeScript incremental
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

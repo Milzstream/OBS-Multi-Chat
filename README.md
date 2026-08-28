@@ -2,6 +2,19 @@
 
 A responsive OBS Browser Source that combines Twitch, Kick, and YouTube live chat into one dock. It starts offline and empty, then shows live accounts, viewer totals, messages, emotes, and a multi-platform composer after the companion backend connects.
 
+![OBS Multi Chat combining Twitch, Kick, and YouTube](docs/screenshot.png)
+
+## Download
+
+The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
+
+1. Download `obs-multi-chat-v*-windows-x64.zip`
+2. Unzip it and fill in `production.env` with your API credentials
+3. Run `relay-chat-dock.exe`
+4. In OBS, add a Browser Source or custom dock pointed at `http://localhost:4173`
+
+GitHub Actions builds that zip and attaches it to the GitHub Release when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
+
 ## What is included
 
 - Responsive OBS dock with platform filters and compact mode
@@ -102,7 +115,7 @@ Click **Connect** for each platform in the dock. Each button opens a browser aut
 
 ## Run as a Windows background app
 
-Build the executable:
+Prefer the [prebuilt Windows zip](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. To build the executable locally:
 
 ```powershell
 npm run package:win
