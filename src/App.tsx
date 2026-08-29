@@ -52,9 +52,8 @@ function App() {
   const [streamDetails, setStreamDetails] = useState(initialStreamDetails)
   const [streamTitle, setStreamTitle] = useState('')
   const [backendOnline, setBackendOnline] = useState(false)
-    const [sendStatus, setSendStatus] = useState('')
-  const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
-    const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sendStatus, setSendStatus] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [health, setHealth] = useState(initialHealth)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
@@ -67,10 +66,7 @@ function App() {
   const headerGame = preferredCategory(twitchGame, kickGame)
   const headerTip = [headerTitle, twitchGame && `Twitch: ${twitchGame}`, kickGame && `Kick: ${kickGame}`].filter(Boolean).join('\n')
   const visibleMessages = activeFilter === 'All' ? messages : messages.filter((message) => (message.platforms || [message.platform]).includes(activeFilter))
-  const alerts = (['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => health[platform]?.status !== 'ok' ? health[platform].message || `${platform} chat issue` : '').filter(Boolean)
   const chatListRef = useRef<HTMLDivElement>(null)
-  const editingStreamRef = useRef(false)
-  editingStreamRef.current = showControls
 
   useEffect(() => {
     const list = chatListRef.current
@@ -91,7 +87,7 @@ function App() {
   useEffect(() => {
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then((remote) => { setConnections(remote.accounts); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true) }).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
-    events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); if (!editingStreamRef.current) { setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) } }
+    events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) }
     events.onerror = () => setBackendOnline(false)
     return () => events.close()
   }, [])
@@ -134,11 +130,6 @@ function App() {
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => setSendStatus('Moderation request failed'))
   }
-  const flashNotice = (text: string, kind: 'ok' | 'error') => {
-    setNotice({ text, kind })
-    setSendStatus(text)
-    window.setTimeout(() => { setNotice(null); setSendStatus('') }, 4500)
-  }
   const saveStreamInfo = async (title: string, details: StreamDetailsByPlatform) => {
     setStreamTitle(title)
     setStreamDetails(details)
@@ -150,25 +141,21 @@ function App() {
       const text = failed.length
         ? (ok.length ? `Updated ${ok.join(' + ')}. ${failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')}` : failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | '))
         : `Title and categories set on ${ok.join(' + ') || 'Twitch + Kick'}`
-      flashNotice(text, failed.length ? 'error' : 'ok')
       return { ok: failed.length === 0, message: text }
     } catch {
-      const message = 'Could not set title and categories'
-      flashNotice(message, 'error')
-      return { ok: false, message }
+      return { ok: false, message: 'Could not set title and categories' }
     }
   }
 
   return (
     <main className={compactMode ? 'app compact' : 'app'}>
       <header className="topbar"><button type="button" className="stream-ref" title={headerTip} onClick={() => setShowControls((open) => !open)}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => setShowControls((open) => !open)}><Gamepad2 size={16} /></button><button className="settings-button" onClick={() => setShowSettings((open) => !open)} aria-label="Open settings"><Settings2 size={17} /></button></div></header>
-      <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} health={health[connection.platform]} onConnect={() => connectPlatform(connection.platform)} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div>{alerts.length ? <div className={`health-banner ${alerts.some((item) => item.toLowerCase().includes('missing') || item.toLowerCase().includes('disconnect')) ? 'down' : 'warn'}`} title={alerts.join('\n')}>{alerts[0]}{alerts.length > 1 ? ` +${alerts.length - 1}` : ''}</div> : null}</section>
+      <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} health={health[connection.platform]} onConnect={() => connectPlatform(connection.platform)} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div></section>
       <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-list" ref={chatListRef}>{visibleMessages.length ? visibleMessages.map((message) => <MessageItem key={message.id} message={message} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />) : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Open settings to connect an account.'}</span><button onClick={() => setShowSettings(true)}>Open connection settings</button></div>}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
       {showSettings && <aside className="settings-popover"><div className="popover-title"><span>CONNECTION SETTINGS</span><button onClick={() => setShowSettings(false)} aria-label="Close settings">×</button></div><p className="settings-note">Connect with OAuth. Title and category live under the gamepad. Reconnect Twitch and Kick once to grant timeout, ban, and delete permissions.</p>{connections.map((connection) => <div className="connection-row" key={connection.platform}><span style={{ color: platformMeta[connection.platform].color }}>{platformIcon(connection.platform, 14)}</span><div><strong>{connection.platform}</strong><small>{connection.connected ? connection.handle : 'Not connected'}</small></div>{connection.connected ? <button className="disconnect" onClick={() => disconnectPlatform(connection.platform)}>Disconnect</button> : <button className="connect" onClick={() => connectPlatform(connection.platform)}>Connect</button>}</div>)}</aside>}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - 190)) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></div>}
-      {notice && <div className={`app-toast ${notice.kind}`}>{notice.text}</div>}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
   )
@@ -177,8 +164,13 @@ function App() {
 function PlatformStat({ connection, health, onConnect }: { connection: Connection; health?: Health; onConnect: () => void }) {
   const meta = platformMeta[connection.platform]
   const handle = connection.connected && connection.handle && !['YouTube account', 'Kick account', 'YouTube', 'Kick', 'Twitch'].includes(connection.handle) ? connection.handle : connection.platform
-  const issue = health && health.status !== 'ok'
-  return <button type="button" className={`platform-stat${connection.connected ? ' connected' : ''}${connection.live ? ' live' : ''}${issue ? ' issue' : ''}`} style={{ color: meta.color, borderColor: issue ? '#f3af61' : connection.live ? meta.color : `${meta.color}66`, background: `${meta.color}18` }} title={issue ? health.message : undefined} onClick={() => { if (!connection.connected) onConnect() }} aria-label={`${connection.platform} ${connection.live ? 'live' : connection.connected ? 'offline' : 'connect'} ${connection.connected ? `${connection.viewers} viewers` : ''}`}><span className="platform-stat-top">{platformIcon(connection.platform, 13)}<span className="platform-stat-name">{handle}</span>{issue ? <span className="issue-dot" /> : connection.live ? <span className="live-dot" /> : null}</span><strong>{connection.connected ? connection.viewers.toLocaleString() : '—'}</strong></button>
+  const status = !connection.connected ? '' : health?.status === 'down' ? 'down' : health?.status === 'warn' ? 'warn' : connection.live ? 'ok' : ''
+  const tip = [
+    `${connection.platform}${connection.live ? ' · live' : connection.connected ? ' · offline' : ' · not connected'}`,
+    connection.connected ? `${connection.viewers.toLocaleString()} viewers` : '',
+    health?.message || (status === 'ok' ? 'Connected' : ''),
+  ].filter(Boolean).join('\n')
+  return <button type="button" className={`platform-stat${connection.connected ? ' connected' : ''}${connection.live ? ' live' : ''}${status === 'down' ? ' down' : ''}`} style={{ color: meta.color, borderColor: status === 'down' ? '#ff5b62' : connection.live ? meta.color : `${meta.color}66`, background: `${meta.color}18` }} title={tip} onClick={() => { if (!connection.connected) onConnect() }} aria-label={tip.replace(/\n/g, ' ')}><span className="platform-stat-top">{platformIcon(connection.platform, 13)}<span className="platform-stat-name">{handle}</span>{status ? <span className={`status-dot ${status}`} /> : null}</span><strong>{connection.connected ? connection.viewers.toLocaleString() : '—'}</strong></button>
 }
 
 function displayLetter(name: string) {
@@ -251,11 +243,20 @@ async function resolveCategory(platform: StreamPlatform, query: string) {
 }
 
 function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; message: string }>; onClose: () => void }) {
-  const [draftTitle, setDraftTitle] = useState(title)
+  const [draftTitle, setDraftTitle] = useState(title || details.Twitch.title || details.Kick.title)
   const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
+  const editedRef = useRef(false)
   useEffect(() => {
+    if (!status) return
+    const timer = window.setTimeout(() => setStatus(null), 4500)
+    return () => window.clearTimeout(timer)
+  }, [status])
+  useEffect(() => {
+    if (editedRef.current) return
+    setDraftTitle(title || details.Twitch.title || details.Kick.title)
+    setDraftDetails(seedStreamDetails(details))
     let cancelled = false
     void (async () => {
       const seeded = seedStreamDetails(details)
@@ -263,21 +264,22 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
         seeded.Twitch.categoryId ? undefined : resolveCategory('Twitch', seeded.Twitch.category),
         seeded.Kick.categoryId ? undefined : resolveCategory('Kick', seeded.Kick.category),
       ])
-      if (cancelled) return
+      if (cancelled || editedRef.current) return
       setDraftDetails((current) => ({
         Twitch: twitchMatch ? { ...current.Twitch, category: twitchMatch.name, categoryId: twitchMatch.id } : current.Twitch,
         Kick: kickMatch ? { ...current.Kick, category: kickMatch.name, categoryId: kickMatch.id } : current.Kick,
       }))
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [title, details])
   const save = async () => {
     setSaving(true)
     const result = await onSave(draftTitle, draftDetails)
     setStatus({ text: result.message, ok: result.ok })
+    if (result.ok) editedRef.current = false
     setSaving(false)
   }
-  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => setDraftDetails((current) => ({ ...current, [platform]: next }))} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
+  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
 }
 
 export default App
