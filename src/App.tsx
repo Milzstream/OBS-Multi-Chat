@@ -52,9 +52,8 @@ function App() {
   const [streamDetails, setStreamDetails] = useState(initialStreamDetails)
   const [streamTitle, setStreamTitle] = useState('')
   const [backendOnline, setBackendOnline] = useState(false)
-    const [sendStatus, setSendStatus] = useState('')
-  const [notice, setNotice] = useState<{ text: string; kind: 'ok' | 'error' } | null>(null)
-    const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sendStatus, setSendStatus] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [health, setHealth] = useState(initialHealth)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
@@ -134,11 +133,6 @@ function App() {
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => setSendStatus('Moderation request failed'))
   }
-  const flashNotice = (text: string, kind: 'ok' | 'error') => {
-    setNotice({ text, kind })
-    setSendStatus(text)
-    window.setTimeout(() => { setNotice(null); setSendStatus('') }, 4500)
-  }
   const saveStreamInfo = async (title: string, details: StreamDetailsByPlatform) => {
     setStreamTitle(title)
     setStreamDetails(details)
@@ -150,12 +144,9 @@ function App() {
       const text = failed.length
         ? (ok.length ? `Updated ${ok.join(' + ')}. ${failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')}` : failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | '))
         : `Title and categories set on ${ok.join(' + ') || 'Twitch + Kick'}`
-      flashNotice(text, failed.length ? 'error' : 'ok')
       return { ok: failed.length === 0, message: text }
     } catch {
-      const message = 'Could not set title and categories'
-      flashNotice(message, 'error')
-      return { ok: false, message }
+      return { ok: false, message: 'Could not set title and categories' }
     }
   }
 
@@ -168,7 +159,6 @@ function App() {
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
       {showSettings && <aside className="settings-popover"><div className="popover-title"><span>CONNECTION SETTINGS</span><button onClick={() => setShowSettings(false)} aria-label="Close settings">×</button></div><p className="settings-note">Connect with OAuth. Title and category live under the gamepad. Reconnect Twitch and Kick once to grant timeout, ban, and delete permissions.</p>{connections.map((connection) => <div className="connection-row" key={connection.platform}><span style={{ color: platformMeta[connection.platform].color }}>{platformIcon(connection.platform, 14)}</span><div><strong>{connection.platform}</strong><small>{connection.connected ? connection.handle : 'Not connected'}</small></div>{connection.connected ? <button className="disconnect" onClick={() => disconnectPlatform(connection.platform)}>Disconnect</button> : <button className="connect" onClick={() => connectPlatform(connection.platform)}>Connect</button>}</div>)}</aside>}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - 190)) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></div>}
-      {notice && <div className={`app-toast ${notice.kind}`}>{notice.text}</div>}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
   )
@@ -255,6 +245,11 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
+  useEffect(() => {
+    if (!status) return
+    const timer = window.setTimeout(() => setStatus(null), 4500)
+    return () => window.clearTimeout(timer)
+  }, [status])
   useEffect(() => {
     let cancelled = false
     void (async () => {
