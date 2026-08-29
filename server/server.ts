@@ -186,6 +186,7 @@ httpServer.on('error', (error: NodeJS.ErrnoException) => {
 })
 httpServer.listen(port, '0.0.0.0', () => console.log(`Relay backend listening on http://127.0.0.1:${port} (OBS dock URL)`))
 for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
+void pollLiveState()
 setInterval(pollLiveState, 15_000)
 setInterval(watchTwitchEventSub, 2_000)
 setInterval(refreshChatHealth, 5_000)
@@ -358,9 +359,10 @@ function startAdapter(platform: Platform) {
     void ensureTwitchBadges()
     connectTwitchEventSub()
     setTimeout(() => { if (!twitchEventSubReady) connectTwitchIrc() }, 4_000)
+    void pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
   }
-  if (platform === 'Kick') void pollKick().catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
-  if (platform === 'YouTube') void pollYouTube().catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+  if (platform === 'Kick') void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
+  if (platform === 'YouTube') void pollYouTube().then(() => broadcast()).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
 }
 
 function looksLikePlaceholder(handle: string) {

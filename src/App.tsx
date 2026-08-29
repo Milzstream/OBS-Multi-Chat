@@ -68,8 +68,6 @@ function App() {
   const visibleMessages = activeFilter === 'All' ? messages : messages.filter((message) => (message.platforms || [message.platform]).includes(activeFilter))
   const alerts = (['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => health[platform]?.status !== 'ok' ? health[platform].message || `${platform} chat issue` : '').filter(Boolean)
   const chatListRef = useRef<HTMLDivElement>(null)
-  const editingStreamRef = useRef(false)
-  editingStreamRef.current = showControls
 
   useEffect(() => {
     const list = chatListRef.current
@@ -90,7 +88,7 @@ function App() {
   useEffect(() => {
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then((remote) => { setConnections(remote.accounts); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true) }).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
-    events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); if (!editingStreamRef.current) { setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) } }
+    events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) }
     events.onerror = () => setBackendOnline(false)
     return () => events.close()
   }, [])
@@ -241,16 +239,20 @@ async function resolveCategory(platform: StreamPlatform, query: string) {
 }
 
 function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; message: string }>; onClose: () => void }) {
-  const [draftTitle, setDraftTitle] = useState(title)
+  const [draftTitle, setDraftTitle] = useState(title || details.Twitch.title || details.Kick.title)
   const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
+  const editedRef = useRef(false)
   useEffect(() => {
     if (!status) return
     const timer = window.setTimeout(() => setStatus(null), 4500)
     return () => window.clearTimeout(timer)
   }, [status])
   useEffect(() => {
+    if (editedRef.current) return
+    setDraftTitle(title || details.Twitch.title || details.Kick.title)
+    setDraftDetails(seedStreamDetails(details))
     let cancelled = false
     void (async () => {
       const seeded = seedStreamDetails(details)
@@ -258,21 +260,22 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
         seeded.Twitch.categoryId ? undefined : resolveCategory('Twitch', seeded.Twitch.category),
         seeded.Kick.categoryId ? undefined : resolveCategory('Kick', seeded.Kick.category),
       ])
-      if (cancelled) return
+      if (cancelled || editedRef.current) return
       setDraftDetails((current) => ({
         Twitch: twitchMatch ? { ...current.Twitch, category: twitchMatch.name, categoryId: twitchMatch.id } : current.Twitch,
         Kick: kickMatch ? { ...current.Kick, category: kickMatch.name, categoryId: kickMatch.id } : current.Kick,
       }))
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [title, details])
   const save = async () => {
     setSaving(true)
     const result = await onSave(draftTitle, draftDetails)
     setStatus({ text: result.message, ok: result.ok })
+    if (result.ok) editedRef.current = false
     setSaving(false)
   }
-  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => setDraftDetails((current) => ({ ...current, [platform]: next }))} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
+  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
 }
 
 export default App
