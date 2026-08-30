@@ -54,9 +54,9 @@ function extractSession(html: string, videoId: string): Session | undefined {
   const apiKey = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
   const clientVersion = html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] || html.match(/"clientVersion":"([\d.]+)"/)?.[1]
   const visitorData = html.match(/"VISITOR_DATA":"([^"]+)"/)?.[1] || html.match(/"visitorData":"([^"]+)"/)?.[1]
-  const continuation = html.match(/"timedContinuationData":\{"continuation":"([^"]+)"/)?.[1]
+  const continuation = html.match(/"reloadContinuationData":\{"continuation":"([^"]+)"/)?.[1]
+    || html.match(/"timedContinuationData":\{"continuation":"([^"]+)"/)?.[1]
     || html.match(/"invalidationContinuationData":\{"continuation":"([^"]+)"/)?.[1]
-    || html.match(/"reloadContinuationData":\{"continuation":"([^"]+)"/)?.[1]
     || html.match(/"continuation":"([A-Za-z0-9_-]{50,})"/)?.[1]
   const canonical = html.match(/watch\?v=([a-zA-Z0-9_-]{11})/)?.[1]
   if (!apiKey || !clientVersion || !continuation) return
@@ -175,6 +175,24 @@ async function fetchHtmlWithBrowser(url: string) {
   }
 }
 
+function extractInitialPayload(html: string) {
+  const marker = html.search(/ytInitialData["']?\s*=\s*\{/)
+  if (marker < 0) return
+  const brace = html.indexOf('{', marker)
+  if (brace < 0) return
+  let depth = 0
+  for (let i = brace; i < html.length && i - brace < 2_000_000; i++) {
+    const char = html[i]
+    if (char === '{') depth++
+    else if (char === '}') {
+      depth--
+      if (depth === 0) {
+        try { return JSON.parse(html.slice(brace, i + 1)) } catch { return }
+      }
+    }
+  }
+}
+
 async function loadLivePage(videoId: string) {
   for (const url of [
     `https://www.youtube.com/live_chat?is_popout=1&v=${encodeURIComponent(videoId)}`,
@@ -183,7 +201,9 @@ async function loadLivePage(videoId: string) {
     const html = await fetchHtml(url) || await fetchHtmlWithBrowser(url)
     if (!html) continue
     const session = extractSession(html, videoId)
-    if (session) return session
+    if (!session) continue
+    const initial = extractInitialPayload(html)
+    return { session, bootstrap: initial ? parseActions(initial, session.videoId) : [] }
   }
 }
 
@@ -271,17 +291,17 @@ export class YouTubeLiveChat {
   }
 
   private async run(target: YouTubeChatTarget, stopped: () => boolean) {
-    let ignoreBefore = Date.now() - 20_000
     while (!stopped()) {
       try {
-        const session = await loadLivePage(target.videoId)
-        if (!session) throw new Error('live chat page missing continuation')
+        const loaded = await loadLivePage(target.videoId)
+        if (!loaded) throw new Error('live chat page missing continuation')
+        const { session } = loaded
         this.failures = 0
         this.lastOk = Date.now()
+        for (const message of loaded.bootstrap) this.onMessage?.(message, target)
         while (!stopped()) {
           const payload = await pollLiveChat(session)
-          const messages = parseActions(payload, target.videoId, ignoreBefore)
-          ignoreBefore = 0
+          const messages = parseActions(payload, target.videoId)
           for (const message of messages) this.onMessage?.(message, target)
           const next = nextContinuation(payload)
           if (next.ended || !next.continuation) throw new Error('live chat ended')

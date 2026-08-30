@@ -55,6 +55,7 @@ let lastYouTubeOfficialChatAt = 0
 let lastYouTubeViewersAt = 0
 let youtubeForceStatus = true
 let youtubeTargets: YouTubeChatTarget[] = []
+const youtubeHistorySeeded = new Set<string>()
 const YOUTUBE_STATUS_SEEK_MS = 3 * 60_000
 const YOUTUBE_STATUS_LIVE_MS = 60 * 60_000
 const YOUTUBE_VIEWERS_MS = 45_000
@@ -1053,6 +1054,7 @@ async function pollYouTube() {
     }
   }
   await syncYouTubeChat(token)
+  await seedYouTubeHistory(token)
   await refreshYouTubeViewers()
 }
 
@@ -1079,7 +1081,10 @@ async function pollYouTubeStatus(token: Token) {
   }).filter((item: YouTubeChatTarget) => item.videoId)
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) console.log(`YouTube lives: ${liveItems.length} chat(s)`)
-  if (!youtubeTargets.length) await youtubeChat.stop()
+  if (!youtubeTargets.length) {
+    youtubeHistorySeeded.clear()
+    await youtubeChat.stop()
+  }
   lastYouTubeViewersAt = 0
 }
 
@@ -1089,6 +1094,7 @@ async function discoverYouTubeLive(token: Token) {
   if (!found) {
     if (!youtubeChat.connected) {
       youtubeTargets = []
+      youtubeHistorySeeded.clear()
       await youtubeChat.stop()
       Object.assign(account, { live: false, viewers: 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle })
     }
@@ -1111,6 +1117,38 @@ async function refreshYouTubeViewers() {
   if (!account) return
   if (account.viewers === viewers && account.live) return
   Object.assign(account, { live: true, viewers })
+}
+
+async function seedYouTubeHistory(token: Token) {
+  if (youtubeQuotaBlocked()) return
+  const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
+  const pending = chatIds.filter((chatId) => !youtubeHistorySeeded.has(chatId))
+  if (!pending.length) return
+  for (const chatId of pending) {
+    youtubeHistorySeeded.add(chatId)
+    try {
+      const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=200`, token)
+      for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
+        youtubeSeen.add(item.id)
+        addMessage({
+          id: item.id,
+          platform: 'YouTube',
+          user: String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, ''),
+          userId: item.authorDetails?.channelId,
+          avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
+          badges: youtubeBadges(item.authorDetails),
+          sourceId: chatId,
+          sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
+          text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
+          time: item.snippet?.publishedAt || new Date().toISOString(),
+        })
+      }
+    } catch (error) {
+      youtubeHistorySeeded.delete(chatId)
+      if (noteYouTubeQuota(error)) return
+      console.error('YouTube history seed:', error instanceof Error ? error.message : error)
+    }
+  }
 }
 
 async function syncYouTubeChat(token: Token) {
