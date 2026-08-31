@@ -77,6 +77,57 @@ const YOUTUBE_STATUS_SEEK_MS = 3 * 60_000
 const YOUTUBE_STATUS_LIVE_MS = 60 * 60_000
 const YOUTUBE_VIEWERS_MS = 45_000
 const YOUTUBE_OFFICIAL_CHAT_MS = 45_000
+const YOUTUBE_HYDRATE_MS = 20_000
+let youtubeHydratingUntil = 0
+
+function beginYouTubeHydration() {
+  const wasInactive = Date.now() >= youtubeHydratingUntil
+  youtubeHydratingUntil = Math.max(youtubeHydratingUntil, Date.now() + YOUTUBE_HYDRATE_MS)
+  if (wasInactive) collapseYouTubeHydrationDuplicates()
+}
+
+function collapseYouTubeHydrationDuplicates() {
+  const kept: ChatMessage[] = []
+  let changed = false
+  for (const message of state.messages) {
+    const at = Date.parse(message.time) || 0
+    const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
+    const match = youtube ? kept.findIndex((item) => {
+      if (item.text !== message.text) return false
+      if (!(item.platform === 'YouTube' || (item.platforms || []).includes('YouTube'))) return false
+      if (!youtubeSameAuthor(item, message)) return false
+      const delta = Math.abs((Date.parse(item.time) || 0) - at)
+      const differentSource = Boolean(item.ingest && message.ingest && item.ingest !== message.ingest)
+      const legacyPair = !item.ingest && !message.ingest
+      return delta <= (differentSource || legacyPair ? 60_000 : 2_000)
+    }) : -1
+    if (match < 0) {
+      kept.push(message)
+      continue
+    }
+    changed = true
+    const current = kept[match]
+    const platforms = [...new Set([...(current.platforms || [current.platform]), ...(message.platforms || [message.platform])])]
+    kept[match] = {
+      ...current,
+      platforms,
+      platform: platforms[0],
+      sourceId: current.sourceId || message.sourceId,
+      userId: current.userId || message.userId,
+      ingest: message.ingest || current.ingest,
+      parts: current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts,
+      avatar: current.avatar || message.avatar,
+      badges: current.badges?.length ? current.badges : message.badges,
+      color: current.color || message.color,
+    }
+    if (current.id) youtubeSeen.add(current.id)
+    if (message.id) youtubeSeen.add(message.id)
+  }
+  if (!changed) return
+  state.messages = kept
+  persistChat()
+  broadcast()
+}
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
 
 function isStoredChatMessage(value: unknown): value is ChatMessage {
@@ -585,6 +636,7 @@ async function checkLiveNow(platform: Platform) {
     else if (platform === 'Kick') await pollKick()
     else {
       youtubeForceStatus = true
+      beginYouTubeHydration()
       await pollYouTube()
       const account = state.accounts.find((item) => item.platform === 'YouTube')
       if (!account?.live) {
@@ -1208,6 +1260,7 @@ function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[],
   const time = item.snippet?.publishedAt || new Date().toISOString()
   const activity = youtubeOfficialToActivity(item)
   if (activity) addNativeActivity(activity)
+  if (preload) beginYouTubeHydration()
   addMessage({
     id: item.id,
     platform: 'YouTube',
@@ -1341,12 +1394,12 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
     const itemIsOwn = ownHandles().has(item.user.toLowerCase())
     const itemPlatforms = item.platforms || [item.platform]
-    const youtubePreloadEcho = Boolean(options?.preload)
+    const hydrating = Boolean(options?.preload) || Date.now() < youtubeHydratingUntil
+    const youtubePreloadEcho = hydrating
       && message.platform === 'YouTube'
       && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
       && youtubeSameAuthor(item, message)
-      && delta <= 60_000
-      && item.ingest !== incomingIngest
+      && delta <= (item.ingest !== incomingIngest ? 60_000 : 2_000)
     let match = youtubePreloadEcho
     if (!match && delta <= 90_000) {
       if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
@@ -1466,6 +1519,7 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
       time: message.time,
     })
   }
+  if (message.preload) beginYouTubeHydration()
   addMessage({
     id: message.id,
     platform: 'YouTube',
@@ -1573,11 +1627,8 @@ async function seedYouTubeHistory(token: Token) {
   const pending = chatIds.filter((chatId) => !youtubeHistorySeeded.has(chatId))
   if (!pending.length) return
   for (const chatId of pending) {
-    if (state.messages.some((item) => item.platform === 'YouTube' && item.sourceId === chatId)) {
-      youtubeHistorySeeded.add(chatId)
-      continue
-    }
     youtubeHistorySeeded.add(chatId)
+    beginYouTubeHydration()
     try {
       const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=200`, token)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
@@ -1597,6 +1648,7 @@ async function syncYouTubeChat(token: Token) {
     await youtubeChat.stop()
     return
   }
+  beginYouTubeHydration()
   await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage)
   if (youtubeChat.connected || !youtubeChat.failed) return
   if (youtubeQuotaBlocked()) {
