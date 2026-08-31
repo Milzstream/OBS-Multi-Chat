@@ -3,6 +3,7 @@ import path from 'node:path'
 import WebSocket from 'ws'
 
 export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
+export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; amount?: string; months?: number; viewers?: number; message?: string }
 
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
 const BROWSER_HEADERS = {
@@ -85,6 +86,56 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
   }
 }
 
+function pickName(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim() && !/^(null|undefined)$/i.test(value.trim())) return value.trim()
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      const nested = pickName(record.username, record.slug, record.name, record.user)
+      if (nested) return nested
+    }
+  }
+}
+
+function kickEventToActivity(eventName: string, data: any): KickActivity | undefined {
+  const event = eventName.replace(/\\/g, '')
+  if (/FollowersUpdated/i.test(event) && !pickName(data?.username, data?.user, data?.follower)) return
+  if (/FollowEvent|FollowersUpdated/i.test(event)) {
+    const user = pickName(data?.username, data?.user, data?.follower, data?.follower_username)
+    if (!user) return
+    return { id: data?.id ? String(data.id) : undefined, kind: 'follow', user }
+  }
+  if (/SubscriptionEvent/i.test(event) && !/Gifted|LuckyUsers/i.test(event)) {
+    const user = pickName(data?.username, data?.user, data?.subscriber)
+    if (!user) return
+    const months = Number(data?.months || data?.duration)
+    return { id: data?.id ? String(data.id) : undefined, kind: 'subscription', user, months: Number.isFinite(months) && months > 0 ? months : undefined }
+  }
+  if (/GiftedSubscriptions/i.test(event)) {
+    const user = pickName(data?.gifter_username, data?.gifter, data?.username, data?.user)
+    if (!user) return
+    const gifted = Array.isArray(data?.gifted_usernames) ? data.gifted_usernames.length : Number(data?.giftedCount || data?.gifted_count)
+    return {
+      id: data?.id ? String(data.id) : undefined,
+      kind: 'gift',
+      user,
+      amount: Number.isFinite(gifted) && gifted > 0 ? `${gifted} gift${gifted === 1 ? '' : 's'}` : undefined,
+    }
+  }
+  if (/KicksGifted/i.test(event)) {
+    const user = pickName(data?.username, data?.sender, data?.user, data?.gifter)
+    if (!user) return
+    const amount = data?.amount ?? data?.gifted_amount ?? data?.kicks
+    return { id: data?.id ? String(data.id) : undefined, kind: 'cheer', user, amount: amount != null ? `${amount} Kicks` : undefined, message: String(data?.message || '').trim() || undefined }
+  }
+  if (/StreamHost/i.test(event)) {
+    const user = pickName(data?.user, data?.username, data?.host, data?.message?.user)
+    if (!user) return
+    const viewers = Number(data?.message?.numberOfViewers ?? data?.numberOfViewers ?? data?.viewers)
+    return { id: data?.id || data?.message?.id ? String(data?.id || data.message.id) : undefined, kind: 'raid', user, viewers: Number.isFinite(viewers) ? viewers : undefined }
+  }
+}
+
 export class KickChat {
   private ws?: WebSocket
   private pingTimer?: NodeJS.Timeout
@@ -93,14 +144,16 @@ export class KickChat {
   private chatroomId?: number
   private slug?: string
   private onMessage?: (message: KickChatMessage) => void
+  private onActivity?: (event: KickActivity) => void
   private closed = true
   private attempt = 0
 
   get currentChatroomId() { return this.chatroomId }
   get connected() { return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
 
-  async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number) {
+  async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number, onActivity?: (event: KickActivity) => void) {
     this.onMessage = onMessage
+    this.onActivity = onActivity
     this.closed = false
     if (this.slug !== slug) {
       this.slug = slug
@@ -118,6 +171,7 @@ export class KickChat {
     this.slug = undefined
     this.chatroomId = undefined
     this.onMessage = undefined
+    this.onActivity = undefined
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = undefined
     await this.disconnectSocket()
@@ -133,7 +187,7 @@ export class KickChat {
   private async openSocket() {
     if (!this.chatroomId) this.chatroomId = await resolveKickChatroomId(this.slug!, this.chatroomId)
     await this.disconnectSocket()
-    console.log(`Kick chat connecting to chatroom ${this.chatroomId} (${this.slug})`)
+    console.log(`Kick chat connecting (${this.slug})`)
     const socket = new WebSocket(PUSHER_URL)
     this.ws = socket
     socket.on('open', () => { this.attempt = 0 })
@@ -161,25 +215,29 @@ export class KickChat {
       return
     }
     if (event === 'pusher_internal:subscription_succeeded') {
-      console.log(`Kick chat subscribed: ${this.slug} (#${this.chatroomId})`)
+      if (String(payload?.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
       return
     }
-    if (!/ChatMessage/i.test(event)) return
-    const message = parseJson(payload.data)
-    const text = String(message?.content || '').trim()
-    const user = String(message?.sender?.username || message?.sender?.slug || 'Kick user')
-    const emotes = message?.emotes || message?.metadata?.emotes
-    if (!text && !emotes?.length) return
-    this.onMessage?.({
-      id: message?.id ? String(message.id) : undefined,
-      user,
-      text: text || ' ',
-      userId: message?.sender?.id != null ? String(message.sender.id) : undefined,
-      color: message?.sender?.identity?.color,
-      avatar: message?.sender?.profile_picture || message?.sender?.profilepic || message?.sender?.avatar,
-      badges: message?.sender?.identity?.badges,
-      emotes,
-    })
+    const data = parseJson(payload.data)
+    if (/ChatMessage/i.test(event)) {
+      const text = String(data?.content || '').trim()
+      const user = String(data?.sender?.username || data?.sender?.slug || 'Kick user')
+      const emotes = data?.emotes || data?.metadata?.emotes
+      if (!text && !emotes?.length) return
+      this.onMessage?.({
+        id: data?.id ? String(data.id) : undefined,
+        user,
+        text: text || ' ',
+        userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
+        color: data?.sender?.identity?.color,
+        avatar: data?.sender?.profile_picture || data?.sender?.profilepic || data?.sender?.avatar,
+        badges: data?.sender?.identity?.badges,
+        emotes,
+      })
+      return
+    }
+    const activity = kickEventToActivity(event, data)
+    if (activity) this.onActivity?.(activity)
   }
 
   private startPing() {

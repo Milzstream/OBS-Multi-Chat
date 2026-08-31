@@ -6,11 +6,15 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat } from './kick-chat.js'
+import { KickChat, type KickActivity } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget } from './youtube-chat.js'
+import { spawn } from 'node:child_process'
+import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
+import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 
+process.removeAllListeners('warning')
 process.on('warning', (warning) => {
-  if (warning.name === 'ExperimentalWarning' && warning.message.includes('Fetch API')) return
+  if (warning.name === 'ExperimentalWarning' && /Fetch API|fetch/i.test(warning.message)) return
   console.warn(warning.stack || warning.message)
 })
 
@@ -20,15 +24,18 @@ const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runti
 dotenv.config({ path: envPath })
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
+type TokenPlatform = Platform | 'StreamElements'
 type StreamPlatform = 'Twitch' | 'Kick'
-type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[] }
+type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[]; provider?: string }
 type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 type ChatBadge = { title: string; url?: string; label?: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
+type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
 type StreamDetails = { title: string; category: string; categoryId?: string }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health> }
+type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
+type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean }
+type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean }
 
 const port = Number(process.env.PORT || 4173)
 const app = express()
@@ -36,11 +43,21 @@ const httpServer = createServer(app)
 const clients = new Set<express.Response>()
 const dataDir = path.resolve(process.env.RELAY_DATA_DIR || './data')
 const tokenFile = path.join(dataDir, 'tokens.json')
+const settingsFile = path.join(dataDir, 'settings.json')
+const chatFile = path.join(dataDir, 'chat.json')
+const CHAT_MAX = 200
+const settings = loadSettings()
+const activityStore = createActivityStore(path.join(dataDir, 'activity.json'))
+if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `http://localhost:${port}/oauth/callback`
-const tokens: Partial<Record<Platform, Token>> = loadTokens()
+const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
+const activityWarnings = new Map<string, string>()
+const streamElements = new StreamElementsClient()
+let twitchEventSubSessionId = ''
 const oauthStates = new Map<string, { platform: Platform; createdAt: number; codeVerifier?: string }>()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
+const liveCheckLocks = new Map<Platform, Promise<void>>()
 const twitchBadgeUrls = new Map<string, string>()
 const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
@@ -60,12 +77,109 @@ const YOUTUBE_STATUS_SEEK_MS = 3 * 60_000
 const YOUTUBE_STATUS_LIVE_MS = 60 * 60_000
 const YOUTUBE_VIEWERS_MS = 45_000
 const YOUTUBE_OFFICIAL_CHAT_MS = 45_000
+const YOUTUBE_HYDRATE_MS = 20_000
+let youtubeHydratingUntil = 0
+
+function beginYouTubeHydration() {
+  const wasInactive = Date.now() >= youtubeHydratingUntil
+  youtubeHydratingUntil = Math.max(youtubeHydratingUntil, Date.now() + YOUTUBE_HYDRATE_MS)
+  if (wasInactive) collapseYouTubeHydrationDuplicates()
+}
+
+function collapseYouTubeHydrationDuplicates() {
+  const kept: ChatMessage[] = []
+  let changed = false
+  for (const message of state.messages) {
+    const at = Date.parse(message.time) || 0
+    const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
+    const match = youtube ? kept.findIndex((item) => {
+      if (item.text !== message.text) return false
+      if (!(item.platform === 'YouTube' || (item.platforms || []).includes('YouTube'))) return false
+      if (!youtubeSameAuthor(item, message)) return false
+      const delta = Math.abs((Date.parse(item.time) || 0) - at)
+      const differentSource = Boolean(item.ingest && message.ingest && item.ingest !== message.ingest)
+      const legacyPair = !item.ingest && !message.ingest
+      return delta <= (differentSource || legacyPair ? 60_000 : 2_000)
+    }) : -1
+    if (match < 0) {
+      kept.push(message)
+      continue
+    }
+    changed = true
+    const current = kept[match]
+    const platforms = [...new Set([...(current.platforms || [current.platform]), ...(message.platforms || [message.platform])])]
+    kept[match] = {
+      ...current,
+      platforms,
+      platform: platforms[0],
+      sourceId: current.sourceId || message.sourceId,
+      userId: current.userId || message.userId,
+      ingest: message.ingest || current.ingest,
+      parts: current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts,
+      avatar: current.avatar || message.avatar,
+      badges: current.badges?.length ? current.badges : message.badges,
+      color: current.color || message.color,
+    }
+    if (current.id) youtubeSeen.add(current.id)
+    if (message.id) youtubeSeen.add(message.id)
+  }
+  if (!changed) return
+  state.messages = kept
+  persistChat()
+  broadcast()
+}
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
+
+function isStoredChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== 'object') return false
+  const item = value as ChatMessage
+  return Boolean(item.id) && (item.platform === 'Twitch' || item.platform === 'Kick' || item.platform === 'YouTube') && typeof item.user === 'string' && typeof item.text === 'string' && typeof item.time === 'string'
+}
+
+function rememberYouTubeFromChat(messages: ChatMessage[]) {
+  for (const item of messages) {
+    if (item.platform !== 'YouTube') continue
+    if (item.id) youtubeSeen.add(item.id)
+    if (item.sourceId) youtubeHistorySeeded.add(item.sourceId)
+  }
+}
+
+function loadChat(): ChatMessage[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(chatFile, 'utf8')) as unknown
+    const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-CHAT_MAX)
+    rememberYouTubeFromChat(messages)
+    return messages
+  } catch {
+    return []
+  }
+}
+
 const state: State = {
   accounts: (['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => ({ platform, connected: Boolean(tokens[platform]), live: false, viewers: 0, handle: tokens[platform]?.user || '' })),
   streamInfo: { Twitch: { title: '', category: '' }, Kick: { title: '', category: '' } },
-  messages: [],
+  messages: loadChat(),
   health: { Twitch: emptyHealth(), Kick: emptyHealth(), YouTube: emptyHealth() },
+  activity: activityStore.list(),
+  activityWarnings: [],
+  streamelements: { connected: false, handle: '', missing: [] },
+  activityFallback: settings.activityFallback,
+  ignoreMissingJwt: settings.ignoreMissingJwt,
+  dropOldAlerts: settings.dropOldAlerts,
+}
+
+function persistChat() {
+  try {
+    fs.mkdirSync(dataDir, { recursive: true })
+    const stored = state.messages.slice(-CHAT_MAX).map((message) => {
+      const rest = { ...message }
+      delete rest.ingest
+      return rest
+    })
+    fs.writeFileSync(chatFile, JSON.stringify(stored, null, 2), { mode: 0o600 })
+  } catch (error) {
+    console.error('Chat save:', error instanceof Error ? error.message : error)
+  }
 }
 
 let twitchIrc: WebSocket | undefined
@@ -80,7 +194,10 @@ const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: num
 
 app.use(cors())
 app.use(express.json())
-app.get('/api/state', (_request, response) => response.json(state))
+app.get('/api/state', (_request, response) => {
+  state.activity = activityStore.list()
+  response.json(state)
+})
 app.get('/events', (request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' })
   response.write(`data: ${JSON.stringify(state)}\n\n`)
@@ -105,6 +222,7 @@ app.post('/api/messages', async (request, response) => {
       existing.platforms = sentPlatforms
       existing.platform = sentPlatforms[0]
     }
+    persistChat()
     broadcast()
   }
   response.json({ results })
@@ -116,6 +234,7 @@ app.post('/api/moderate', async (request, response) => {
     const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration })
     if (result.ok && body.action === 'delete' && body.messageId) {
       state.messages = state.messages.map((item) => item.id === body.messageId ? { ...item, deleted: true } : item)
+      persistChat()
       broadcast()
     }
     response.json(result)
@@ -147,6 +266,67 @@ app.post('/api/stream-info', async (request, response) => {
   broadcast()
   response.json({ streamInfo: state.streamInfo, results })
 })
+app.post('/api/settings', (request, response) => {
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }
+  let changed = false
+  if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
+    settings.activityFallback = body.activityFallback
+    state.activityFallback = body.activityFallback
+    if (body.activityFallback && twitchEventSubSessionId && tokens.Twitch) void subscribeTwitchEvents(twitchEventSubSessionId)
+    changed = true
+  }
+  if (typeof body.ignoreMissingJwt === 'boolean' && body.ignoreMissingJwt !== settings.ignoreMissingJwt) {
+    settings.ignoreMissingJwt = body.ignoreMissingJwt
+    state.ignoreMissingJwt = body.ignoreMissingJwt
+    if (body.ignoreMissingJwt) setActivityWarning('streamelements')
+    else {
+      const note = missingStreamElementsMessage(state.streamelements.missing)
+      if (note) setActivityWarning('streamelements', note)
+    }
+    changed = true
+  }
+  if (typeof body.dropOldAlerts === 'boolean' && body.dropOldAlerts !== settings.dropOldAlerts) {
+    settings.dropOldAlerts = body.dropOldAlerts
+    state.dropOldAlerts = body.dropOldAlerts
+    activityStore.setMaxAge(body.dropOldAlerts ? ACTIVITY_MAX_AGE_MS : 0)
+    changed = true
+  }
+  if (changed) {
+    saveSettings()
+    broadcast()
+  }
+  response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, streamelements: state.streamelements })
+})
+app.post('/api/open', (request, response) => {
+  const url = String((request.body as { url?: string })?.url || '').trim()
+  if (!/^https?:\/\//i.test(url)) return response.status(400).json({ error: 'url must be http or https' })
+  try {
+    openInDefaultBrowser(url)
+    response.json({ ok: true })
+  } catch (error) {
+    response.status(502).json({ error: error instanceof Error ? error.message : String(error) })
+  }
+})
+app.post('/api/activity/test', (request, response) => {
+  const body = request.body as Partial<ActivityEvent>
+  const platform = body.platform
+  const kind = body.kind
+  if (!platform || !kind) return response.status(400).json({ error: 'platform and kind are required' })
+  const event: ActivityEvent = {
+    id: `test-${crypto.randomUUID()}`,
+    platform,
+    kind,
+    user: String(body.user || 'TestUser'),
+    amount: body.amount,
+    months: body.months,
+    viewers: body.viewers,
+    message: body.message || 'Test alert',
+    time: new Date().toISOString(),
+    source: body.source,
+  }
+  addActivity(event)
+  response.json({ ok: true, event })
+})
 app.post('/api/disconnect/:platform', (request, response) => {
   const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
   if (!platform) return response.status(404).json({ error: 'Unknown platform' })
@@ -154,11 +334,23 @@ app.post('/api/disconnect/:platform', (request, response) => {
   saveTokens()
   const account = state.accounts.find((item) => item.platform === platform)
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
-  if (platform === 'Twitch') closeTwitchChat()
+  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes') }
   if (platform === 'Kick') void kickChat.stop()
   if (platform === 'YouTube') { youtubeTargets = []; void youtubeChat.stop() }
   broadcast()
   response.json({ ok: true })
+})
+app.post('/api/live-check/:platform', async (request, response) => {
+  const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
+  if (!platform) return response.status(404).json({ error: 'Unknown platform' })
+  if (!tokens[platform]) return response.status(400).json({ error: `${platform} is not connected` })
+  try {
+    await checkLiveNow(platform)
+    const account = state.accounts.find((item) => item.platform === platform)
+    response.json({ ok: true, live: Boolean(account?.live), viewers: account?.viewers || 0 })
+  } catch (error) {
+    response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
 })
 
 app.get('/oauth/callback', async (request, response) => {
@@ -198,12 +390,37 @@ httpServer.on('error', (error: NodeJS.ErrnoException) => {
   else console.error('Relay backend failed to start:', error)
   process.exitCode = 1
 })
-httpServer.listen(port, '0.0.0.0', () => console.log(`Relay backend listening on http://127.0.0.1:${port} (OBS dock URL)`))
+httpServer.listen(port, '0.0.0.0', () => {
+  const base = `http://127.0.0.1:${port}`
+  const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
+  console.log('')
+  console.log('Relay Chat Dock')
+  console.log('')
+  console.log(`  Chat dock      ${base}`)
+  console.log(`  Activity dock  ${base}/activity`)
+  console.log('')
+  console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
+  console.log('')
+  if (missing.length && !settings.ignoreMissingJwt) {
+    const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
+    console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
+    console.error(`  Add ${keys} in production.env, then restart this app.`)
+    console.error('')
+  }
+})
 for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
+void startStreamElements(true)
 void pollLiveState()
 setInterval(pollLiveState, 15_000)
 setInterval(watchTwitchEventSub, 2_000)
 setInterval(refreshChatHealth, 5_000)
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    persistChat()
+    process.exit(0)
+  })
+}
 
 function authorizationUrl(platform: Platform) {
   const clientId = process.env[`${platform.toUpperCase()}_CLIENT_ID`]
@@ -213,7 +430,7 @@ function authorizationUrl(platform: Platform) {
   oauthStates.set(stateValue, { platform, createdAt: Date.now(), codeVerifier })
   const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', state: stateValue })
   if (platform === 'Twitch') {
-    params.set('scope', 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages')
+    params.set('scope', 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read')
     params.set('force_verify', 'true')
   }
   if (platform === 'Kick') {
@@ -405,11 +622,40 @@ function startAdapter(platform: Platform) {
     twitchBadgesLoaded = false
     void ensureTwitchBadges()
     connectTwitchEventSub()
-    setTimeout(() => { if (!twitchEventSubReady) connectTwitchIrc() }, 4_000)
     void pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
   }
   if (platform === 'Kick') void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
   if (platform === 'YouTube') void pollYouTube().then(() => broadcast()).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+}
+
+async function checkLiveNow(platform: Platform) {
+  const pending = liveCheckLocks.get(platform)
+  if (pending) return pending
+  const work = (async () => {
+    if (platform === 'Twitch') await pollTwitch()
+    else if (platform === 'Kick') await pollKick()
+    else {
+      youtubeForceStatus = true
+      beginYouTubeHydration()
+      await pollYouTube()
+      const account = state.accounts.find((item) => item.platform === 'YouTube')
+      if (!account?.live) {
+        const token = await ensureToken('YouTube')
+        if (token) {
+          await discoverYouTubeLive(token)
+          await syncYouTubeChat(token)
+          await seedYouTubeHistory(token)
+          await refreshYouTubeViewers()
+        }
+      }
+    }
+    refreshChatHealth()
+    broadcast()
+  })().finally(() => {
+    if (liveCheckLocks.get(platform) === work) liveCheckLocks.delete(platform)
+  })
+  liveCheckLocks.set(platform, work)
+  return work
 }
 
 function looksLikePlaceholder(handle: string) {
@@ -428,7 +674,18 @@ function startKickChat(slug: string) {
     text: message.text,
     time: new Date().toISOString(),
     parts: parseKickParts(message.text, message.emotes),
-  }), tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined).then(() => {
+  }), tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
+    id: event.id || '',
+    platform: 'Kick',
+    kind: event.kind,
+    user: event.user,
+    userId: event.userId,
+    amount: event.amount,
+    months: event.months,
+    viewers: event.viewers,
+    message: event.message,
+    time: new Date().toISOString(),
+  })).then(() => {
     if (kickChat.currentChatroomId && tokens.Kick && tokens.Kick.channelId !== String(kickChat.currentChatroomId)) {
       tokens.Kick.channelId = String(kickChat.currentChatroomId)
       saveTokens()
@@ -444,6 +701,7 @@ function closeTwitchChat() {
   twitchEventSubGeneration += 1
   twitchEventSubReady = false
   twitchEventSubUnsupported = false
+  twitchEventSubSessionId = ''
   twitchIrcReady = false
   twitchEventSub?.close()
   twitchIrc?.close()
@@ -467,23 +725,12 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
     if (type === 'session_welcome') {
       twitchKeepaliveMs = Number(payload.payload?.session?.keepalive_timeout_seconds || 10) * 1000
       if (isResume) { twitchEventSubReady = true; console.log('Twitch EventSub resumed') }
-      else void subscribeTwitchChat(payload.payload.session.id)
-    } else if (type === 'notification' && payload.metadata?.subscription_type === 'channel.chat.message') {
-      const event = payload.payload?.event
-      addMessage({
-        id: event?.message_id || crypto.randomUUID(),
-        platform: 'Twitch',
-        user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
-        userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
-        color: event?.color || undefined,
-        badges: twitchBadgesFromList(event?.badges),
-        avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
-        text: event?.message?.text || '',
-        time: new Date().toISOString(),
-        parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
-        emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
-      })
-      setHealth('Twitch', 'ok')
+      else {
+        twitchEventSubSessionId = String(payload.payload.session.id || '')
+        void subscribeTwitchEvents(twitchEventSubSessionId)
+      }
+    } else if (type === 'notification') {
+      handleTwitchEventSub(payload)
     } else if (type === 'session_reconnect' && payload.payload?.session?.reconnect_url) {
       connectTwitchEventSub(payload.payload.session.reconnect_url)
     } else if (type === 'revocation') {
@@ -501,32 +748,118 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
   socket.on('error', (error) => { console.error('Twitch EventSub:', error.message); socket.close() })
 }
 
-async function subscribeTwitchChat(sessionId: string) {
+const twitchEventSubs: { type: string; version: string; condition: (userId: string) => Record<string, string>; activity?: boolean }[] = [
+  { type: 'channel.chat.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
+  { type: 'channel.follow', version: '2', condition: (userId) => ({ broadcaster_user_id: userId, moderator_user_id: userId }), activity: true },
+  { type: 'channel.subscribe', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
+  { type: 'channel.subscription.gift', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
+  { type: 'channel.subscription.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
+  { type: 'channel.cheer', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
+  { type: 'channel.raid', version: '1', condition: (userId) => ({ to_broadcaster_user_id: userId }), activity: true },
+]
+
+async function subscribeTwitchEvents(sessionId: string) {
   const token = await ensureToken('Twitch')
   if (!token?.userId) return
-  try {
-    await twitchApi('/helix/eventsub/subscriptions', token, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'channel.chat.message',
-        version: '1',
-        condition: { broadcaster_user_id: token.userId, user_id: token.userId },
-        transport: { method: 'websocket', session_id: sessionId },
-      }),
-    })
+  const transport = { method: 'websocket', session_id: sessionId }
+  let chatOk = false
+  let activityFailed = false
+  for (const spec of twitchEventSubs) {
+    if (spec.activity && !settings.activityFallback) continue
+    try {
+      await twitchApi('/helix/eventsub/subscriptions', token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: spec.type, version: spec.version, condition: spec.condition(token.userId), transport }),
+      })
+      if (spec.type === 'channel.chat.message') chatOk = true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/409|already exists|Conflict/i.test(message)) {
+        if (spec.type === 'channel.chat.message') chatOk = true
+        continue
+      }
+      if (spec.activity) activityFailed = true
+      else {
+        console.error(`Twitch EventSub ${spec.type}:`, message)
+        if (message.includes('403') || message.includes('401') || message.includes('scope')) {
+          twitchEventSubUnsupported = true
+          console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
+        }
+      }
+    }
+  }
+  if (chatOk) {
     twitchEventSubReady = true
     twitchIrc?.close()
     setHealth('Twitch', 'ok')
-    console.log(`Twitch EventSub subscribed for ${token.user}`)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('Twitch EventSub subscribe:', message)
-    if (message.includes('403') || message.includes('401') || message.includes('scope')) {
-      twitchEventSubUnsupported = true
-      console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
+    console.log(`Twitch EventSub connected (${token.user})`)
+  } else connectTwitchIrc()
+  if (activityFailed) {
+    console.log('Twitch native alert backup needs a reconnect in settings (follow, sub, bits scopes).')
+    setActivityWarning('twitch-scopes', 'Reconnect Twitch to enable native follow/sub/bits backup')
+  } else setActivityWarning('twitch-scopes')
+}
+
+function handleTwitchEventSub(payload: any) {
+  const type = String(payload?.metadata?.subscription_type || '')
+  const event = payload?.payload?.event
+  if (type === 'channel.chat.message') {
+    addMessage({
+      id: event?.message_id || crypto.randomUUID(),
+      platform: 'Twitch',
+      user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
+      userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
+      color: event?.color || undefined,
+      badges: twitchBadgesFromList(event?.badges),
+      avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
+      text: event?.message?.text || '',
+      time: new Date().toISOString(),
+      parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
+      emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
+    })
+    setHealth('Twitch', 'ok')
+    return
+  }
+  const activity = twitchEventToActivity(type, event)
+  if (activity) addNativeActivity(activity)
+}
+
+function twitchEventToActivity(type: string, event: any): ActivityEvent | undefined {
+  const time = new Date().toISOString()
+  if (type === 'channel.follow') {
+    return { id: `twitch-follow-${event?.user_id}-${event?.followed_at || time}`, platform: 'Twitch', kind: 'follow', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time: event?.followed_at || time }
+  }
+  if (type === 'channel.subscribe') {
+    if (event?.is_gift) return
+    return { id: `twitch-sub-${event?.user_id}-${time}`, platform: 'Twitch', kind: 'subscription', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time }
+  }
+  if (type === 'channel.subscription.message') {
+    const months = Number(event?.cumulative_months || event?.duration_months)
+    return {
+      id: event?.message?.id || `twitch-resub-${event?.user_id}-${time}`,
+      platform: 'Twitch',
+      kind: 'subscription',
+      user: event?.user_login || event?.user_name || 'Twitch user',
+      userId: event?.user_id ? String(event.user_id) : undefined,
+      months: Number.isFinite(months) && months > 0 ? months : undefined,
+      message: String(event?.message?.text || '').trim() || undefined,
+      time,
     }
-    connectTwitchIrc()
+  }
+  if (type === 'channel.subscription.gift') {
+    const total = Number(event?.total)
+    const user = event?.is_anonymous ? 'Anonymous' : event?.user_name || event?.user_login || 'Twitch user'
+    return { id: `twitch-gift-${event?.user_id || 'anon'}-${time}`, platform: 'Twitch', kind: 'gift', user, userId: event?.user_id ? String(event.user_id) : undefined, amount: Number.isFinite(total) && total > 0 ? `${total} gift${total === 1 ? '' : 's'}` : undefined, time }
+  }
+  if (type === 'channel.cheer') {
+    const bits = Number(event?.bits)
+    const user = event?.is_anonymous ? 'Anonymous' : event?.user_name || event?.user_login || 'Twitch user'
+    return { id: `twitch-cheer-${event?.user_id || 'anon'}-${time}`, platform: 'Twitch', kind: 'cheer', user, userId: event?.user_id ? String(event.user_id) : undefined, amount: Number.isFinite(bits) ? `${bits} Bits` : undefined, message: String(event?.message || '').trim() || undefined, time }
+  }
+  if (type === 'channel.raid') {
+    const viewers = Number(event?.viewers)
+    return { id: `twitch-raid-${event?.from_broadcaster_user_id}-${time}`, platform: 'Twitch', kind: 'raid', user: event?.from_broadcaster_user_login || event?.from_broadcaster_user_name || 'Twitch user', userId: event?.from_broadcaster_user_id ? String(event.from_broadcaster_user_id) : undefined, viewers: Number.isFinite(viewers) ? viewers : undefined, time }
   }
 }
 
@@ -609,14 +942,17 @@ function openTwitchIrc() {
       setHealth('Twitch', 'ok')
       console.log(`Twitch IRC joined #${nick}`)
     }
-    parseTwitchLines(raw).forEach(addMessage)
+    parseTwitchLines(raw).forEach((message) => addMessage(message))
   })
   twitchIrc.on('close', () => {
     twitchIrc = undefined
     twitchIrcReady = false
     if (tokens.Twitch && !twitchEventSubReady) setTimeout(connectTwitchIrc, 5_000)
   })
-  twitchIrc.on('error', (error) => { console.error('Twitch IRC:', error.message); twitchIrc?.close() })
+  twitchIrc.on('error', (error) => {
+    if (!/closed before the connection was established/i.test(error.message)) console.error('Twitch IRC:', error.message)
+    twitchIrc?.close()
+  })
 }
 
 function parseTwitchLines(raw: string): ChatMessage[] {
@@ -713,7 +1049,10 @@ async function flushTwitchAvatars() {
       changed = true
       return { ...item, avatar }
     })
-    if (changed) broadcast()
+    if (changed) {
+      persistChat()
+      broadcast()
+    }
   } catch (error) {
     console.error('Twitch avatars:', error instanceof Error ? error.message : error)
   }
@@ -895,6 +1234,7 @@ async function applyTranslation(message: ChatMessage) {
   const current = state.messages[index]
   const text = next.filter((part) => part.type === 'text').map((part) => part.text).join('') || current.text
   state.messages = state.messages.map((item, itemIndex) => itemIndex === index ? { ...item, text, parts: next, originalText: current.originalText || current.text } : item)
+  persistChat()
   broadcast()
 }
 
@@ -915,25 +1255,163 @@ async function drainTranslations() {
   translating = false
 }
 
-function addMessage(message: ChatMessage) {
+function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[], preload = false) {
+  const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
+  const time = item.snippet?.publishedAt || new Date().toISOString()
+  const activity = youtubeOfficialToActivity(item)
+  if (activity) addNativeActivity(activity)
+  if (preload) beginYouTubeHydration()
+  addMessage({
+    id: item.id,
+    platform: 'YouTube',
+    user,
+    userId: item.authorDetails?.channelId,
+    avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
+    badges: youtubeBadges(item.authorDetails),
+    sourceId: chatId,
+    sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
+    text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
+    time,
+  }, { preload, ingest: 'official' })
+}
+
+function youtubeOfficialToActivity(item: any): ActivityEvent | undefined {
+  const type = String(item.snippet?.type || '')
+  const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
+  const userId = item.authorDetails?.channelId ? String(item.authorDetails.channelId) : undefined
+  const time = item.snippet?.publishedAt || new Date().toISOString()
+  if (type === 'superChatEvent' || type === 'superStickerEvent') {
+    const details = item.snippet?.superChatDetails || item.snippet?.superStickerDetails
+    return { id: item.id, platform: 'YouTube', kind: 'superchat', user, userId, amount: details?.amountDisplayString, message: String(details?.userComment || '').trim() || undefined, time }
+  }
+  if (type === 'newSponsorEvent') {
+    return { id: item.id, platform: 'YouTube', kind: 'membership', user, userId, message: item.snippet?.newSponsorDetails?.memberLevelName, time }
+  }
+  if (type === 'memberMilestoneChatEvent') {
+    const months = Number(item.snippet?.memberMilestoneChatDetails?.memberMonth)
+    return { id: item.id, platform: 'YouTube', kind: 'membership', user, userId, months: Number.isFinite(months) && months > 0 ? months : undefined, message: item.snippet?.memberMilestoneChatDetails?.memberLevelName, time }
+  }
+  if (type === 'membershipGiftingEvent') {
+    const count = Number(item.snippet?.membershipGiftingDetails?.giftMembershipsCount)
+    return { id: item.id, platform: 'YouTube', kind: 'gift', user, userId, amount: Number.isFinite(count) && count > 0 ? `${count} gift${count === 1 ? '' : 's'}` : undefined, time }
+  }
+}
+
+function addActivity(event: ActivityEvent) {
+  if (!activityStore.add(event)) return
+  state.activity = activityStore.list()
+  broadcast()
+}
+
+function addNativeActivity(event: ActivityEvent) {
+  if (!settings.activityFallback) return
+  addActivity(event)
+}
+
+function streamElementsJwtSlots() {
+  return [
+    { platform: 'Twitch', jwt: String(process.env.STREAMELEMENTS_JWT_TWITCH || '').trim() },
+    { platform: 'Kick', jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
+    { platform: 'YouTube', jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
+  ]
+}
+
+function missingStreamElementsMessage(missing: string[]) {
+  if (!missing.length) return
+  const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
+  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in production.env, then restart.`
+  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in production.env, then restart.`
+}
+
+function setActivityWarning(key: string, message?: string) {
+  if (message) activityWarnings.set(key, message)
+  else activityWarnings.delete(key)
+  const next = [...activityWarnings.values()]
+  if (next.length === state.activityWarnings.length && next.every((item, index) => item === state.activityWarnings[index])) return
+  state.activityWarnings = next
+  broadcast()
+}
+
+async function startStreamElements(backfill = false) {
+  const slots = streamElementsJwtSlots()
+  const missing = slots.filter((slot) => !slot.jwt).map((slot) => slot.platform)
+  const jwts = [...new Set(slots.map((slot) => slot.jwt).filter(Boolean))]
+  const missingNote = missingStreamElementsMessage(missing)
+  if (!jwts.length) {
+    state.streamelements = { connected: false, handle: '', missing }
+    setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
+    return
+  }
+  const channels = []
+  for (const jwt of jwts) {
+    try {
+      channels.push(await hydrateStreamElements(jwt))
+    } catch (error) {
+      console.error('StreamElements JWT failed:', error instanceof Error ? error.message : error)
+    }
+  }
+  if (!channels.length) {
+    state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
+    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check production.env, then restart.')
+    console.error('StreamElements JWTs failed to load. Check production.env, then restart.')
+    return
+  }
+  const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')
+  state.streamelements = { connected: true, handle, missing }
+  setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
+  await streamElements.start(channels, (event) => addActivity(event), (message) => setActivityWarning('streamelements-live', message))
+  console.log(`StreamElements connected (${handle})`)
+  if (backfill) {
+    for (const channel of channels) {
+      const events = await fetchRecentActivities(channel)
+      for (const event of events) addActivity(event)
+    }
+  }
+}
+
+function youtubeSameAuthor(left: ChatMessage, right: ChatMessage) {
+  if (left.userId && right.userId) return left.userId.toLowerCase() === right.userId.toLowerCase()
+  return left.user.toLowerCase() === right.user.toLowerCase()
+}
+
+function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
   if (!message.text && !message.parts?.length) return
-  if (state.messages.some((item) => item.id === message.id)) return
+  if (state.messages.some((item) => item.id === message.id)) {
+    if (message.id) youtubeSeen.add(message.id)
+    return
+  }
   const incomingTime = Date.parse(message.time) || Date.now()
   const incomingPlatforms = message.platforms?.length ? message.platforms : [message.platform]
   const incomingIsOwn = ownHandles().has(message.user.toLowerCase())
   const tracked = recentOutgoing.find((item) => item.text === message.text && Math.abs(incomingTime - item.at) < 20_000)
+  const incomingIngest = options?.ingest
 
-  const mergeAt = state.messages.findIndex((item) => {
-    if (item.text !== message.text) return false
-    if (Math.abs(Date.parse(item.time) - incomingTime) > 90_000) return false
+  let mergeAt = -1
+  let mergeDelta = Infinity
+  for (let index = 0; index < state.messages.length; index++) {
+    const item = state.messages[index]
+    if (item.text !== message.text) continue
+    const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
     const itemIsOwn = ownHandles().has(item.user.toLowerCase())
     const itemPlatforms = item.platforms || [item.platform]
-    if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) return true
-    if (!itemIsOwn || !incomingIsOwn) return false
-    const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-    if (!samePlatforms) return true
-    return message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId)
-  })
+    const hydrating = Boolean(options?.preload) || Date.now() < youtubeHydratingUntil
+    const youtubePreloadEcho = hydrating
+      && message.platform === 'YouTube'
+      && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
+      && youtubeSameAuthor(item, message)
+      && delta <= (item.ingest !== incomingIngest ? 60_000 : 2_000)
+    let match = youtubePreloadEcho
+    if (!match && delta <= 90_000) {
+      if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
+      else if (itemIsOwn && incomingIsOwn) {
+        const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
+        match = !samePlatforms || (message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId))
+      }
+    }
+    if (!match || delta >= mergeDelta) continue
+    mergeAt = index
+    mergeDelta = delta
+  }
 
   if (mergeAt >= 0) {
     const current = state.messages[mergeAt]
@@ -942,24 +1420,35 @@ function addMessage(message: ChatMessage) {
     const already = current.platforms || [current.platform]
     const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
     const dualYouTube = current.platform === 'YouTube' && message.platform === 'YouTube' && current.sourceId !== message.sourceId
+    const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
-    if (platformsUnchanged && parts === current.parts && !dualYouTube) return
+    if (current.id) youtubeSeen.add(current.id)
+    if (message.id) youtubeSeen.add(message.id)
+    const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
+    if (platformsUnchanged && parts === current.parts && !dualYouTube && !takeIncomingId && !ingestChanged) return
     state.messages = state.messages.map((item, index) => index === mergeAt ? {
       ...item,
+      ...(takeIncomingId ? { id: message.id } : {}),
       platform: platforms[0],
       platforms,
+      sourceId: item.sourceId || message.sourceId,
+      userId: item.userId || message.userId,
+      ingest: incomingIngest || item.ingest,
       ...(parts ? { parts } : {}),
       avatar: item.avatar || message.avatar,
       badges: item.badges?.length ? item.badges : message.badges,
       color: item.color || message.color,
       sourceLabel: dualYouTube ? undefined : item.sourceLabel || message.sourceLabel,
     } : item)
+    persistChat()
     broadcast()
     return
   }
 
-  const stored = { ...message, platforms: incomingPlatforms }
-  state.messages = [...state.messages.slice(-199), stored]
+  const stored = { ...message, platforms: incomingPlatforms, ...(incomingIngest ? { ingest: incomingIngest } : {}) }
+  if (stored.id && stored.platform === 'YouTube') youtubeSeen.add(stored.id)
+  state.messages = [...state.messages, stored].slice(-CHAT_MAX)
+  persistChat()
   broadcast()
   queueTranslation(stored)
   if (stored.platform === 'Twitch') queueTwitchAvatar(stored.userId)
@@ -1018,6 +1507,19 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
   if (youtubeSeen.has(message.id)) return
   youtubeSeen.add(message.id)
   const multi = youtubeTargets.length > 1
+  if (message.activityKind) {
+    addNativeActivity({
+      id: message.id,
+      platform: 'YouTube',
+      kind: message.activityKind,
+      user: message.user,
+      userId: message.userId,
+      amount: message.amount,
+      message: message.activityKind === 'superchat' ? message.text.replace(/^\[.*?\]\s*/, '') : message.text,
+      time: message.time,
+    })
+  }
+  if (message.preload) beginYouTubeHydration()
   addMessage({
     id: message.id,
     platform: 'YouTube',
@@ -1030,7 +1532,7 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
     text: message.text,
     time: message.time,
     parts: message.parts,
-  })
+  }, { preload: Boolean(message.preload), ingest: 'innertube' })
 }
 
 async function pollYouTube() {
@@ -1126,22 +1628,12 @@ async function seedYouTubeHistory(token: Token) {
   if (!pending.length) return
   for (const chatId of pending) {
     youtubeHistorySeeded.add(chatId)
+    beginYouTubeHydration()
     try {
       const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=200`, token)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
         youtubeSeen.add(item.id)
-        addMessage({
-          id: item.id,
-          platform: 'YouTube',
-          user: String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, ''),
-          userId: item.authorDetails?.channelId,
-          avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
-          badges: youtubeBadges(item.authorDetails),
-          sourceId: chatId,
-          sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
-          text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
-          time: item.snippet?.publishedAt || new Date().toISOString(),
-        })
+        ingestYouTubeOfficialItem(item, chatId, chatIds, true)
       }
     } catch (error) {
       youtubeHistorySeeded.delete(chatId)
@@ -1156,6 +1648,7 @@ async function syncYouTubeChat(token: Token) {
     await youtubeChat.stop()
     return
   }
+  beginYouTubeHydration()
   await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage)
   if (youtubeChat.connected || !youtubeChat.failed) return
   if (youtubeQuotaBlocked()) {
@@ -1176,18 +1669,7 @@ async function pollYouTubeOfficialChat(token: Token) {
       const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails`, token)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
         youtubeSeen.add(item.id)
-        addMessage({
-          id: item.id,
-          platform: 'YouTube',
-          user: String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, ''),
-          userId: item.authorDetails?.channelId,
-          avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
-          badges: youtubeBadges(item.authorDetails),
-          sourceId: chatId,
-          sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
-          text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
-          time: item.snippet?.publishedAt || new Date().toISOString(),
-        })
+        ingestYouTubeOfficialItem(item, chatId, chatIds)
       }
     } catch (error) {
       if (noteYouTubeQuota(error)) return
@@ -1452,6 +1934,28 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
   return { platform, ok: false, error: 'Unsupported stream platform' }
 }
 
-function broadcast() { const payload = `data: ${JSON.stringify(state)}\n\n`; for (const client of clients) client.write(payload) }
-function loadTokens(): Partial<Record<Platform, Token>> { try { return JSON.parse(fs.readFileSync(tokenFile, 'utf8')) } catch { return {} } }
+function broadcast() {
+  state.activity = activityStore.list()
+  const payload = `data: ${JSON.stringify(state)}\n\n`
+  for (const client of clients) client.write(payload)
+}
+function loadTokens(): Partial<Record<TokenPlatform, Token>> { try { return JSON.parse(fs.readFileSync(tokenFile, 'utf8')) } catch { return {} } }
+function loadSettings(): AppSettings {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf8')) as Partial<AppSettings>
+    return { activityFallback: parsed.activityFallback !== false, ignoreMissingJwt: parsed.ignoreMissingJwt === true, dropOldAlerts: parsed.dropOldAlerts === true }
+  } catch {
+    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false }
+  }
+}
+
+function openInDefaultBrowser(url: string) {
+  if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref()
+  else if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref()
+  else spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref()
+}
+function saveSettings() {
+  fs.mkdirSync(dataDir, { recursive: true })
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), { mode: 0o600 })
+}
 function saveTokens() { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 }) }
