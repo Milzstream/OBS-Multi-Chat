@@ -13,6 +13,7 @@ export type YouTubeChatMessage = {
   videoId: string
   activityKind?: 'superchat' | 'membership' | 'gift'
   amount?: string
+  preload?: boolean
 }
 
 export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string }
@@ -330,7 +331,7 @@ export class YouTubeLiveChat {
         const { session } = loaded
         this.failures = 0
         this.lastOk = Date.now()
-        for (const message of loaded.bootstrap) this.onMessage?.(message, target)
+        for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, target)
         while (!stopped()) {
           const payload = await pollLiveChat(session)
           const messages = parseActions(payload, target.videoId)

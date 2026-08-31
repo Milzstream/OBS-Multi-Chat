@@ -187,6 +187,7 @@ The executable serves the docks at `http://localhost:4173`. Start it before open
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category to one platform
 - `POST /api/disconnect/:platform` - remove a saved platform connection
+- `POST /api/live-check/:platform` - run that platform's live check immediately (does not change the slower automatic YouTube interval)
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
 - `GET /oauth/callback` - exchange the provider authorization code server-side
 

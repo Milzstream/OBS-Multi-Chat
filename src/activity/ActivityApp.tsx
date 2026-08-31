@@ -127,6 +127,7 @@ export default function ActivityApp() {
     setConnections((current) => current.map((connection) => connection.platform === platform ? { ...connection, connected: false, live: false, viewers: 0, handle: '' } : connection))
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
+  const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
   const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }) => {
     if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
     if (typeof body.ignoreMissingJwt === 'boolean') {
@@ -181,6 +182,7 @@ export default function ActivityApp() {
         onClose={() => setShowSettings(false)}
         onConnect={connectPlatform}
         onDisconnect={disconnectPlatform}
+        onCheckLive={checkLive}
         onToggleFallback={() => patchSettings({ activityFallback: !activityFallback })}
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}

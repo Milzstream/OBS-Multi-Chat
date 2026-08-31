@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Bell } from 'lucide-react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -22,6 +22,7 @@ export function ConnectionSettings({
   onClose,
   onConnect,
   onDisconnect,
+  onCheckLive,
   onToggleFallback,
   onToggleIgnoreMissing,
   onToggleDropOld,
@@ -37,12 +38,19 @@ export function ConnectionSettings({
   onClose: () => void
   onConnect: (platform: Platform) => void
   onDisconnect: (platform: Platform) => void
+  onCheckLive: (platform: Platform) => Promise<void> | void
   onToggleFallback: () => void
   onToggleIgnoreMissing: () => void
   onToggleDropOld: () => void
   note?: string
 }) {
   const missing = streamelements.missing || []
+  const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
+  const checkLive = async (platform: Platform) => {
+    if (checking[platform]) return
+    setChecking((current) => ({ ...current, [platform]: true }))
+    try { await onCheckLive(platform) } finally { setChecking((current) => ({ ...current, [platform]: false })) }
+  }
   return (
     <aside className="settings-popover">
       <div className="popover-title"><span>CONNECTION SETTINGS</span><button type="button" onClick={onClose} aria-label="Close settings">×</button></div>
@@ -55,7 +63,14 @@ export function ConnectionSettings({
             <small>{connection.connected ? connection.handle : 'Not connected'}</small>
           </div>
           {connection.connected
-            ? <button type="button" className="disconnect" onClick={() => onDisconnect(connection.platform)}>Disconnect</button>
+            ? (
+              <div className="connection-actions">
+                <button type="button" className="live-check" disabled={checking[connection.platform]} title="Run a live check now without waiting for the next automatic poll" onClick={() => void checkLive(connection.platform)}>
+                  {checking[connection.platform] ? 'Checking…' : 'Check live'}
+                </button>
+                <button type="button" className="disconnect" onClick={() => onDisconnect(connection.platform)}>Disconnect</button>
+              </div>
+            )
             : <button type="button" className="connect" onClick={() => onConnect(connection.platform)}>Connect</button>}
         </div>
       ))}

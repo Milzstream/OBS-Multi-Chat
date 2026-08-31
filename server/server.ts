@@ -30,7 +30,7 @@ type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; u
 type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 type ChatBadge = { title: string; url?: string; label?: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
+type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
 type StreamDetails = { title: string; category: string; categoryId?: string }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
@@ -57,6 +57,7 @@ let twitchEventSubSessionId = ''
 const oauthStates = new Map<string, { platform: Platform; createdAt: number; codeVerifier?: string }>()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
+const liveCheckLocks = new Map<Platform, Promise<void>>()
 const twitchBadgeUrls = new Map<string, string>()
 const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
@@ -119,7 +120,12 @@ const state: State = {
 function persistChat() {
   try {
     fs.mkdirSync(dataDir, { recursive: true })
-    fs.writeFileSync(chatFile, JSON.stringify(state.messages.slice(-CHAT_MAX), null, 2), { mode: 0o600 })
+    const stored = state.messages.slice(-CHAT_MAX).map((message) => {
+      const rest = { ...message }
+      delete rest.ingest
+      return rest
+    })
+    fs.writeFileSync(chatFile, JSON.stringify(stored, null, 2), { mode: 0o600 })
   } catch (error) {
     console.error('Chat save:', error instanceof Error ? error.message : error)
   }
@@ -282,6 +288,18 @@ app.post('/api/disconnect/:platform', (request, response) => {
   if (platform === 'YouTube') { youtubeTargets = []; void youtubeChat.stop() }
   broadcast()
   response.json({ ok: true })
+})
+app.post('/api/live-check/:platform', async (request, response) => {
+  const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
+  if (!platform) return response.status(404).json({ error: 'Unknown platform' })
+  if (!tokens[platform]) return response.status(400).json({ error: `${platform} is not connected` })
+  try {
+    await checkLiveNow(platform)
+    const account = state.accounts.find((item) => item.platform === platform)
+    response.json({ ok: true, live: Boolean(account?.live), viewers: account?.viewers || 0 })
+  } catch (error) {
+    response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
 })
 
 app.get('/oauth/callback', async (request, response) => {
@@ -557,6 +575,35 @@ function startAdapter(platform: Platform) {
   }
   if (platform === 'Kick') void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
   if (platform === 'YouTube') void pollYouTube().then(() => broadcast()).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+}
+
+async function checkLiveNow(platform: Platform) {
+  const pending = liveCheckLocks.get(platform)
+  if (pending) return pending
+  const work = (async () => {
+    if (platform === 'Twitch') await pollTwitch()
+    else if (platform === 'Kick') await pollKick()
+    else {
+      youtubeForceStatus = true
+      await pollYouTube()
+      const account = state.accounts.find((item) => item.platform === 'YouTube')
+      if (!account?.live) {
+        const token = await ensureToken('YouTube')
+        if (token) {
+          await discoverYouTubeLive(token)
+          await syncYouTubeChat(token)
+          await seedYouTubeHistory(token)
+          await refreshYouTubeViewers()
+        }
+      }
+    }
+    refreshChatHealth()
+    broadcast()
+  })().finally(() => {
+    if (liveCheckLocks.get(platform) === work) liveCheckLocks.delete(platform)
+  })
+  liveCheckLocks.set(platform, work)
+  return work
 }
 
 function looksLikePlaceholder(handle: string) {
@@ -843,7 +890,7 @@ function openTwitchIrc() {
       setHealth('Twitch', 'ok')
       console.log(`Twitch IRC joined #${nick}`)
     }
-    parseTwitchLines(raw).forEach(addMessage)
+    parseTwitchLines(raw).forEach((message) => addMessage(message))
   })
   twitchIrc.on('close', () => {
     twitchIrc = undefined
@@ -1156,7 +1203,7 @@ async function drainTranslations() {
   translating = false
 }
 
-function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[]) {
+function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[], preload = false) {
   const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
   const time = item.snippet?.publishedAt || new Date().toISOString()
   const activity = youtubeOfficialToActivity(item)
@@ -1172,7 +1219,7 @@ function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[])
     sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
     text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
     time,
-  })
+  }, { preload, ingest: 'official' })
 }
 
 function youtubeOfficialToActivity(item: any): ActivityEvent | undefined {
@@ -1269,25 +1316,49 @@ async function startStreamElements(backfill = false) {
   }
 }
 
-function addMessage(message: ChatMessage) {
+function youtubeSameAuthor(left: ChatMessage, right: ChatMessage) {
+  if (left.userId && right.userId) return left.userId.toLowerCase() === right.userId.toLowerCase()
+  return left.user.toLowerCase() === right.user.toLowerCase()
+}
+
+function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
   if (!message.text && !message.parts?.length) return
-  if (state.messages.some((item) => item.id === message.id)) return
+  if (state.messages.some((item) => item.id === message.id)) {
+    if (message.id) youtubeSeen.add(message.id)
+    return
+  }
   const incomingTime = Date.parse(message.time) || Date.now()
   const incomingPlatforms = message.platforms?.length ? message.platforms : [message.platform]
   const incomingIsOwn = ownHandles().has(message.user.toLowerCase())
   const tracked = recentOutgoing.find((item) => item.text === message.text && Math.abs(incomingTime - item.at) < 20_000)
+  const incomingIngest = options?.ingest
 
-  const mergeAt = state.messages.findIndex((item) => {
-    if (item.text !== message.text) return false
-    if (Math.abs(Date.parse(item.time) - incomingTime) > 90_000) return false
+  let mergeAt = -1
+  let mergeDelta = Infinity
+  for (let index = 0; index < state.messages.length; index++) {
+    const item = state.messages[index]
+    if (item.text !== message.text) continue
+    const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
     const itemIsOwn = ownHandles().has(item.user.toLowerCase())
     const itemPlatforms = item.platforms || [item.platform]
-    if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) return true
-    if (!itemIsOwn || !incomingIsOwn) return false
-    const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-    if (!samePlatforms) return true
-    return message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId)
-  })
+    const youtubePreloadEcho = Boolean(options?.preload)
+      && message.platform === 'YouTube'
+      && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
+      && youtubeSameAuthor(item, message)
+      && delta <= 60_000
+      && item.ingest !== incomingIngest
+    let match = youtubePreloadEcho
+    if (!match && delta <= 90_000) {
+      if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
+      else if (itemIsOwn && incomingIsOwn) {
+        const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
+        match = !samePlatforms || (message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId))
+      }
+    }
+    if (!match || delta >= mergeDelta) continue
+    mergeAt = index
+    mergeDelta = delta
+  }
 
   if (mergeAt >= 0) {
     const current = state.messages[mergeAt]
@@ -1296,12 +1367,20 @@ function addMessage(message: ChatMessage) {
     const already = current.platforms || [current.platform]
     const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
     const dualYouTube = current.platform === 'YouTube' && message.platform === 'YouTube' && current.sourceId !== message.sourceId
+    const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
-    if (platformsUnchanged && parts === current.parts && !dualYouTube) return
+    if (current.id) youtubeSeen.add(current.id)
+    if (message.id) youtubeSeen.add(message.id)
+    const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
+    if (platformsUnchanged && parts === current.parts && !dualYouTube && !takeIncomingId && !ingestChanged) return
     state.messages = state.messages.map((item, index) => index === mergeAt ? {
       ...item,
+      ...(takeIncomingId ? { id: message.id } : {}),
       platform: platforms[0],
       platforms,
+      sourceId: item.sourceId || message.sourceId,
+      userId: item.userId || message.userId,
+      ingest: incomingIngest || item.ingest,
       ...(parts ? { parts } : {}),
       avatar: item.avatar || message.avatar,
       badges: item.badges?.length ? item.badges : message.badges,
@@ -1313,7 +1392,8 @@ function addMessage(message: ChatMessage) {
     return
   }
 
-  const stored = { ...message, platforms: incomingPlatforms }
+  const stored = { ...message, platforms: incomingPlatforms, ...(incomingIngest ? { ingest: incomingIngest } : {}) }
+  if (stored.id && stored.platform === 'YouTube') youtubeSeen.add(stored.id)
   state.messages = [...state.messages, stored].slice(-CHAT_MAX)
   persistChat()
   broadcast()
@@ -1398,7 +1478,7 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
     text: message.text,
     time: message.time,
     parts: message.parts,
-  })
+  }, { preload: Boolean(message.preload), ingest: 'innertube' })
 }
 
 async function pollYouTube() {
@@ -1502,7 +1582,7 @@ async function seedYouTubeHistory(token: Token) {
       const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=200`, token)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
         youtubeSeen.add(item.id)
-        ingestYouTubeOfficialItem(item, chatId, chatIds)
+        ingestYouTubeOfficialItem(item, chatId, chatIds, true)
       }
     } catch (error) {
       youtubeHistorySeeded.delete(chatId)
