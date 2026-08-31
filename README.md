@@ -200,3 +200,11 @@ The executable serves the docks at `http://localhost:4173`. Start it before open
 ## Current platform status
 
 Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's public chat WebSocket after resolving the channel's chatroom id. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections.
+
+## License
+
+This project is source-available under the MIT License with the [Commons Clause](https://commonsclause.com/). See [LICENSE](LICENSE) for the full terms.
+
+You may use, copy, modify, and share this software for free, including on your own stream even if that stream is monetized.
+
+You may not sell this software, charge for copies of it, or offer it as a paid product or hosted service.
