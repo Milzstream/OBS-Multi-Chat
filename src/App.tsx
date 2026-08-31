@@ -1,5 +1,7 @@
 import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
+import { ConnectionSettings } from './ConnectionSettings'
+import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
@@ -11,7 +13,8 @@ type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: strin
 type ChatBadge = { title: string; url?: string; label?: string }
 type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
-type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health> }
+type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
+type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }
 
 const platformMeta: Record<Platform, { color: string; route: string }> = {
   Twitch: { color: '#a970ff', route: 'twitch' },
@@ -55,6 +58,10 @@ function App() {
   const [sendStatus, setSendStatus] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [health, setHealth] = useState(initialHealth)
+  const [streamelements, setStreamelements] = useState<StreamElementsStatus>({ connected: false, handle: '' })
+  const [activityFallback, setActivityFallback] = useState(true)
+  const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
+  const [dropOldAlerts, setDropOldAlerts] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
   const connectedAccounts = connections.filter((connection) => connection.connected)
@@ -67,11 +74,7 @@ function App() {
   const headerTip = [headerTitle, twitchGame && `Twitch: ${twitchGame}`, kickGame && `Kick: ${kickGame}`].filter(Boolean).join('\n')
   const visibleMessages = activeFilter === 'All' ? messages : messages.filter((message) => (message.platforms || [message.platform]).includes(activeFilter))
   const chatListRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const list = chatListRef.current
-    if (list) list.scrollTop = list.scrollHeight
-  }, [visibleMessages])
+  const { paused: chatPaused, onScroll: onChatScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
   useEffect(() => {
     const close = () => setMenu(null)
     window.addEventListener('click', close)
@@ -85,9 +88,21 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then((remote) => { setConnections(remote.accounts); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true) }).catch(() => setBackendOnline(false))
+    const apply = (remote: BackendState) => {
+      setConnections(remote.accounts)
+      setMessages(remote.messages)
+      if (remote.health) setHealth(remote.health)
+      if (remote.streamelements) setStreamelements(remote.streamelements)
+      if (typeof remote.activityFallback === 'boolean') setActivityFallback(remote.activityFallback)
+      if (typeof remote.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(remote.ignoreMissingJwt)
+      if (typeof remote.dropOldAlerts === 'boolean') setDropOldAlerts(remote.dropOldAlerts)
+      setBackendOnline(true)
+      setStreamDetails(remote.streamInfo)
+      setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title)
+    }
+    fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
-    events.onmessage = (event) => { const remote = JSON.parse(event.data) as BackendState; setConnections(remote.accounts); setMessages(remote.messages); if (remote.health) setHealth(remote.health); setBackendOnline(true); setStreamDetails(remote.streamInfo); setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title) }
+    events.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
     events.onerror = () => setBackendOnline(false)
     return () => events.close()
   }, [])
@@ -100,6 +115,12 @@ function App() {
     sendOptOutRef.current.delete(platform)
     setSelectedPlatforms((current) => current.filter((item) => item !== platform))
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
+  }
+  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }) => {
+    if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
+    if (typeof body.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(body.ignoreMissingJwt)
+    if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
+    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   }
   const togglePlatform = (platform: Platform) => {
     if (!connections.find((connection) => connection.platform === platform)?.connected) return
@@ -151,10 +172,25 @@ function App() {
     <main className={compactMode ? 'app compact' : 'app'}>
       <header className="topbar"><button type="button" className="stream-ref" title={headerTip} onClick={() => setShowControls((open) => !open)}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => setShowControls((open) => !open)}><Gamepad2 size={16} /></button><button className="settings-button" onClick={() => setShowSettings((open) => !open)} aria-label="Open settings"><Settings2 size={17} /></button></div></header>
       <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} health={health[connection.platform]} onConnect={() => connectPlatform(connection.platform)} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div></section>
-      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-list" ref={chatListRef}>{visibleMessages.length ? visibleMessages.map((message) => <MessageItem key={message.id} message={message} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />) : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Open settings to connect an account.'}</span><button onClick={() => setShowSettings(true)}>Open connection settings</button></div>}</div></section>
+      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? visibleMessages.map((message) => <MessageItem key={message.id} message={message} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />) : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Open settings to connect an account.'}</span><button onClick={() => setShowSettings(true)}>Open connection settings</button></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
-      {showSettings && <aside className="settings-popover"><div className="popover-title"><span>CONNECTION SETTINGS</span><button onClick={() => setShowSettings(false)} aria-label="Close settings">×</button></div><p className="settings-note">Connect with OAuth. Title and category live under the gamepad. Reconnect Twitch and Kick once to grant timeout, ban, and delete permissions.</p>{connections.map((connection) => <div className="connection-row" key={connection.platform}><span style={{ color: platformMeta[connection.platform].color }}>{platformIcon(connection.platform, 14)}</span><div><strong>{connection.platform}</strong><small>{connection.connected ? connection.handle : 'Not connected'}</small></div>{connection.connected ? <button className="disconnect" onClick={() => disconnectPlatform(connection.platform)}>Disconnect</button> : <button className="connect" onClick={() => connectPlatform(connection.platform)}>Connect</button>}</div>)}</aside>}
+      {showSettings && <ConnectionSettings
+        connections={connections}
+        streamelements={streamelements}
+        activityFallback={activityFallback}
+        ignoreMissingJwt={ignoreMissingJwt}
+        dropOldAlerts={dropOldAlerts}
+        showActivityOptions={false}
+        platformIcon={platformIcon}
+        onClose={() => setShowSettings(false)}
+        onConnect={connectPlatform}
+        onDisconnect={disconnectPlatform}
+        onToggleFallback={() => patchSettings({ activityFallback: !activityFallback })}
+        onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
+        onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
+        note="Connect accounts here for backup or chat."
+      />}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - 190)) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></div>}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>

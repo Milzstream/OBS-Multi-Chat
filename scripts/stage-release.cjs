@@ -27,9 +27,11 @@ fs.writeFileSync(
   path.join(stage, 'README.txt'),
   `Relay Chat Dock v${version}
 
-1. Edit production.env and add your Twitch, Kick, and YouTube API credentials.
-2. Run relay-chat-dock.exe.
-3. In OBS, add a Browser Source (or dock) pointed at http://localhost:4173.
+1. Edit production.env and add your Twitch, Kick, and YouTube API credentials plus StreamElements JWTs (one per linked platform).
+2. Run relay-chat-dock.exe. The console prints both dock URLs.
+3. In OBS, add custom browser docks:
+   Chat      http://localhost:4173
+   Activity  http://localhost:4173/activity
 
 OAuth tokens are stored in a local data/tokens.json file beside the executable.
 Never share production.env or the data folder.

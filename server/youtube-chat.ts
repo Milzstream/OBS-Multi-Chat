@@ -11,6 +11,8 @@ export type YouTubeChatMessage = {
   badges?: { title: string; url?: string; label?: string }[]
   parts?: ({ type: 'text'; text: string } | { type: 'emote'; name: string; url: string })[]
   videoId: string
+  activityKind?: 'superchat' | 'membership' | 'gift'
+  amount?: string
 }
 
 export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string }
@@ -109,29 +111,59 @@ function authorBadges(renderer: any): YouTubeChatMessage['badges'] {
   return badges
 }
 
+function classifyChatItem(item: any): { renderer: any; activityKind?: YouTubeChatMessage['activityKind']; amount?: string } | undefined {
+  if (item?.liveChatTextMessageRenderer) return { renderer: item.liveChatTextMessageRenderer }
+  if (item?.liveChatPaidMessageRenderer) {
+    const renderer = item.liveChatPaidMessageRenderer
+    return { renderer, activityKind: 'superchat', amount: renderer.purchaseAmountText?.simpleText }
+  }
+  if (item?.liveChatPaidStickerRenderer) {
+    const renderer = item.liveChatPaidStickerRenderer
+    return { renderer, activityKind: 'superchat', amount: renderer.purchaseAmountText?.simpleText }
+  }
+  if (item?.liveChatMembershipItemRenderer) return { renderer: item.liveChatMembershipItemRenderer, activityKind: 'membership' }
+  const gift = item?.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
+  if (gift) {
+    const header = gift.header?.liveChatSponsorshipsHeaderRenderer || {}
+    return {
+      renderer: {
+        ...header,
+        id: gift.id || header.id,
+        timestampUsec: gift.timestampUsec || header.timestampUsec,
+        authorExternalChannelId: gift.authorExternalChannelId || header.authorExternalChannelId,
+        authorName: header.authorName || gift.authorName,
+        authorPhoto: header.authorPhoto || gift.authorPhoto,
+      },
+      activityKind: 'gift',
+    }
+  }
+}
+
 function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeChatMessage[] {
   const actions = payload?.continuationContents?.liveChatContinuation?.actions || payload?.actions || []
   const messages: YouTubeChatMessage[] = []
   for (const action of actions) {
-    const item = action.addChatItemAction?.item
-    const renderer = item?.liveChatTextMessageRenderer || item?.liveChatPaidMessageRenderer || item?.liveChatPaidStickerRenderer
-    if (!renderer) continue
-    const paid = renderer.purchaseAmountText?.simpleText ? `[${renderer.purchaseAmountText.simpleText}] ` : ''
-    const parts = runsToParts(renderer.message?.runs || renderer.headerSubtext?.runs || [])
+    const classified = classifyChatItem(action.addChatItemAction?.item)
+    if (!classified) continue
+    const { renderer, activityKind, amount } = classified
+    const paid = amount ? `[${amount}] ` : ''
+    const parts = runsToParts(renderer.message?.runs || renderer.headerSubtext?.runs || renderer.headerPrimaryText?.runs || renderer.primaryText?.runs || [])
     const text = `${paid}${parts?.filter((part) => part.type === 'text').map((part) => part.text).join('') || ''}`.trim()
     const time = renderer.timestampUsec ? new Date(Number(renderer.timestampUsec) / 1000).toISOString() : new Date().toISOString()
     if (ignoreBefore && Date.parse(time) < ignoreBefore) continue
-    if (!text && !parts?.some((part) => part.type === 'emote')) continue
+    if (!activityKind && !text && !parts?.some((part) => part.type === 'emote')) continue
     messages.push({
       id: String(renderer.id || `${videoId}-${renderer.timestampUsec || Date.now()}`),
-      user: String(renderer.authorName?.simpleText || 'YouTube user').replace(/^@+/, ''),
-      text: text || ' ',
+      user: String(renderer.authorName?.simpleText || renderer.authorName?.runs?.[0]?.text || 'YouTube user').replace(/^@+/, ''),
+      text: text || (activityKind === 'membership' ? 'became a member' : activityKind === 'gift' ? 'gifted memberships' : ' '),
       userId: renderer.authorExternalChannelId,
       avatar: renderer.authorPhoto?.thumbnails?.slice(-1)[0]?.url,
       time,
       badges: authorBadges(renderer),
       parts,
       videoId,
+      activityKind,
+      amount,
     })
   }
   return messages
