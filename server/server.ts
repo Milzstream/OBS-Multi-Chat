@@ -34,8 +34,10 @@ type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; use
 type StreamDetails = { title: string; category: string; categoryId?: string }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
-type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails> }
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean }
+type YoutubeQuota = { day: string; used: number; limit?: number }
+type YoutubeQuotaStatus = { used: number; limit: number }
+type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
+type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const app = express()
@@ -66,7 +68,13 @@ let twitchAvatarTimer: NodeJS.Timeout | undefined
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const youtubeChat = new YouTubeLiveChat()
+const YOUTUBE_QUOTA_LIMIT = 10_000
+let youtubeQuotaLimit = YOUTUBE_QUOTA_LIMIT
 let youtubeQuotaBlockedUntil = 0
+let youtubeQuotaUsed = 0
+let youtubeQuotaDay = ''
+let youtubeQuotaWarnLogged = false
+let youtubeQuotaHeaderLogged = false
 let lastYouTubeStatusAt = 0
 let lastYouTubeOfficialChatAt = 0
 let lastYouTubeViewersAt = 0
@@ -93,13 +101,12 @@ function collapseYouTubeHydrationDuplicates() {
     const at = Date.parse(message.time) || 0
     const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
     const match = youtube ? kept.findIndex((item) => {
-      if (item.text !== message.text) return false
+      if (foldChatText(item) !== foldChatText(message)) return false
       if (!(item.platform === 'YouTube' || (item.platforms || []).includes('YouTube'))) return false
       if (!youtubeSameAuthor(item, message)) return false
+      if (!youtubeSameChat(item.sourceId, message.sourceId)) return false
       const delta = Math.abs((Date.parse(item.time) || 0) - at)
-      const differentSource = Boolean(item.ingest && message.ingest && item.ingest !== message.ingest)
-      const legacyPair = !item.ingest && !message.ingest
-      return delta <= (differentSource || legacyPair ? 60_000 : 2_000)
+      return delta <= 2_000
     }) : -1
     if (match < 0) {
       kept.push(message)
@@ -117,8 +124,9 @@ function collapseYouTubeHydrationDuplicates() {
       ingest: message.ingest || current.ingest,
       parts: current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts,
       avatar: current.avatar || message.avatar,
-      badges: current.badges?.length ? current.badges : message.badges,
+      badges: sortedYouTubeBadges(current.badges?.length ? current.badges : message.badges),
       color: current.color || message.color,
+      sourceLabel: current.sourceLabel || message.sourceLabel,
     }
     if (current.id) youtubeSeen.add(current.id)
     if (message.id) youtubeSeen.add(message.id)
@@ -169,6 +177,7 @@ const state: State = {
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
   dropOldAlerts: settings.dropOldAlerts,
+  youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
 
 function persistChat() {
@@ -403,6 +412,8 @@ httpServer.on('error', (error: NodeJS.ErrnoException) => {
   process.exitCode = 1
 })
 httpServer.listen(port, '0.0.0.0', () => {
+  ensureYouTubeQuotaDay()
+  collapseYouTubeHydrationDuplicates()
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
@@ -413,6 +424,12 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log('')
   console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
   console.log('')
+  console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
+  console.log('  Use YouTube Data API v3 → Queries per day → Current usage (example 35), not the 1,247 quota-count card.')
+  if (youtubeQuotaUsed) console.log(`  Estimated today ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (Pacific)`)
+  console.log('  Optional: type 35 or 35/10000 and press Enter anytime. Logging will not wait.')
+  console.log('')
+  listenForYouTubeQuotaInput()
   if (missing.length && !settings.ignoreMissingJwt) {
     const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
     console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
@@ -595,37 +612,261 @@ function nextPacificMidnight(now = Date.now()) {
   return now + 24 * 60 * 60 * 1000
 }
 
+function pacificDate(now = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now))
+}
+
 function youtubeQuotaBlocked() {
   return Date.now() < youtubeQuotaBlockedUntil
+}
+
+function youtubeQuotaCost(endpoint: string, method = 'GET') {
+  const path = endpoint.split('?')[0].replace(/^\//, '')
+  if (path.startsWith('liveChat/bans')) return 50
+  if (path.startsWith('liveChat/messages')) return 5
+  return 1
+}
+
+function youtubeQuotaLabel(endpoint: string, method = 'GET') {
+  const path = endpoint.split('?')[0].replace(/^\//, '')
+  const verb = method.toUpperCase()
+  if (path.startsWith('liveChat/bans')) return verb === 'DELETE' ? 'liveChatBans.delete' : 'liveChatBans.insert'
+  if (path.startsWith('liveChat/messages')) return verb === 'POST' ? 'liveChatMessages.insert' : verb === 'DELETE' ? 'liveChatMessages.delete' : 'liveChatMessages.list'
+  if (path.startsWith('liveBroadcasts')) return 'liveBroadcasts.list'
+  if (path.startsWith('channels')) return 'channels.list'
+  if (path.startsWith('videos')) return 'videos.list'
+  return `${path} ${verb}`
+}
+
+function youtubeQuotaWarnAt() {
+  return Math.floor(youtubeQuotaLimit * 0.8)
+}
+
+function youtubeQuotaSnapshot(): YoutubeQuotaStatus {
+  return { used: youtubeQuotaUsed, limit: youtubeQuotaLimit }
+}
+
+function persistYouTubeQuota() {
+  const next = { day: youtubeQuotaDay || pacificDate(), used: youtubeQuotaUsed, limit: youtubeQuotaLimit }
+  if (settings.youtubeQuota.day === next.day && settings.youtubeQuota.used === next.used && settings.youtubeQuota.limit === next.limit) return
+  settings.youtubeQuota = next
+  saveSettings()
+}
+
+function ensureYouTubeQuotaDay() {
+  const today = pacificDate()
+  if (youtubeQuotaDay === today) return
+  const saved = settings.youtubeQuota
+  const sameDay = saved.day === today
+  youtubeQuotaDay = today
+  youtubeQuotaUsed = sameDay ? saved.used : 0
+  youtubeQuotaLimit = sameDay && saved.limit && saved.limit > 0 ? saved.limit : YOUTUBE_QUOTA_LIMIT
+  youtubeQuotaWarnLogged = youtubeQuotaUsed >= youtubeQuotaWarnAt()
+  if (!sameDay) youtubeQuotaBlockedUntil = 0
+  persistYouTubeQuota()
+  state.youtubeQuota = youtubeQuotaSnapshot()
+}
+
+function youtubeQuotaHealth(): Health | undefined {
+  ensureYouTubeQuotaDay()
+  if (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit) {
+    return { status: 'warn', message: `YouTube API quota reached (${Math.min(youtubeQuotaUsed, youtubeQuotaLimit).toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}) — using site chat until midnight Pacific` }
+  }
+  if (youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
+    const percent = Math.min(99, Math.round((youtubeQuotaUsed / youtubeQuotaLimit) * 100))
+    return { status: 'warn', message: `YouTube API quota ${percent}% used (${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}) — sending and moderation still use official API` }
+  }
+}
+
+function applyYouTubeQuotaHealth() {
+  const quota = youtubeQuotaHealth()
+  if (quota) setHealth('YouTube', quota.status, quota.message)
+  else if (/quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok')
+}
+
+function setYouTubeQuotaUsed(used: number, source: string, limit?: number) {
+  ensureYouTubeQuotaDay()
+  if (limit != null && limit > 0) youtubeQuotaLimit = Math.floor(limit)
+  youtubeQuotaUsed = Math.max(0, Math.min(youtubeQuotaLimit, Math.floor(used)))
+  youtubeQuotaWarnLogged = youtubeQuotaUsed >= youtubeQuotaWarnAt()
+  persistYouTubeQuota()
+  state.youtubeQuota = youtubeQuotaSnapshot()
+  if (youtubeQuotaUsed < youtubeQuotaLimit) youtubeQuotaBlockedUntil = 0
+  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (${source})`)
+  if (youtubeQuotaUsed >= youtubeQuotaLimit) markYouTubeQuotaExceeded()
+  else applyYouTubeQuotaHealth()
+}
+
+function applyManualYouTubeQuota(line: string) {
+  const pair = line.match(/^(?:used\s+)?(\d+)\s*\/\s*(\d+)\s*$/i)
+  if (pair) {
+    setYouTubeQuotaUsed(Number(pair[1]), 'console', Number(pair[2]))
+    return
+  }
+  const remaining = line.match(/^(?:remaining|left|rem)\s+(\d+)\s*$/i)
+  if (remaining) {
+    const left = Number(remaining[1])
+    if (left > youtubeQuotaLimit) setYouTubeQuotaUsed(youtubeQuotaUsed, 'console remaining', youtubeQuotaUsed + left)
+    else setYouTubeQuotaUsed(youtubeQuotaLimit - left, 'console remaining')
+    return
+  }
+  const used = line.match(/^(?:used\s+)?(\d+)\s*$/i)
+  if (used) {
+    setYouTubeQuotaUsed(Number(used[1]), 'console')
+    return
+  }
+  if (/^\d/.test(line) || /quota|remaining|used/i.test(line)) {
+    console.log('YouTube quota: type the Queries per day current usage (e.g. 35), or 35/10000 if your limit is not 10000.')
+  }
+}
+
+function listenForYouTubeQuotaInput() {
+  if (!process.stdin || process.stdin.readableEnded || process.stdin.isTTY === false) return
+  try { process.stdin.setEncoding('utf8') } catch { return }
+  if (typeof process.stdin.resume === 'function') process.stdin.resume()
+  let buffer = ''
+  process.stdin.on('data', (chunk) => {
+    buffer += String(chunk).replace(/\r/g, '')
+    let newline = buffer.indexOf('\n')
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim()
+      buffer = buffer.slice(newline + 1)
+      if (line) applyManualYouTubeQuota(line)
+      newline = buffer.indexOf('\n')
+    }
+  })
+  process.stdin.on('error', () => undefined)
+}
+
+function headerNumber(headers: Headers, names: string[]) {
+  for (const name of names) {
+    const raw = headers.get(name)
+    if (raw == null || raw === '') continue
+    const value = Number(String(raw).split(/[;,\s]/)[0])
+    if (Number.isFinite(value)) return value
+  }
+}
+
+function quotaFromHeaders(headers: Headers): { used?: number; remaining?: number; limit?: number } | undefined {
+  const remaining = headerNumber(headers, ['ratelimit-remaining', 'x-ratelimit-remaining', 'x-rate-limit-remaining', 'x-quota-remaining'])
+  const limit = headerNumber(headers, ['ratelimit-limit', 'x-ratelimit-limit', 'x-rate-limit-limit', 'x-quota-limit'])
+  const used = headerNumber(headers, ['x-quota-used', 'x-ratelimit-used'])
+  if (remaining == null && limit == null && used == null) return
+  return { remaining, limit, used }
+}
+
+function applyYouTubeQuotaHeaders(headers: Headers) {
+  const parsed = quotaFromHeaders(headers)
+  if (!parsed) return false
+  const looksDaily = (parsed.limit != null && parsed.limit >= 1000) || (parsed.used != null && parsed.used >= 0 && (parsed.limit == null || parsed.limit >= 1000))
+  if (!looksDaily) {
+    if (!youtubeQuotaHeaderLogged) {
+      youtubeQuotaHeaderLogged = true
+      console.log('YouTube rate-limit headers are not the daily quota; estimating from this app\'s official calls.')
+    }
+    return false
+  }
+  ensureYouTubeQuotaDay()
+  if (parsed.limit != null && parsed.limit > 0) youtubeQuotaLimit = parsed.limit
+  if (parsed.used != null) youtubeQuotaUsed = parsed.used
+  else if (parsed.remaining != null) youtubeQuotaUsed = Math.max(0, youtubeQuotaLimit - parsed.remaining)
+  persistYouTubeQuota()
+  state.youtubeQuota = youtubeQuotaSnapshot()
+  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (from API headers)`)
+  if (youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
+    youtubeQuotaWarnLogged = true
+    applyYouTubeQuotaHealth()
+  } else broadcast()
+  return true
+}
+
+function noteYouTubeQuotaUse(endpoint: string, method = 'GET') {
+  ensureYouTubeQuotaDay()
+  const cost = youtubeQuotaCost(endpoint, method)
+  const before = youtubeQuotaUsed
+  youtubeQuotaUsed += cost
+  persistYouTubeQuota()
+  state.youtubeQuota = youtubeQuotaSnapshot()
+  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (+${cost} ${youtubeQuotaLabel(endpoint, method)})`)
+  if (!youtubeQuotaWarnLogged && youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
+    youtubeQuotaWarnLogged = true
+    console.warn(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} — approaching the daily cap (resets midnight Pacific)`)
+  }
+  if (before < youtubeQuotaWarnAt() && youtubeQuotaUsed >= youtubeQuotaWarnAt()) applyYouTubeQuotaHealth()
+  else broadcast()
+}
+
+function markYouTubeQuotaExceeded() {
+  ensureYouTubeQuotaDay()
+  const until = nextPacificMidnight()
+  youtubeQuotaUsed = Math.max(youtubeQuotaUsed, youtubeQuotaLimit)
+  persistYouTubeQuota()
+  state.youtubeQuota = youtubeQuotaSnapshot()
+  if (youtubeQuotaBlockedUntil >= until) {
+    applyYouTubeQuotaHealth()
+    return
+  }
+  youtubeQuotaBlockedUntil = until
+  console.error(`YouTube Data API quota exceeded (${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}). Official YouTube calls paused until midnight Pacific. Chat will use the site reader.`)
+  applyYouTubeQuotaHealth()
 }
 
 function noteYouTubeQuota(error: unknown) {
   const text = error instanceof Error ? error.message : String(error)
   if (!/quotaExceeded|quota exceeded/i.test(text)) return false
-  const until = nextPacificMidnight()
-  if (youtubeQuotaBlockedUntil < until) {
-    youtubeQuotaBlockedUntil = until
-    console.error('YouTube Data API quota exceeded. Official YouTube calls paused until midnight Pacific. Chat will use the site reader.')
-    setHealth('YouTube', 'warn', 'YouTube API quota exceeded — using site chat until reset')
-  }
+  markYouTubeQuotaExceeded()
   return true
 }
 
-async function youtubeApi(endpoint: string, token: Token, retried = false): Promise<any> {
+async function youtubeRequest(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<{ ok: boolean; status: number; text: string }> {
+  ensureYouTubeQuotaDay()
   if (youtubeQuotaBlocked()) throw new Error('YouTube API quota exceeded')
+  const method = String(options.method || 'GET').toUpperCase()
   const localized = /[?&]hl=/.test(endpoint) ? endpoint : `${endpoint}${endpoint.includes('?') ? '&' : '?'}hl=en`
-  const response = await fetchTimed(`https://www.googleapis.com/youtube/v3${localized}`, { headers: { Authorization: `Bearer ${token.accessToken}` } }, 12_000)
+  const headers = { Authorization: `Bearer ${token.accessToken}`, ...(options.headers as Record<string, string> | undefined) }
+  const response = await fetchTimed(`https://www.googleapis.com/youtube/v3${localized}`, { ...options, headers }, 12_000)
+  const fromHeaders = applyYouTubeQuotaHeaders(response.headers)
   if (response.status === 401 && !retried) {
+    if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
     const refreshed = await refreshAccessToken('YouTube')
-    if (refreshed) return youtubeApi(endpoint, refreshed, true)
+    if (refreshed) return youtubeRequest(endpoint, refreshed, options, true)
   }
+  if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
   const text = await response.text()
-  if (response.status === 403 && /quotaExceeded/i.test(text)) {
-    youtubeQuotaBlockedUntil = nextPacificMidnight()
-    throw new Error('YouTube API 403 quota exceeded')
+  if (response.status === 403 && /quotaExceeded/i.test(text)) markYouTubeQuotaExceeded()
+  return { ok: response.ok, status: response.status, text }
+}
+
+function youtubeApiErrorReason(text: string) {
+  try {
+    const payload = JSON.parse(text) as { error?: { message?: string; errors?: { reason?: string; message?: string }[] } }
+    const entry = payload.error?.errors?.[0]
+    const reason = entry?.reason || payload.error?.message || entry?.message
+    if (reason) return reason
+  } catch { /* not json */ }
+  return text.replace(/\s+/g, ' ').slice(0, 120)
+}
+
+function isEndedYouTubeChat(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error)
+  return /live chat is no longer live|liveChatEnded|liveChatNotFound/i.test(text)
+}
+
+function dropEndedYouTubeChat(chatId: string) {
+  const token = tokens.YouTube
+  if (token) {
+    token.liveChatIds = (token.liveChatIds || []).filter((id) => id !== chatId)
+    if (token.liveChatId === chatId) token.liveChatId = token.liveChatIds[0]
   }
-  if (!response.ok) throw new Error(`YouTube API ${response.status}: ${text.slice(0, 180)}`)
-  return text ? JSON.parse(text) : {}
+  const next = youtubeTargets.filter((target) => target.liveChatId !== chatId)
+  if (next.length !== youtubeTargets.length) setYouTubeTargets(next)
+}
+
+async function youtubeApi(endpoint: string, token: Token): Promise<any> {
+  const result = await youtubeRequest(endpoint, token)
+  if (result.status === 403 && /quotaExceeded/i.test(result.text)) throw new Error('YouTube API 403 quota exceeded')
+  if (!result.ok) throw new Error(`YouTube API ${result.status}: ${youtubeApiErrorReason(result.text)}`)
+  return result.text ? JSON.parse(result.text) : {}
 }
 
 function startAdapter(platform: Platform) {
@@ -909,10 +1150,11 @@ function refreshChatHealth() {
   }
   if (tokens.YouTube) {
     const account = state.accounts.find((item) => item.platform === 'YouTube')
-    if (youtubeChat.connected && youtubeQuotaBlocked()) setHealth('YouTube', 'warn', 'YouTube API quota exceeded — using site chat until reset')
-    else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down') setHealth('YouTube', 'ok') }
-    else if (account?.live && youtubeQuotaBlocked()) setHealth('YouTube', 'warn', 'YouTube API quota exceeded — using site chat until reset')
+    const quota = youtubeQuotaHealth()
+    if (quota && (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit)) setHealth('YouTube', quota.status, quota.message)
     else if (account?.live && youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
+    else if (quota) setHealth('YouTube', quota.status, quota.message)
+    else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
     else if (account?.live && !tokens.YouTube.liveChatIds?.length && !tokens.YouTube.liveChatId) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
   }
 }
@@ -1386,6 +1628,37 @@ function youtubeSameAuthor(left: ChatMessage, right: ChatMessage) {
   return left.user.toLowerCase() === right.user.toLowerCase()
 }
 
+function foldChatText(message: ChatMessage) {
+  const raw = message.parts?.length
+    ? message.parts.filter((part) => part.type === 'text').map((part) => part.text).join('')
+    : message.text
+  return raw.replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function youtubeChatKeys(sourceId?: string) {
+  if (!sourceId) return []
+  const keys = [sourceId]
+  for (const target of youtubeTargets) {
+    if (target.liveChatId !== sourceId && target.videoId !== sourceId) continue
+    if (target.liveChatId) keys.push(target.liveChatId)
+    keys.push(target.videoId)
+  }
+  return keys
+}
+
+function youtubeSameChat(left?: string, right?: string) {
+  if (!left || !right) return true
+  if (left === right) return true
+  const keys = new Set(youtubeChatKeys(left))
+  return youtubeChatKeys(right).some((key) => keys.has(key))
+}
+
+function sortedYouTubeBadges(badges?: ChatBadge[]) {
+  if (!badges?.length) return badges
+  const rank = (label?: string) => label === 'HOST' ? 0 : label === 'MOD' ? 1 : label === '✓' ? 2 : label === 'MEM' ? 3 : 4
+  return [...badges].sort((left, right) => rank(left.label) - rank(right.label) || left.title.localeCompare(right.title))
+}
+
 function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
   if (!message.text && !message.parts?.length) return
   if (state.messages.some((item) => item.id === message.id)) {
@@ -1402,23 +1675,20 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
   let mergeDelta = Infinity
   for (let index = 0; index < state.messages.length; index++) {
     const item = state.messages[index]
-    if (item.text !== message.text) continue
+    const exactText = item.text === message.text
+    if (!exactText && foldChatText(item) !== foldChatText(message)) continue
     const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
     const itemIsOwn = ownHandles().has(item.user.toLowerCase())
     const itemPlatforms = item.platforms || [item.platform]
-    const hydrating = Boolean(options?.preload) || Date.now() < youtubeHydratingUntil
-    const youtubePreloadEcho = hydrating
-      && message.platform === 'YouTube'
+    const youtubeEcho = message.platform === 'YouTube'
       && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
       && youtubeSameAuthor(item, message)
-      && delta <= (item.ingest !== incomingIngest ? 60_000 : 2_000)
-    let match = youtubePreloadEcho
-    if (!match && delta <= 90_000) {
-      if (tracked && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
-      else if (itemIsOwn && incomingIsOwn) {
-        const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-        match = !samePlatforms || (message.platform === 'YouTube' && item.platform === 'YouTube' && Boolean(message.sourceId && item.sourceId && message.sourceId !== item.sourceId))
-      }
+      && youtubeSameChat(item.sourceId, message.sourceId)
+    let match = youtubeEcho && delta <= 2_000
+    if (!match && exactText && tracked && delta <= 20_000 && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
+    else if (!match && exactText && incomingIsOwn && itemIsOwn && delta <= 90_000) {
+      const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
+      match = !samePlatforms
     }
     if (!match || delta >= mergeDelta) continue
     mergeAt = index
@@ -1431,13 +1701,12 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     const platforms = [...new Set([...preferred, ...(current.platforms || [current.platform]), ...incomingPlatforms])]
     const already = current.platforms || [current.platform]
     const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
-    const dualYouTube = current.platform === 'YouTube' && message.platform === 'YouTube' && current.sourceId !== message.sourceId
     const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
     if (current.id) youtubeSeen.add(current.id)
     if (message.id) youtubeSeen.add(message.id)
     const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
-    if (platformsUnchanged && parts === current.parts && !dualYouTube && !takeIncomingId && !ingestChanged) return
+    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged) return
     state.messages = state.messages.map((item, index) => index === mergeAt ? {
       ...item,
       ...(takeIncomingId ? { id: message.id } : {}),
@@ -1448,9 +1717,9 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
       ingest: incomingIngest || item.ingest,
       ...(parts ? { parts } : {}),
       avatar: item.avatar || message.avatar,
-      badges: item.badges?.length ? item.badges : message.badges,
+      badges: sortedYouTubeBadges(item.badges?.length ? item.badges : message.badges),
       color: item.color || message.color,
-      sourceLabel: dualYouTube ? undefined : item.sourceLabel || message.sourceLabel,
+      sourceLabel: item.sourceLabel || message.sourceLabel,
     } : item)
     persistChat()
     broadcast()
@@ -1657,6 +1926,11 @@ async function refreshYouTubeViewers() {
 async function seedYouTubeHistory(token: Token) {
   if (youtubeQuotaBlocked()) return
   const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
+  if (youtubeChat.connected) {
+    for (const chatId of chatIds) youtubeHistorySeeded.add(chatId)
+    collapseYouTubeHydrationDuplicates()
+    return
+  }
   const pending = chatIds.filter((chatId) => !youtubeHistorySeeded.has(chatId))
   if (!pending.length) return
   for (const chatId of pending) {
@@ -1669,11 +1943,17 @@ async function seedYouTubeHistory(token: Token) {
         ingestYouTubeOfficialItem(item, chatId, chatIds, true)
       }
     } catch (error) {
-      youtubeHistorySeeded.delete(chatId)
       if (noteYouTubeQuota(error)) return
+      if (isEndedYouTubeChat(error)) {
+        console.log('YouTube history seed skipped: live chat ended')
+        dropEndedYouTubeChat(chatId)
+        continue
+      }
+      youtubeHistorySeeded.delete(chatId)
       console.error('YouTube history seed:', error instanceof Error ? error.message : error)
     }
   }
+  collapseYouTubeHydrationDuplicates()
 }
 
 async function syncYouTubeChat(token: Token) {
@@ -1706,6 +1986,10 @@ async function pollYouTubeOfficialChat(token: Token) {
       }
     } catch (error) {
       if (noteYouTubeQuota(error)) return
+      if (isEndedYouTubeChat(error)) {
+        dropEndedYouTubeChat(chatId)
+        continue
+      }
       console.error('YouTube chat poll:', error instanceof Error ? error.message : error)
     }
   }
@@ -1736,7 +2020,7 @@ function retagYouTubeMessages() {
     const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
     if (!youtube) return message
     const label = youtubeSourceLabel(message.sourceId)
-    if (message.sourceLabel === label) return message
+    if (!label || message.sourceLabel === label) return message
     changed = true
     return { ...message, sourceLabel: label }
   })
@@ -1750,6 +2034,7 @@ function setYouTubeTargets(targets: YouTubeChatTarget[]) {
   youtubeTargets = targets
   relabelYouTubeTargets()
   retagYouTubeMessages()
+  collapseYouTubeHydrationDuplicates()
 }
 
 async function pollKick() {
@@ -1840,13 +2125,13 @@ async function sendYouTubeMessage(text: string) {
   if (!token) return { ok: false, error: 'Not connected' }
   const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
   if (!chatIds.length) return { ok: false, error: 'YouTube chat is not live' }
-  const results = await Promise.all(chatIds.map((liveChatId) => fetch('https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet', {
+  const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/messages?part=snippet', token, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ snippet: { liveChatId, type: 'textMessageEvent', textMessageDetails: { messageText: text } } }),
   })))
-  const failed = await Promise.all(results.filter((result) => !result.ok).map((result) => result.text()))
-  return { ok: results.some((result) => result.ok), error: failed.length ? failed.join(' | ') : undefined }
+  const failed = results.filter((result) => !result.ok)
+  return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
 }
 
 async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
@@ -1904,15 +2189,15 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
   if (!token) return { ok: false, error: 'YouTube is not connected' }
   if (body.action === 'delete') {
     if (!body.messageId) return { ok: false, error: 'Message id is required' }
-    const result = await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?id=${encodeURIComponent(body.messageId)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token.accessToken}` } })
-    if (!result.ok) return { ok: false, error: await result.text() }
+    const result = await youtubeRequest(`/liveChat/messages?id=${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
+    if (!result.ok) return { ok: false, error: result.text }
     return { ok: true }
   }
   const chatIds = [...new Set([body.sourceId, ...(token.liveChatIds || []), token.liveChatId].filter(Boolean))] as string[]
   if (!body.userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
-  const results = await Promise.all(chatIds.map((liveChatId) => fetch('https://www.googleapis.com/youtube/v3/liveChat/bans?part=snippet', {
+  const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/bans?part=snippet', token, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token.accessToken}`, 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       snippet: {
         liveChatId,
@@ -1922,8 +2207,8 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
       },
     }),
   })))
-  const failed = await Promise.all(results.filter((result) => !result.ok).map((result) => result.text()))
-  return { ok: results.some((result) => result.ok), error: failed.length ? failed.join(' | ') : undefined }
+  const failed = results.filter((result) => !result.ok)
+  return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
 }
 
 async function waitForTwitchIrc() {
@@ -2061,10 +2346,18 @@ function loadSettings(): AppSettings {
       ignoreMissingJwt: parsed.ignoreMissingJwt === true,
       dropOldAlerts: parsed.dropOldAlerts === true,
       streamInfo: loadStreamInfo(parsed.streamInfo),
+      youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
     }
   } catch {
-    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo() }
+    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
   }
+}
+
+function loadYouTubeQuota(value: unknown): YoutubeQuota {
+  if (!value || typeof value !== 'object') return { day: '', used: 0 }
+  const item = value as Partial<YoutubeQuota>
+  const limit = item.limit != null ? Math.floor(Number(item.limit) || 0) : 0
+  return { day: String(item.day || ''), used: Math.max(0, Math.floor(Number(item.used) || 0)), ...(limit > 0 ? { limit } : {}) }
 }
 
 function openInDefaultBrowser(url: string) {

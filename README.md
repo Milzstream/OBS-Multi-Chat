@@ -71,7 +71,9 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 The app requests YouTube read access and YouTube live metadata/chat access.
 
-YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase.
+YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
+
+The console prints the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). Use the **YouTube Data API v3 → Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the large “All quotas & system limits” count (for example `1,247`) — that is how many quota rows exist, not units used. Optionally type `35` or `35/10000` and press Enter at any time; logging does not wait. After that, the dock estimates forward from this app’s official API calls. A warning appears around 80% and when the daily cap is reached. InnerTube chat does not count against quota.
 
 Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection on a slow interval (about 3 minutes while offline, much less often while live), a one-shot history seed when a new live chat appears, sending and deleting messages, and a slow official chat fallback only if InnerTube fails. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
 
