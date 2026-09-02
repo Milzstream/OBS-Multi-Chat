@@ -34,7 +34,7 @@ type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; use
 type StreamDetails = { title: string; category: string; categoryId?: string }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
-type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean }
+type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails> }
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean }
 
 const port = Number(process.env.PORT || 4173)
@@ -157,7 +157,10 @@ function loadChat(): ChatMessage[] {
 
 const state: State = {
   accounts: (['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => ({ platform, connected: Boolean(tokens[platform]), live: false, viewers: 0, handle: tokens[platform]?.user || '' })),
-  streamInfo: { Twitch: { title: '', category: '' }, Kick: { title: '', category: '' } },
+  streamInfo: {
+    Twitch: { ...settings.streamInfo.Twitch },
+    Kick: { ...settings.streamInfo.Kick },
+  },
   messages: loadChat(),
   health: { Twitch: emptyHealth(), Kick: emptyHealth(), YouTube: emptyHealth() },
   activity: activityStore.list(),
@@ -254,7 +257,10 @@ app.post('/api/stream-info/:platform', async (request, response) => {
   const { title, category, categoryId } = request.body as Partial<StreamDetails>
   const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}) }
   const result = await updateStreamInfo(platform, details)
-  if (result.ok) state.streamInfo[platform] = details
+  if (result.ok) {
+    state.streamInfo[platform] = details
+    persistStreamInfo()
+  }
   broadcast()
   response.json({ streamInfo: state.streamInfo, results: [result] })
 })
@@ -262,7 +268,13 @@ app.post('/api/stream-info', async (request, response) => {
   const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
   const detailsByPlatform = { Twitch: { category: '', ...Twitch, title: String(title || '').trim() }, Kick: { category: '', ...Kick, title: String(title || '').trim() } }
   const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
-  for (const result of results) if (result.ok) state.streamInfo[result.platform] = detailsByPlatform[result.platform]
+  let changed = false
+  for (const result of results) {
+    if (!result.ok) continue
+    state.streamInfo[result.platform] = detailsByPlatform[result.platform]
+    changed = true
+  }
+  if (changed) persistStreamInfo()
   broadcast()
   response.json({ streamInfo: state.streamInfo, results })
 })
@@ -336,7 +348,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
   if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes') }
   if (platform === 'Kick') void kickChat.stop()
-  if (platform === 'YouTube') { youtubeTargets = []; void youtubeChat.stop() }
+  if (platform === 'YouTube') { setYouTubeTargets([]); void youtubeChat.stop() }
   broadcast()
   response.json({ ok: true })
 })
@@ -1481,6 +1493,7 @@ async function pollLiveState() {
     else setHealth('Kick', 'warn', 'Kick status poll failed')
   }
   if (kickWasLive && !kickAccount?.live) youtubeForceStatus = true
+  persistStreamInfo()
   refreshChatHealth()
   broadcast()
 }
@@ -1493,11 +1506,11 @@ async function pollTwitch() {
   const stream = streams.data?.[0]
   Object.assign(account, { live: Boolean(stream), viewers: stream?.viewer_count || 0, handle: token.user || account.handle })
   if (stream) {
-    state.streamInfo.Twitch = { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined }
+    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined })
   } else {
     const channel = await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token)
     const info = channel.data?.[0]
-    if (info) state.streamInfo.Twitch = { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined }
+    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined })
   }
   void ensureTwitchBadges()
   ensureTwitchChat()
@@ -1573,16 +1586,23 @@ async function pollYouTubeStatus(token: Token) {
   if (!youtubeQuotaBlocked() && (looksLikePlaceholder(token.user || '') || token.user === 'YouTube' || !token.channelId)) {
     try { await hydrateYouTubeToken(token); saveTokens() } catch (error) { if (!noteYouTubeQuota(error)) console.error('YouTube profile:', error instanceof Error ? error.message : error) }
   }
-  labelYouTubeChats(liveItems, [])
-  const chatIds = [...new Set(liveItems.map((item: any) => item.snippet?.liveChatId || item.contentDetails?.activeLiveChatId).filter(Boolean))] as string[]
-  token.liveChatIds = chatIds
-  token.liveChatId = chatIds[0]
-  youtubeTargets = liveItems.map((item: any) => {
+  const previous = youtubeTargets
+  const next = liveItems.map((item: any) => {
     const chatId = item.snippet?.liveChatId || item.contentDetails?.activeLiveChatId
-    return { videoId: String(item.id), liveChatId: chatId ? String(chatId) : undefined, label: chatId ? youtubeChatLabels.get(chatId) : undefined }
+    const videoId = String(item.id)
+    const existing = previous.find((target) => target.videoId === videoId)
+    return {
+      videoId,
+      liveChatId: chatId ? String(chatId) : undefined,
+      title: String(item.snippet?.title || existing?.title || ''),
+    }
   }).filter((item: YouTubeChatTarget) => item.videoId)
+  setYouTubeTargets(next)
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
-  if (liveItems.length) console.log(`YouTube lives: ${liveItems.length} chat(s)`)
+  if (liveItems.length) {
+    const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
+    console.log(`YouTube lives: ${liveItems.length} chat(s)${labels.length ? ` (${labels.join(', ')})` : ''}`)
+  }
   if (!youtubeTargets.length) {
     youtubeHistorySeeded.clear()
     await youtubeChat.stop()
@@ -1595,7 +1615,7 @@ async function discoverYouTubeLive(token: Token) {
   const found = await youtubeChat.discoverLive({ channelId: token.channelId, handle: token.user })
   if (!found) {
     if (!youtubeChat.connected) {
-      youtubeTargets = []
+      setYouTubeTargets([])
       youtubeHistorySeeded.clear()
       await youtubeChat.stop()
       Object.assign(account, { live: false, viewers: 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle })
@@ -1603,7 +1623,7 @@ async function discoverYouTubeLive(token: Token) {
     return
   }
   const existing = youtubeTargets.find((item) => item.videoId === found.videoId)
-  youtubeTargets = existing ? youtubeTargets : [{ videoId: found.videoId, liveChatId: token.liveChatId, label: youtubeTargets.length ? 'Live' : undefined }]
+  if (!existing) setYouTubeTargets([{ videoId: found.videoId, liveChatId: token.liveChatId, title: found.title }])
   Object.assign(account, { live: true, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(Number.isFinite(found.viewers) ? { viewers: found.viewers } : {}) })
   lastYouTubeViewersAt = 0
 }
@@ -1612,12 +1632,25 @@ async function refreshYouTubeViewers() {
   if (!youtubeTargets.length) return
   if (lastYouTubeViewersAt && Date.now() - lastYouTubeViewersAt < YOUTUBE_VIEWERS_MS) return
   lastYouTubeViewersAt = Date.now()
-  const counts = (await Promise.all(youtubeTargets.map((target) => youtubeChat.viewers(target.videoId)))).filter((count): count is number => Number.isFinite(count))
+  const pages = await Promise.all(youtubeTargets.map(async (target) => ({ target, info: await youtubeChat.pageInfo(target.videoId) })))
+  const previousLabels = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',')
+  for (const { target, info } of pages) {
+    if (info?.title) target.title = info.title
+  }
+  relabelYouTubeTargets()
+  const labelsChanged = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',') !== previousLabels
+  if (labelsChanged) {
+    const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
+    if (labels.length) console.log(`YouTube chats: ${labels.join(', ')}`)
+    retagYouTubeMessages()
+    await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage)
+  }
+  const counts = pages.map((item) => item.info?.viewers).filter((count): count is number => Number.isFinite(count))
   if (!counts.length) return
   const viewers = counts.reduce((total, count) => total + count, 0)
   const account = state.accounts.find((item) => item.platform === 'YouTube')
   if (!account) return
-  if (account.viewers === viewers && account.live) return
+  if (account.viewers === viewers && account.live && !labelsChanged) return
   Object.assign(account, { live: true, viewers })
 }
 
@@ -1678,24 +1711,45 @@ async function pollYouTubeOfficialChat(token: Token) {
   }
 }
 
-function labelYouTubeChats(liveItems: any[], videos: any[]) {
+function youtubeTitleIsShorts(title?: string) {
+  return /#shortsfeed\b/i.test(title || '')
+}
+
+function relabelYouTubeTargets() {
   youtubeChatLabels.clear()
-  const rows = liveItems.map((item) => {
-    const chatId = item.snippet?.liveChatId || item.contentDetails?.activeLiveChatId
-    const video = videos.find((entry: any) => entry.id === item.id)
-    const title = String(item.snippet?.title || video?.snippet?.title || '')
-    const viewers = Number(video?.liveStreamingDetails?.concurrentViewers || 0)
-    return { chatId, title, viewers }
-  }).filter((row) => row.chatId)
-  const topViewers = Math.max(0, ...rows.map((row) => row.viewers))
-  for (const row of rows) {
-    const shorts = /short/i.test(row.title) || (rows.length > 1 && row.viewers < topViewers)
-    youtubeChatLabels.set(row.chatId, shorts ? 'Shorts' : 'Live')
+  const multi = youtubeTargets.length > 1 && youtubeTargets.some((target) => youtubeTitleIsShorts(target.title))
+  for (const target of youtubeTargets) {
+    target.label = multi ? (youtubeTitleIsShorts(target.title) ? 'Shorts' : 'Live') : undefined
+    if (target.liveChatId && target.label) youtubeChatLabels.set(target.liveChatId, target.label)
   }
-  if (rows.length > 1 && [...youtubeChatLabels.values()].every((label) => label === 'Live')) {
-    const secondary = rows.slice().sort((left, right) => right.viewers - left.viewers)[1]
-    if (secondary?.chatId) youtubeChatLabels.set(secondary.chatId, 'Shorts')
-  }
+}
+
+function youtubeSourceLabel(sourceId?: string) {
+  if (!sourceId || youtubeTargets.length <= 1) return
+  const target = youtubeTargets.find((item) => item.liveChatId === sourceId || item.videoId === sourceId)
+  return target?.label || youtubeChatLabels.get(sourceId)
+}
+
+function retagYouTubeMessages() {
+  let changed = false
+  const next = state.messages.map((message) => {
+    const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
+    if (!youtube) return message
+    const label = youtubeSourceLabel(message.sourceId)
+    if (message.sourceLabel === label) return message
+    changed = true
+    return { ...message, sourceLabel: label }
+  })
+  if (!changed) return false
+  state.messages = next
+  persistChat()
+  return true
+}
+
+function setYouTubeTargets(targets: YouTubeChatTarget[]) {
+  youtubeTargets = targets
+  relabelYouTubeTargets()
+  retagYouTubeMessages()
 }
 
 async function pollKick() {
@@ -1719,13 +1773,7 @@ async function pollKick() {
     saveTokens()
   }
   Object.assign(account, { live: Boolean(channel?.stream?.is_live), viewers: Number(channel?.stream?.viewer_count || 0), handle: slug || account.handle })
-  if (channel) {
-    state.streamInfo.Kick = {
-      title: channel.stream_title || state.streamInfo.Kick.title,
-      category: channel.category?.name || state.streamInfo.Kick.category,
-      ...(channel.category?.id ? { categoryId: String(channel.category.id) } : {}),
-    }
-  }
+  if (channel) state.streamInfo.Kick = applyLiveStreamDetails(state.streamInfo.Kick, kickStreamDetails(channel))
   if (slug) startKickChat(slug)
   else await kickChat.stop()
 }
@@ -1940,12 +1988,82 @@ function broadcast() {
   for (const client of clients) client.write(payload)
 }
 function loadTokens(): Partial<Record<TokenPlatform, Token>> { try { return JSON.parse(fs.readFileSync(tokenFile, 'utf8')) } catch { return {} } }
+function emptyStreamDetails(): StreamDetails {
+  return { title: '', category: '' }
+}
+
+function emptyStreamInfo(): Record<StreamPlatform, StreamDetails> {
+  return { Twitch: emptyStreamDetails(), Kick: emptyStreamDetails() }
+}
+
+function normalizeStreamDetails(value: unknown): StreamDetails {
+  if (!value || typeof value !== 'object') return emptyStreamDetails()
+  const item = value as Partial<StreamDetails>
+  const title = String(item.title || '').trim()
+  const category = String(item.category || '').trim()
+  const categoryId = item.categoryId != null && String(item.categoryId).trim() ? String(item.categoryId).trim() : undefined
+  return { title, category, ...(categoryId ? { categoryId } : {}) }
+}
+
+function loadStreamInfo(value: unknown): Record<StreamPlatform, StreamDetails> {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return { Twitch: normalizeStreamDetails(raw.Twitch), Kick: normalizeStreamDetails(raw.Kick) }
+}
+
+function isMoreSpecificCategory(specific: string, general: string) {
+  const a = specific.trim().toLowerCase()
+  const b = general.trim().toLowerCase()
+  if (!a || !b || a === b || !a.startsWith(b)) return false
+  const next = a[b.length]
+  return next === ' ' || next === ':' || next === '-' || next === '('
+}
+
+function applyLiveStreamDetails(current: StreamDetails, live: StreamDetails): StreamDetails {
+  const title = (live.title || current.title || '').trim()
+  const liveCategory = (live.category || '').trim()
+  const currentCategory = (current.category || '').trim()
+  if (!liveCategory) return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
+  if (isMoreSpecificCategory(currentCategory, liveCategory)) {
+    return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
+  }
+  return { title, category: liveCategory, ...(live.categoryId ? { categoryId: live.categoryId } : current.categoryId ? { categoryId: current.categoryId } : {}) }
+}
+
+function kickStreamDetails(channel: any): StreamDetails {
+  const candidates = [
+    channel?.category,
+    channel?.subcategory,
+    channel?.livestream?.category,
+    ...(Array.isArray(channel?.livestream?.categories) ? channel.livestream.categories : []),
+  ]
+  let best: { name: string; id?: string } | undefined
+  for (const item of candidates) {
+    const name = String(item?.name || '').trim()
+    const id = item?.id != null && String(item.id).trim() ? String(item.id) : undefined
+    if (!name) continue
+    if (!best || isMoreSpecificCategory(name, best.name) || (id && !best.id && name.toLowerCase() === best.name.toLowerCase())) best = { name, id }
+  }
+  return { title: String(channel?.stream_title || '').trim(), category: best?.name || '', ...(best?.id ? { categoryId: best.id } : {}) }
+}
+
+function persistStreamInfo() {
+  const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick } }
+  if (JSON.stringify(settings.streamInfo) === JSON.stringify(next)) return
+  settings.streamInfo = next
+  saveSettings()
+}
+
 function loadSettings(): AppSettings {
   try {
     const parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf8')) as Partial<AppSettings>
-    return { activityFallback: parsed.activityFallback !== false, ignoreMissingJwt: parsed.ignoreMissingJwt === true, dropOldAlerts: parsed.dropOldAlerts === true }
+    return {
+      activityFallback: parsed.activityFallback !== false,
+      ignoreMissingJwt: parsed.ignoreMissingJwt === true,
+      dropOldAlerts: parsed.dropOldAlerts === true,
+      streamInfo: loadStreamInfo(parsed.streamInfo),
+    }
   } catch {
-    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false }
+    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo() }
   }
 }
 

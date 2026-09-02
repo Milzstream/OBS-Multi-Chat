@@ -247,14 +247,12 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
   return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} />{open && options.length > 0 && <ul className="category-options">{options.slice(0, 8).map((option) => <li key={option.id}><button type="button" onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
 }
 
-function seedStreamDetails(details: StreamDetailsByPlatform): StreamDetailsByPlatform {
-  const twitch = details.Twitch.category.trim()
-  const kick = details.Kick.category.trim()
-  const source = twitch || kick
-  return {
-    Twitch: { ...details.Twitch, category: twitch || source },
-    Kick: { ...details.Kick, category: kick || source },
-  }
+function isMoreSpecificCategory(specific: string, general: string) {
+  const a = specific.trim().toLowerCase()
+  const b = general.trim().toLowerCase()
+  if (!a || !b || a === b || !a.startsWith(b)) return false
+  const next = a[b.length]
+  return next === ' ' || next === ':' || next === '-' || next === '('
 }
 
 function bestCategoryMatch(query: string, options: CategoryOption[]) {
@@ -262,10 +260,21 @@ function bestCategoryMatch(query: string, options: CategoryOption[]) {
   if (!options.length) return
   const exact = options.find((option) => option.name.toLowerCase() === lower)
   if (exact) return exact
-  return options.filter((option) => {
-    const name = option.name.toLowerCase()
-    return name.startsWith(lower) || lower.startsWith(name) || name.includes(lower) || lower.includes(name)
-  }).sort((left, right) => Math.abs(left.name.length - query.length) - Math.abs(right.name.length - query.length))[0] || options[0]
+  const moreSpecific = options.filter((option) => isMoreSpecificCategory(option.name, query))
+    .sort((left, right) => left.name.length - right.name.length)
+  if (moreSpecific.length) return moreSpecific[0]
+  const containsQuery = options.filter((option) => option.name.toLowerCase().includes(lower))
+    .sort((left, right) => Math.abs(left.name.length - query.length) - Math.abs(right.name.length - query.length))
+  return containsQuery[0]
+}
+
+function applyResolvedCategory(current: StreamDetails, match?: CategoryOption): StreamDetails {
+  if (!match) return current
+  const currentName = current.category.trim()
+  if (!currentName) return { ...current, category: match.name, categoryId: match.id }
+  if (match.name.toLowerCase() === currentName.toLowerCase()) return { ...current, category: match.name, categoryId: match.id }
+  if (isMoreSpecificCategory(currentName, match.name)) return current
+  return { ...current, category: match.name, categoryId: match.id }
 }
 
 async function resolveCategory(platform: StreamPlatform, query: string) {
@@ -282,7 +291,7 @@ async function resolveCategory(platform: StreamPlatform, query: string) {
 
 function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; message: string }>; onClose: () => void }) {
   const [draftTitle, setDraftTitle] = useState(title || details.Twitch.title || details.Kick.title)
-  const [draftDetails, setDraftDetails] = useState(() => seedStreamDetails(details))
+  const [draftDetails, setDraftDetails] = useState(details)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
   const editedRef = useRef(false)
@@ -294,18 +303,17 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   useEffect(() => {
     if (editedRef.current) return
     setDraftTitle(title || details.Twitch.title || details.Kick.title)
-    setDraftDetails(seedStreamDetails(details))
+    setDraftDetails(details)
     let cancelled = false
     void (async () => {
-      const seeded = seedStreamDetails(details)
       const [twitchMatch, kickMatch] = await Promise.all([
-        seeded.Twitch.categoryId ? undefined : resolveCategory('Twitch', seeded.Twitch.category),
-        seeded.Kick.categoryId ? undefined : resolveCategory('Kick', seeded.Kick.category),
+        details.Twitch.categoryId || !details.Twitch.category.trim() ? undefined : resolveCategory('Twitch', details.Twitch.category),
+        details.Kick.categoryId || !details.Kick.category.trim() ? undefined : resolveCategory('Kick', details.Kick.category),
       ])
       if (cancelled || editedRef.current) return
       setDraftDetails((current) => ({
-        Twitch: twitchMatch ? { ...current.Twitch, category: twitchMatch.name, categoryId: twitchMatch.id } : current.Twitch,
-        Kick: kickMatch ? { ...current.Kick, category: kickMatch.name, categoryId: kickMatch.id } : current.Kick,
+        Twitch: applyResolvedCategory(current.Twitch, twitchMatch),
+        Kick: applyResolvedCategory(current.Kick, kickMatch),
       }))
     })()
     return () => { cancelled = true }
