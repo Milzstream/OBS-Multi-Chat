@@ -24,7 +24,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - Server-side token persistence in the local `data/tokens.json` file
 - Chat history persistence in `data/chat.json` (last 200 messages) so a backend restart does not empty the dock
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
-- YouTube live detection, viewer count, and live-chat reading
+- YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
 - Unified Twitch + Kick stream title/category controls
@@ -71,9 +71,13 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 The app requests YouTube read access and YouTube live metadata/chat access.
 
-YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase.
+YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
+
+The console prints the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). Use the **YouTube Data API v3 → Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the large “All quotas & system limits” count (for example `1,247`) — that is how many quota rows exist, not units used. Optionally type `35` or `35/10000` and press Enter at any time; logging does not wait. After that, the dock estimates forward from this app’s official API calls. A warning appears around 80% and when the daily cap is reached. InnerTube chat does not count against quota.
 
 Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection on a slow interval (about 3 minutes while offline, much less often while live), a one-shot history seed when a new live chat appears, sending and deleting messages, and a slow official chat fallback only if InnerTube fails. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
+
+If you are live on both a regular YouTube stream and a Shorts stream at the same time, put `#shortsfeed` in the **Shorts** stream title (not the horizontal one). Chat from that title is tagged **Shorts**; the other YouTube chat is tagged **Live**. The dock reads the title only and does not spend extra API quota to guess which chat is which. If `#shortsfeed` is not in any live title, the Live/Shorts tags stay hidden.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
 

@@ -16,7 +16,7 @@ export type YouTubeChatMessage = {
   preload?: boolean
 }
 
-export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string }
+export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string; title?: string }
 
 type Session = { videoId: string; apiKey: string; clientVersion: string; continuation: string; visitorData?: string }
 
@@ -82,6 +82,19 @@ function parseYouTubeViewers(html: string) {
   if (runs) return Number(runs.replace(/,/g, ''))
   const details = html.match(/"videoDetails":\{[^}]{0,400}"viewCount":"(\d+)"/)?.[1]
   if (details) return Number(details)
+}
+
+function unescapeYouTubeText(value: string) {
+  return value.replace(/\\"/g, '"').replace(/\\u0026/g, '&').replace(/&amp;/g, '&')
+}
+
+function parseYouTubeTitle(html: string) {
+  const details = html.match(/"videoDetails":\{[^}]{0,1200}"title":"((?:\\.|[^"\\])*)"/)
+  if (details?.[1]) return unescapeYouTubeText(details[1]).trim()
+  const meta = html.match(/<meta name="title" content="([^"]+)"/i)?.[1]
+    || html.match(/<title>([^<]+)<\/title>/i)?.[1]
+  if (!meta) return
+  return unescapeYouTubeText(meta).replace(/\s*-\s*YouTube\s*$/i, '').trim()
 }
 
 function runsToParts(runs: any[]): YouTubeChatMessage['parts'] {
@@ -278,7 +291,7 @@ async function pollLiveChat(session: Session) {
 }
 
 export class YouTubeLiveChat {
-  private loops = new Map<string, { stop: () => void }>()
+  private loops = new Map<string, { stop: () => void; target: YouTubeChatTarget }>()
   private onMessage?: (message: YouTubeChatMessage, target: YouTubeChatTarget) => void
   private closed = true
   private lastOk = 0
@@ -291,6 +304,10 @@ export class YouTubeLiveChat {
   async start(targets: YouTubeChatTarget[], onMessage: (message: YouTubeChatMessage, target: YouTubeChatTarget) => void) {
     this.onMessage = onMessage
     this.closed = false
+    for (const target of targets) {
+      const existing = this.loops.get(target.videoId)
+      if (existing) existing.target = target
+    }
     const nextKey = targets.map((target) => target.videoId).sort().join(',')
     const current = [...this.loops.keys()].sort().join(',')
     if (nextKey === current && nextKey) return
@@ -318,41 +335,49 @@ export class YouTubeLiveChat {
       const html = await fetchHtml(url) || await fetchHtmlWithBrowser(url)
       if (!html) continue
       const videoId = extractVideoId(html)
-      if (videoId) return { videoId, viewers: parseYouTubeViewers(html) }
+      if (videoId) return { videoId, viewers: parseYouTubeViewers(html), title: parseYouTubeTitle(html) }
     }
   }
 
   async viewers(videoId: string) {
-    const html = await fetchHtml(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)
-      || await fetchHtmlWithBrowser(`https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`)
+    const info = await this.pageInfo(videoId)
+    return info?.viewers
+  }
+
+  async pageInfo(videoId: string): Promise<{ viewers?: number; title?: string } | undefined> {
+    const watch = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
+    const html = await fetchHtml(watch) || await fetchHtmlWithBrowser(watch)
     if (!html) return
-    return parseYouTubeViewers(html)
+    return { viewers: parseYouTubeViewers(html), title: parseYouTubeTitle(html) }
   }
 
   private spawn(target: YouTubeChatTarget) {
     let stopped = false
-    const stop = () => {
-      stopped = true
-      this.loops.delete(target.videoId)
+    const loop = {
+      target,
+      stop: () => {
+        stopped = true
+        this.loops.delete(loop.target.videoId)
+      },
     }
-    this.loops.set(target.videoId, { stop })
-    void this.run(target, () => stopped || this.closed)
+    this.loops.set(target.videoId, loop)
+    void this.run(loop, () => stopped || this.closed)
   }
 
-  private async run(target: YouTubeChatTarget, stopped: () => boolean) {
+  private async run(loop: { target: YouTubeChatTarget }, stopped: () => boolean) {
     while (!stopped()) {
       try {
-        const loaded = await loadLivePage(target.videoId)
+        const loaded = await loadLivePage(loop.target.videoId)
         if (!loaded) throw new Error('live chat page missing continuation')
         const { session } = loaded
         this.failures = 0
         this.lastOk = Date.now()
-        for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, target)
+        for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, loop.target)
         let firstPoll = true
         while (!stopped()) {
           const payload = await pollLiveChat(session)
-          const messages = parseActions(payload, target.videoId)
-          for (const message of messages) this.onMessage?.(firstPoll ? { ...message, preload: true } : message, target)
+          const messages = parseActions(payload, loop.target.videoId)
+          for (const message of messages) this.onMessage?.(firstPoll ? { ...message, preload: true } : message, loop.target)
           firstPoll = false
           const next = nextContinuation(payload)
           if (next.ended || !next.continuation) throw new Error('live chat ended')
@@ -364,7 +389,7 @@ export class YouTubeLiveChat {
       } catch (error) {
         if (stopped()) return
         this.failures += 1
-        console.error(`YouTube InnerTube (${target.videoId}):`, error instanceof Error ? error.message : error)
+        console.error(`YouTube InnerTube (${loop.target.videoId}):`, error instanceof Error ? error.message : error)
         await wait(Math.min(20_000, 2_000 * 2 ** Math.min(this.failures, 4)))
       }
     }
