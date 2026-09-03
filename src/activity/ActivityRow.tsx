@@ -1,4 +1,5 @@
 import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, Youtube, Zap } from 'lucide-react'
+import { activitySubtitle, kindLabel } from './format'
 
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
@@ -22,18 +23,6 @@ export const platformColor: Record<ActivityPlatform, string> = {
   Kick: '#62c554',
   YouTube: '#ff5b62',
   StreamElements: '#f3af61',
-}
-
-const kindLabel: Record<ActivityKind, string> = {
-  follow: 'FOLLOW',
-  subscription: 'SUBSCRIPTION',
-  gift: 'GIFT',
-  cheer: 'CHEER',
-  raid: 'RAID',
-  donation: 'DONATION',
-  membership: 'MEMBER',
-  superchat: 'SUPER CHAT',
-  merch: 'MERCH',
 }
 
 function kindColor(event: ActivityEvent) {
@@ -63,15 +52,6 @@ function KindIcon({ kind }: { kind: ActivityKind }) {
   return <Heart size={size} />
 }
 
-function subtitle(event: ActivityEvent) {
-  const bits: string[] = []
-  if (event.amount) bits.push(event.amount)
-  if (event.months) bits.push(`${event.months} mo`)
-  if (event.viewers != null) bits.push(`${event.viewers.toLocaleString()} viewers`)
-  if (event.message) bits.push(event.message)
-  return bits.join(' · ')
-}
-
 export function profileHref(event: ActivityEvent) {
   if (event.profileUrl) return event.profileUrl
   const handle = event.user.replace(/^@+/, '').trim()
@@ -90,7 +70,7 @@ export function ActivityRow({ event, age }: { event: ActivityEvent; age: string 
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
-  const detail = subtitle(event)
+  const detail = activitySubtitle(event)
   const href = profileHref(event)
   const openProfile = () => {
     if (!href) return

@@ -48,11 +48,11 @@ async function loadChromium() {
   }
 }
 
-function decodeHtml(value: string) {
+export function decodeHtml(value: string) {
   return value.replace(/\\u0026/g, '&').replace(/\\"/g, '"').replace(/\\\//g, '/')
 }
 
-function extractSession(html: string, videoId: string): Session | undefined {
+export function extractSession(html: string, videoId: string): Session | undefined {
   if (/"isReplay"\s*:\s*true/.test(html)) return
   const apiKey = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
   const clientVersion = html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] || html.match(/"clientVersion":"([\d.]+)"/)?.[1]
@@ -66,14 +66,14 @@ function extractSession(html: string, videoId: string): Session | undefined {
   return { videoId: canonical || videoId, apiKey, clientVersion, continuation, visitorData }
 }
 
-function extractVideoId(html: string) {
+export function extractVideoId(html: string) {
   if (/"isReplay"\s*:\s*true/.test(html) || /LIVE_STREAM_OFFLINE|This live event has ended/i.test(html)) return
   return html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)"/)?.[1]
     || html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
     || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
 }
 
-function parseYouTubeViewers(html: string) {
+export function parseYouTubeViewers(html: string) {
   const watching = html.match(/([\d,.]+)\s+watching now/i)?.[1]
   if (watching) return Number(watching.replace(/,/g, ''))
   const concurrent = html.match(/"concurrentViewers":"(\d+)"/)?.[1]
@@ -84,11 +84,11 @@ function parseYouTubeViewers(html: string) {
   if (details) return Number(details)
 }
 
-function unescapeYouTubeText(value: string) {
+export function unescapeYouTubeText(value: string) {
   return value.replace(/\\"/g, '"').replace(/\\u0026/g, '&').replace(/&amp;/g, '&')
 }
 
-function parseYouTubeTitle(html: string) {
+export function parseYouTubeTitle(html: string) {
   const details = html.match(/"videoDetails":\{[^}]{0,1200}"title":"((?:\\.|[^"\\])*)"/)
   if (details?.[1]) return unescapeYouTubeText(details[1]).trim()
   const meta = html.match(/<meta name="title" content="([^"]+)"/i)?.[1]
@@ -97,7 +97,7 @@ function parseYouTubeTitle(html: string) {
   return unescapeYouTubeText(meta).replace(/\s*-\s*YouTube\s*$/i, '').trim()
 }
 
-function runsToParts(runs: any[]): YouTubeChatMessage['parts'] {
+export function runsToParts(runs: any[]): YouTubeChatMessage['parts'] {
   const parts: NonNullable<YouTubeChatMessage['parts']> = []
   for (const run of runs || []) {
     if (run?.text) parts.push({ type: 'text', text: String(run.text) })
@@ -111,7 +111,7 @@ function runsToParts(runs: any[]): YouTubeChatMessage['parts'] {
   return parts
 }
 
-function authorBadges(renderer: any): YouTubeChatMessage['badges'] {
+export function authorBadges(renderer: any): YouTubeChatMessage['badges'] {
   const badges: NonNullable<YouTubeChatMessage['badges']> = []
   for (const entry of renderer?.authorBadges || []) {
     const badge = entry.liveChatAuthorBadgeRenderer
@@ -125,7 +125,7 @@ function authorBadges(renderer: any): YouTubeChatMessage['badges'] {
   return badges
 }
 
-function classifyChatItem(item: any): { renderer: any; activityKind?: YouTubeChatMessage['activityKind']; amount?: string } | undefined {
+export function classifyChatItem(item: any): { renderer: any; activityKind?: YouTubeChatMessage['activityKind']; amount?: string } | undefined {
   if (item?.liveChatTextMessageRenderer) return { renderer: item.liveChatTextMessageRenderer }
   if (item?.liveChatPaidMessageRenderer) {
     const renderer = item.liveChatPaidMessageRenderer
@@ -168,7 +168,7 @@ function chatActionItems(action: any): any[] {
   return []
 }
 
-function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeChatMessage[] {
+export function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeChatMessage[] {
   const messages: YouTubeChatMessage[] = []
   for (const action of liveChatActions(payload)) {
     for (const raw of chatActionItems(action)) {
@@ -199,7 +199,7 @@ function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeC
   return messages
 }
 
-function nextContinuation(payload: any): { continuation?: string; timeoutMs: number; ended: boolean } {
+export function nextContinuation(payload: any): { continuation?: string; timeoutMs: number; ended: boolean } {
   const items = payload?.continuationContents?.liveChatContinuation?.continuations || []
   for (const item of items) {
     const data = item.timedContinuationData || item.invalidationContinuationData || item.liveChatReplayContinuationData

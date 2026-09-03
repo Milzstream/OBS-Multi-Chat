@@ -11,6 +11,62 @@ import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget } from
 import { spawn } from 'node:child_process'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
+import {
+  CHAT_MAX,
+  YOUTUBE_QUOTA_LIMIT,
+  applyLiveStreamDetails,
+  collapseYouTubeDuplicates,
+  defaultAppSettings,
+  isDailyQuotaHeader,
+  isEndedYouTubeChat,
+  isStoredChatMessage,
+  kickBadges,
+  kickStreamDetails,
+  looksLikePlaceholder,
+  mergeIncomingChat,
+  missingStreamElementsMessage,
+  needsTranslation,
+  nextPacificMidnight,
+  normalizeAvatar,
+  oauthAuthorizeUrl,
+  pacificDate,
+  parseAppSettings,
+  parseKickParts,
+  parseTwitchChatLine,
+  parseYouTubeQuotaInput,
+  partsFromTwitchFragments,
+  quotaFromHeaders,
+  quotaWarnAt,
+  resolveYouTubeLiveChatIds,
+  summarizeApiError,
+  syncYouTubeTokenChatIds,
+  twitchBadgesFromList,
+  twitchEventToActivity,
+  youtubeApiErrorReason,
+  youtubeBadges,
+  youtubeChatLabel,
+  youtubeLiveChatMessageBody,
+  youtubeOfficialToActivity,
+  youtubeQuotaCost,
+  youtubeQuotaHealthStatus,
+  youtubeQuotaLabel,
+  youtubeSendGuard,
+} from './logic.js'
+import type {
+  Account,
+  AppSettings,
+  ChatMessage,
+  Health,
+  MessagePart,
+  Platform,
+  StreamDetails,
+  StreamElementsStatus,
+  StreamPlatform,
+  Token,
+  TokenPlatform,
+  YoutubeQuota,
+  YoutubeQuotaStatus,
+} from './types.js'
 
 process.removeAllListeners('warning')
 process.on('warning', (warning) => {
@@ -23,20 +79,6 @@ const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
 dotenv.config({ path: envPath })
 
-type Platform = 'Twitch' | 'Kick' | 'YouTube'
-type TokenPlatform = Platform | 'StreamElements'
-type StreamPlatform = 'Twitch' | 'Kick'
-type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[]; provider?: string }
-type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
-type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
-type ChatBadge = { title: string; url?: string; label?: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
-type StreamDetails = { title: string; category: string; categoryId?: string }
-type Health = { status: 'ok' | 'warn' | 'down'; message: string }
-type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
-type YoutubeQuota = { day: string; used: number; limit?: number }
-type YoutubeQuotaStatus = { used: number; limit: number }
-type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
@@ -47,7 +89,6 @@ const dataDir = path.resolve(process.env.RELAY_DATA_DIR || './data')
 const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
-const CHAT_MAX = 200
 const settings = loadSettings()
 const activityStore = createActivityStore(path.join(dataDir, 'activity.json'))
 if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
@@ -68,7 +109,6 @@ let twitchAvatarTimer: NodeJS.Timeout | undefined
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const youtubeChat = new YouTubeLiveChat()
-const YOUTUBE_QUOTA_LIMIT = 10_000
 let youtubeQuotaLimit = YOUTUBE_QUOTA_LIMIT
 let youtubeQuotaBlockedUntil = 0
 let youtubeQuotaUsed = 0
@@ -95,54 +135,14 @@ function beginYouTubeHydration() {
 }
 
 function collapseYouTubeHydrationDuplicates() {
-  const kept: ChatMessage[] = []
-  let changed = false
-  for (const message of state.messages) {
-    const at = Date.parse(message.time) || 0
-    const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
-    const match = youtube ? kept.findIndex((item) => {
-      if (foldChatText(item) !== foldChatText(message)) return false
-      if (!(item.platform === 'YouTube' || (item.platforms || []).includes('YouTube'))) return false
-      if (!youtubeSameAuthor(item, message)) return false
-      if (!youtubeSameChat(item.sourceId, message.sourceId)) return false
-      const delta = Math.abs((Date.parse(item.time) || 0) - at)
-      return delta <= 2_000
-    }) : -1
-    if (match < 0) {
-      kept.push(message)
-      continue
-    }
-    changed = true
-    const current = kept[match]
-    const platforms = [...new Set([...(current.platforms || [current.platform]), ...(message.platforms || [message.platform])])]
-    kept[match] = {
-      ...current,
-      platforms,
-      platform: platforms[0],
-      sourceId: current.sourceId || message.sourceId,
-      userId: current.userId || message.userId,
-      ingest: message.ingest || current.ingest,
-      parts: current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts,
-      avatar: current.avatar || message.avatar,
-      badges: sortedYouTubeBadges(current.badges?.length ? current.badges : message.badges),
-      color: current.color || message.color,
-      sourceLabel: current.sourceLabel || message.sourceLabel,
-    }
-    if (current.id) youtubeSeen.add(current.id)
-    if (message.id) youtubeSeen.add(message.id)
-  }
-  if (!changed) return
-  state.messages = kept
+  const result = collapseYouTubeDuplicates(state.messages, youtubeTargets)
+  if (!result.changed) return
+  for (const id of result.seenIds) youtubeSeen.add(id)
+  state.messages = result.messages
   persistChat()
   broadcast()
 }
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
-
-function isStoredChatMessage(value: unknown): value is ChatMessage {
-  if (!value || typeof value !== 'object') return false
-  const item = value as ChatMessage
-  return Boolean(item.id) && (item.platform === 'Twitch' || item.platform === 'Kick' || item.platform === 'YouTube') && typeof item.user === 'string' && typeof item.text === 'string' && typeof item.time === 'string'
-}
 
 function rememberYouTubeFromChat(messages: ChatMessage[]) {
   for (const item of messages) {
@@ -457,18 +457,8 @@ function authorizationUrl(platform: Platform) {
   const stateValue = crypto.randomBytes(24).toString('hex')
   const codeVerifier = platform === 'Kick' ? crypto.randomBytes(32).toString('base64url') : undefined
   oauthStates.set(stateValue, { platform, createdAt: Date.now(), codeVerifier })
-  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', state: stateValue })
-  if (platform === 'Twitch') {
-    params.set('scope', 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read')
-    params.set('force_verify', 'true')
-  }
-  if (platform === 'Kick') {
-    params.set('scope', 'user:read channel:read channel:write chat:write events:subscribe moderation:ban moderation:chat_message:manage')
-    params.set('code_challenge', crypto.createHash('sha256').update(codeVerifier!).digest('base64url'))
-    params.set('code_challenge_method', 'S256')
-  }
-  if (platform === 'YouTube') { params.set('access_type', 'offline'); params.set('prompt', 'consent'); params.set('scope', 'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl') }
-  return platform === 'Twitch' ? `https://id.twitch.tv/oauth2/authorize?${params}` : platform === 'Kick' ? `https://id.kick.com/oauth/authorize?${params}` : `https://accounts.google.com/o/oauth2/v2/auth?${params}`
+  const codeChallenge = platform === 'Kick' ? crypto.createHash('sha256').update(codeVerifier!).digest('base64url') : undefined
+  return oauthAuthorizeUrl(platform, { clientId, redirectUri, state: stateValue, codeChallenge })
 }
 
 async function exchangeCode(platform: Platform, code: string, codeVerifier?: string): Promise<Token> {
@@ -566,19 +556,6 @@ async function fetchTimed(url: string, options: RequestInit = {}, ms = 8_000) {
   }
 }
 
-function summarizeApiError(status: number, text: string) {
-  if (/504|Gateway Timeout/i.test(text) || status === 504) return 'Gateway Timeout (Twitch CDN busy)'
-  if (/502|Bad Gateway/i.test(text) || status === 502) return 'Bad Gateway'
-  if (/503|Service Unavailable/i.test(text) || status === 503) return 'Service Unavailable'
-  try {
-    const json = JSON.parse(text) as { message?: string; error?: string }
-    return json.message || json.error || `HTTP ${status}`
-  } catch {
-    const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    return plain.slice(0, 160) || `HTTP ${status}`
-  }
-}
-
 async function twitchApi(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<any> {
   let response: Response
   try {
@@ -603,43 +580,12 @@ async function twitchApi(endpoint: string, token: Token, options: RequestInit = 
   return text ? JSON.parse(text) : {}
 }
 
-function nextPacificMidnight(now = Date.now()) {
-  for (let t = now + 60_000; t <= now + 36 * 3600_000; t += 60_000) {
-    const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(new Date(t)))
-    const minute = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', minute: 'numeric' }).format(new Date(t)))
-    if (hour === 0 && minute === 0) return t
-  }
-  return now + 24 * 60 * 60 * 1000
-}
-
-function pacificDate(now = Date.now()) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now))
-}
-
 function youtubeQuotaBlocked() {
   return Date.now() < youtubeQuotaBlockedUntil
 }
 
-function youtubeQuotaCost(endpoint: string, method = 'GET') {
-  const path = endpoint.split('?')[0].replace(/^\//, '')
-  if (path.startsWith('liveChat/bans')) return 50
-  if (path.startsWith('liveChat/messages')) return 5
-  return 1
-}
-
-function youtubeQuotaLabel(endpoint: string, method = 'GET') {
-  const path = endpoint.split('?')[0].replace(/^\//, '')
-  const verb = method.toUpperCase()
-  if (path.startsWith('liveChat/bans')) return verb === 'DELETE' ? 'liveChatBans.delete' : 'liveChatBans.insert'
-  if (path.startsWith('liveChat/messages')) return verb === 'POST' ? 'liveChatMessages.insert' : verb === 'DELETE' ? 'liveChatMessages.delete' : 'liveChatMessages.list'
-  if (path.startsWith('liveBroadcasts')) return 'liveBroadcasts.list'
-  if (path.startsWith('channels')) return 'channels.list'
-  if (path.startsWith('videos')) return 'videos.list'
-  return `${path} ${verb}`
-}
-
 function youtubeQuotaWarnAt() {
-  return Math.floor(youtubeQuotaLimit * 0.8)
+  return quotaWarnAt(youtubeQuotaLimit)
 }
 
 function youtubeQuotaSnapshot(): YoutubeQuotaStatus {
@@ -669,13 +615,7 @@ function ensureYouTubeQuotaDay() {
 
 function youtubeQuotaHealth(): Health | undefined {
   ensureYouTubeQuotaDay()
-  if (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit) {
-    return { status: 'warn', message: `YouTube API quota reached (${Math.min(youtubeQuotaUsed, youtubeQuotaLimit).toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}) — using site chat until midnight Pacific` }
-  }
-  if (youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
-    const percent = Math.min(99, Math.round((youtubeQuotaUsed / youtubeQuotaLimit) * 100))
-    return { status: 'warn', message: `YouTube API quota ${percent}% used (${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}) — sending and moderation still use official API` }
-  }
+  return youtubeQuotaHealthStatus(youtubeQuotaUsed, youtubeQuotaLimit, youtubeQuotaBlocked())
 }
 
 function applyYouTubeQuotaHealth() {
@@ -698,26 +638,19 @@ function setYouTubeQuotaUsed(used: number, source: string, limit?: number) {
 }
 
 function applyManualYouTubeQuota(line: string) {
-  const pair = line.match(/^(?:used\s+)?(\d+)\s*\/\s*(\d+)\s*$/i)
-  if (pair) {
-    setYouTubeQuotaUsed(Number(pair[1]), 'console', Number(pair[2]))
-    return
-  }
-  const remaining = line.match(/^(?:remaining|left|rem)\s+(\d+)\s*$/i)
-  if (remaining) {
-    const left = Number(remaining[1])
-    if (left > youtubeQuotaLimit) setYouTubeQuotaUsed(youtubeQuotaUsed, 'console remaining', youtubeQuotaUsed + left)
-    else setYouTubeQuotaUsed(youtubeQuotaLimit - left, 'console remaining')
-    return
-  }
-  const used = line.match(/^(?:used\s+)?(\d+)\s*$/i)
-  if (used) {
-    setYouTubeQuotaUsed(Number(used[1]), 'console')
-    return
-  }
-  if (/^\d/.test(line) || /quota|remaining|used/i.test(line)) {
+  const parsed = parseYouTubeQuotaInput(line)
+  if (!parsed) return
+  if (parsed.kind === 'help') {
     console.log('YouTube quota: type the Queries per day current usage (e.g. 35), or 35/10000 if your limit is not 10000.')
+    return
   }
+  if (parsed.kind === 'used') {
+    setYouTubeQuotaUsed(parsed.used, 'console', parsed.limit)
+    return
+  }
+  const left = parsed.remaining
+  if (left > youtubeQuotaLimit) setYouTubeQuotaUsed(youtubeQuotaUsed, 'console remaining', youtubeQuotaUsed + left)
+  else setYouTubeQuotaUsed(youtubeQuotaLimit - left, 'console remaining')
 }
 
 function listenForYouTubeQuotaInput() {
@@ -738,27 +671,10 @@ function listenForYouTubeQuotaInput() {
   process.stdin.on('error', () => undefined)
 }
 
-function headerNumber(headers: Headers, names: string[]) {
-  for (const name of names) {
-    const raw = headers.get(name)
-    if (raw == null || raw === '') continue
-    const value = Number(String(raw).split(/[;,\s]/)[0])
-    if (Number.isFinite(value)) return value
-  }
-}
-
-function quotaFromHeaders(headers: Headers): { used?: number; remaining?: number; limit?: number } | undefined {
-  const remaining = headerNumber(headers, ['ratelimit-remaining', 'x-ratelimit-remaining', 'x-rate-limit-remaining', 'x-quota-remaining'])
-  const limit = headerNumber(headers, ['ratelimit-limit', 'x-ratelimit-limit', 'x-rate-limit-limit', 'x-quota-limit'])
-  const used = headerNumber(headers, ['x-quota-used', 'x-ratelimit-used'])
-  if (remaining == null && limit == null && used == null) return
-  return { remaining, limit, used }
-}
-
 function applyYouTubeQuotaHeaders(headers: Headers) {
   const parsed = quotaFromHeaders(headers)
   if (!parsed) return false
-  const looksDaily = (parsed.limit != null && parsed.limit >= 1000) || (parsed.used != null && parsed.used >= 0 && (parsed.limit == null || parsed.limit >= 1000))
+  const looksDaily = isDailyQuotaHeader(parsed)
   if (!looksDaily) {
     if (!youtubeQuotaHeaderLogged) {
       youtubeQuotaHeaderLogged = true
@@ -837,21 +753,6 @@ async function youtubeRequest(endpoint: string, token: Token, options: RequestIn
   return { ok: response.ok, status: response.status, text }
 }
 
-function youtubeApiErrorReason(text: string) {
-  try {
-    const payload = JSON.parse(text) as { error?: { message?: string; errors?: { reason?: string; message?: string }[] } }
-    const entry = payload.error?.errors?.[0]
-    const reason = entry?.reason || payload.error?.message || entry?.message
-    if (reason) return reason
-  } catch { /* not json */ }
-  return text.replace(/\s+/g, ' ').slice(0, 120)
-}
-
-function isEndedYouTubeChat(error: unknown) {
-  const text = error instanceof Error ? error.message : String(error)
-  return /live chat is no longer live|liveChatEnded|liveChatNotFound/i.test(text)
-}
-
 function dropEndedYouTubeChat(chatId: string) {
   const token = tokens.YouTube
   if (token) {
@@ -909,10 +810,6 @@ async function checkLiveNow(platform: Platform) {
   })
   liveCheckLocks.set(platform, work)
   return work
-}
-
-function looksLikePlaceholder(handle: string) {
-  return !handle || handle === 'Kick account' || handle.includes(' ')
 }
 
 function startKickChat(slug: string) {
@@ -1064,7 +961,7 @@ function handleTwitchEventSub(payload: any) {
       user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
       userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
       color: event?.color || undefined,
-      badges: twitchBadgesFromList(event?.badges),
+      badges: twitchBadgesFromList(event?.badges, twitchBadgeUrls),
       avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
       text: event?.message?.text || '',
       time: new Date().toISOString(),
@@ -1076,44 +973,6 @@ function handleTwitchEventSub(payload: any) {
   }
   const activity = twitchEventToActivity(type, event)
   if (activity) addNativeActivity(activity)
-}
-
-function twitchEventToActivity(type: string, event: any): ActivityEvent | undefined {
-  const time = new Date().toISOString()
-  if (type === 'channel.follow') {
-    return { id: `twitch-follow-${event?.user_id}-${event?.followed_at || time}`, platform: 'Twitch', kind: 'follow', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time: event?.followed_at || time }
-  }
-  if (type === 'channel.subscribe') {
-    if (event?.is_gift) return
-    return { id: `twitch-sub-${event?.user_id}-${time}`, platform: 'Twitch', kind: 'subscription', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time }
-  }
-  if (type === 'channel.subscription.message') {
-    const months = Number(event?.cumulative_months || event?.duration_months)
-    return {
-      id: event?.message?.id || `twitch-resub-${event?.user_id}-${time}`,
-      platform: 'Twitch',
-      kind: 'subscription',
-      user: event?.user_login || event?.user_name || 'Twitch user',
-      userId: event?.user_id ? String(event.user_id) : undefined,
-      months: Number.isFinite(months) && months > 0 ? months : undefined,
-      message: String(event?.message?.text || '').trim() || undefined,
-      time,
-    }
-  }
-  if (type === 'channel.subscription.gift') {
-    const total = Number(event?.total)
-    const user = event?.is_anonymous ? 'Anonymous' : event?.user_name || event?.user_login || 'Twitch user'
-    return { id: `twitch-gift-${event?.user_id || 'anon'}-${time}`, platform: 'Twitch', kind: 'gift', user, userId: event?.user_id ? String(event.user_id) : undefined, amount: Number.isFinite(total) && total > 0 ? `${total} gift${total === 1 ? '' : 's'}` : undefined, time }
-  }
-  if (type === 'channel.cheer') {
-    const bits = Number(event?.bits)
-    const user = event?.is_anonymous ? 'Anonymous' : event?.user_name || event?.user_login || 'Twitch user'
-    return { id: `twitch-cheer-${event?.user_id || 'anon'}-${time}`, platform: 'Twitch', kind: 'cheer', user, userId: event?.user_id ? String(event.user_id) : undefined, amount: Number.isFinite(bits) ? `${bits} Bits` : undefined, message: String(event?.message || '').trim() || undefined, time }
-  }
-  if (type === 'channel.raid') {
-    const viewers = Number(event?.viewers)
-    return { id: `twitch-raid-${event?.from_broadcaster_user_id}-${time}`, platform: 'Twitch', kind: 'raid', user: event?.from_broadcaster_user_login || event?.from_broadcaster_user_name || 'Twitch user', userId: event?.from_broadcaster_user_id ? String(event.from_broadcaster_user_id) : undefined, viewers: Number.isFinite(viewers) ? viewers : undefined, time }
-  }
 }
 
 function watchTwitchEventSub() {
@@ -1155,7 +1014,7 @@ function refreshChatHealth() {
     else if (account?.live && youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
     else if (quota) setHealth('YouTube', quota.status, quota.message)
     else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
-    else if (account?.live && !tokens.YouTube.liveChatIds?.length && !tokens.YouTube.liveChatId) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
+    else if (account?.live && !youtubeLiveChatIds().length) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
   }
 }
 
@@ -1211,49 +1070,11 @@ function openTwitchIrc() {
 
 function parseTwitchLines(raw: string): ChatMessage[] {
   return raw.split(/\r?\n/).flatMap((line) => {
-    if (line.startsWith('PING')) { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
-    const match = line.match(/^(?:@([^ ]+) )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/)
-    if (!match) return []
-    const tags = parseIrcTags(match[1] || '')
-    const userId = tags['user-id'] || undefined
-    return [{ id: tags.id || crypto.randomUUID(), platform: 'Twitch' as Platform, user: tags['display-name'] || match[2], userId, color: tags.color || undefined, badges: twitchBadgesFromTag(tags.badges), avatar: userId ? twitchAvatars.get(userId) : undefined, text: match[3], time: new Date().toISOString(), parts: parseTwitchEmoteParts(match[3], tags.emotes), emotes: tags.emotes ? tags.emotes.split('/').map((item: string) => item.split(':')[0]) : [] }]
+    const parsed = parseTwitchChatLine(line, { urls: twitchBadgeUrls })
+    if (parsed === 'ping') { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
+    if (!parsed) return []
+    return [{ ...parsed, avatar: parsed.userId ? twitchAvatars.get(parsed.userId) : undefined }]
   })
-}
-
-function parseIrcTags(raw: string) {
-  return Object.fromEntries((raw || '').split(';').filter(Boolean).map((item) => {
-    const index = item.indexOf('=')
-    return index === -1 ? [item, ''] : [item.slice(0, index), item.slice(index + 1)]
-  }))
-}
-
-function twitchBadgeLabel(set: string) {
-  const name = set.toLowerCase()
-  if (name === 'broadcaster') return 'HOST'
-  if (name === 'moderator') return 'MOD'
-  if (name === 'subscriber' || name === 'founder') return 'SUB'
-  if (name === 'vip') return 'VIP'
-  if (name === 'premium' || name === 'turbo') return 'PRIME'
-  if (name === 'staff' || name === 'admin') return 'STAFF'
-  if (name === 'partner' || name === 'verified') return '✓'
-  if (name.includes('bit')) return 'BITS'
-  if (name.includes('gift')) return 'GIFT'
-  return ''
-}
-
-function twitchBadge(set: string, version: string): ChatBadge {
-  return { title: set, url: twitchBadgeUrls.get(`${set}/${version || '1'}`), label: twitchBadgeLabel(set) }
-}
-
-function twitchBadgesFromTag(tag?: string): ChatBadge[] {
-  return (tag || '').split(',').filter(Boolean).map((item) => {
-    const [set, version] = item.split('/')
-    return twitchBadge(set, version || '1')
-  }).filter((badge) => badge.url || badge.label).slice(0, 5)
-}
-
-function twitchBadgesFromList(badges?: { set_id?: string; id?: string }[]): ChatBadge[] {
-  return (badges || []).map((badge) => twitchBadge(String(badge.set_id || ''), String(badge.id || '1'))).filter((badge) => badge.url || badge.label).slice(0, 5)
 }
 
 async function ensureTwitchBadges() {
@@ -1313,120 +1134,6 @@ async function flushTwitchAvatars() {
   if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
 }
 
-function kickBadges(badges?: { type?: string; text?: string }[]): ChatBadge[] {
-  return (badges || []).map((badge) => {
-    const type = String(badge.type || '').toLowerCase()
-    let label = ''
-    if (type.includes('broadcaster') || type === 'og') label = 'HOST'
-    else if (type.includes('mod')) label = 'MOD'
-    else if (type.includes('sub')) label = 'SUB'
-    else if (type.includes('vip')) label = 'VIP'
-    else if (type.includes('verified')) label = '✓'
-    else if (type.includes('staff')) label = 'STAFF'
-    else if (type.includes('founder')) label = 'OG'
-    return { title: badge.text || badge.type || label, label }
-  }).filter((badge) => badge.label).slice(0, 4)
-}
-
-function normalizeAvatar(url?: string) {
-  if (!url) return
-  let next = String(url).trim()
-  if (!next) return
-  if (next.startsWith('//')) next = `https:${next}`
-  else if (next.startsWith('http://')) next = `https://${next.slice(7)}`
-  if (/default-user|\/photo\.jpg(\?|$)/i.test(next)) return
-  return next.replace(/=s\d+/i, '=s88')
-}
-
-function youtubeBadges(author?: { isChatOwner?: boolean; isChatModerator?: boolean; isChatSponsor?: boolean; isVerified?: boolean }): ChatBadge[] {
-  const badges: ChatBadge[] = []
-  if (author?.isChatOwner) badges.push({ title: 'Owner', label: 'HOST' })
-  if (author?.isChatModerator) badges.push({ title: 'Moderator', label: 'MOD' })
-  if (author?.isChatSponsor) badges.push({ title: 'Member', label: 'MEM' })
-  if (author?.isVerified) badges.push({ title: 'Verified', label: '✓' })
-  return badges
-}
-
-function twitchEmoteUrl(id: string) {
-  return `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(id)}/default/dark/2.0`
-}
-
-function kickEmoteUrl(id: string) {
-  return `https://files.kick.com/emotes/${encodeURIComponent(id)}/fullsize`
-}
-
-function parseTwitchEmoteParts(text: string, emotesTag?: string): MessagePart[] {
-  if (!emotesTag) return [{ type: 'text', text }]
-  const ranges: { start: number; end: number; id: string }[] = []
-  for (const emote of emotesTag.split('/').filter(Boolean)) {
-    const [id, positions] = [emote.slice(0, emote.indexOf(':')), emote.slice(emote.indexOf(':') + 1)]
-    if (!id || !positions) continue
-    for (const position of positions.split(',').filter(Boolean)) {
-      const [start, end] = position.split('-').map(Number)
-      if (Number.isFinite(start) && Number.isFinite(end) && end >= start) ranges.push({ start, end, id })
-    }
-  }
-  if (!ranges.length) return [{ type: 'text', text }]
-  ranges.sort((left, right) => left.start - right.start)
-  const parts: MessagePart[] = []
-  let cursor = 0
-  for (const range of ranges) {
-    if (range.start < cursor) continue
-    if (range.start > cursor) parts.push({ type: 'text', text: text.slice(cursor, range.start) })
-    parts.push({ type: 'emote', name: text.slice(range.start, range.end + 1), url: twitchEmoteUrl(range.id) })
-    cursor = range.end + 1
-  }
-  if (cursor < text.length) parts.push({ type: 'text', text: text.slice(cursor) })
-  return parts.length ? parts : [{ type: 'text', text }]
-}
-
-function partsFromTwitchFragments(fragments: any[] | undefined, fallback: string): MessagePart[] {
-  if (!fragments?.length) return fallback ? [{ type: 'text', text: fallback }] : []
-  const parts: MessagePart[] = []
-  for (const fragment of fragments) {
-    if (fragment?.type === 'emote' && fragment.emote?.id) parts.push({ type: 'emote', name: String(fragment.text || ''), url: twitchEmoteUrl(String(fragment.emote.id)) })
-    else if (fragment?.text) parts.push({ type: 'text', text: String(fragment.text) })
-  }
-  return parts.length ? parts : [{ type: 'text', text: fallback }]
-}
-
-function parseKickParts(text: string, emotes?: any[]): MessagePart[] {
-  const token = /\[emote:(\d+):([^\]]+)\]/g
-  const parts: MessagePart[] = []
-  let cursor = 0
-  let matched = false
-  for (const match of text.matchAll(token)) {
-    matched = true
-    const index = match.index || 0
-    if (index > cursor) parts.push({ type: 'text', text: text.slice(cursor, index) })
-    parts.push({ type: 'emote', name: match[2], url: kickEmoteUrl(match[1]) })
-    cursor = index + match[0].length
-  }
-  if (matched) {
-    if (cursor < text.length) parts.push({ type: 'text', text: text.slice(cursor) })
-    return parts.length ? parts : [{ type: 'text', text }]
-  }
-  if (emotes?.length) {
-    const ranges = emotes.flatMap((emote) => {
-      const id = String(emote.emote_id || emote.id || '')
-      const name = String(emote.name || '')
-      return (emote.positions || []).map((position: any) => ({ start: Number(position.s ?? position.start), end: Number(position.e ?? position.end), id, name }))
-    }).filter((range) => range.id && Number.isFinite(range.start) && Number.isFinite(range.end)).sort((left, right) => left.start - right.start)
-    if (ranges.length) {
-      let offset = 0
-      for (const range of ranges) {
-        if (range.start < offset) continue
-        if (range.start > offset) parts.push({ type: 'text', text: text.slice(offset, range.start) })
-        parts.push({ type: 'emote', name: range.name || text.slice(range.start, range.end + 1), url: kickEmoteUrl(range.id) })
-        offset = range.end + 1
-      }
-      if (offset < text.length) parts.push({ type: 'text', text: text.slice(offset) })
-      return parts.length ? parts : [{ type: 'text', text }]
-    }
-  }
-  return [{ type: 'text', text }]
-}
-
 function rememberOutgoing(entry: { id: string; text: string; platforms: Platform[]; at: number }) {
   const cutoff = Date.now() - 20_000
   for (let index = recentOutgoing.length - 1; index >= 0; index--) if (recentOutgoing[index].at < cutoff) recentOutgoing.splice(index, 1)
@@ -1446,12 +1153,6 @@ function ownHandles() {
 const translationCache = new Map<string, string>()
 const translateQueue: ChatMessage[] = []
 let translating = false
-const NON_ENGLISH = /[\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0590-\u05FF]/
-
-function needsTranslation(text: string) {
-  return NON_ENGLISH.test(text)
-}
-
 async function translateToEnglish(text: string) {
   const key = text.trim()
   if (!key || !needsTranslation(key)) return
@@ -1529,28 +1230,6 @@ function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[],
   }, { preload, ingest: 'official' })
 }
 
-function youtubeOfficialToActivity(item: any): ActivityEvent | undefined {
-  const type = String(item.snippet?.type || '')
-  const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
-  const userId = item.authorDetails?.channelId ? String(item.authorDetails.channelId) : undefined
-  const time = item.snippet?.publishedAt || new Date().toISOString()
-  if (type === 'superChatEvent' || type === 'superStickerEvent') {
-    const details = item.snippet?.superChatDetails || item.snippet?.superStickerDetails
-    return { id: item.id, platform: 'YouTube', kind: 'superchat', user, userId, amount: details?.amountDisplayString, message: String(details?.userComment || '').trim() || undefined, time }
-  }
-  if (type === 'newSponsorEvent') {
-    return { id: item.id, platform: 'YouTube', kind: 'membership', user, userId, message: item.snippet?.newSponsorDetails?.memberLevelName, time }
-  }
-  if (type === 'memberMilestoneChatEvent') {
-    const months = Number(item.snippet?.memberMilestoneChatDetails?.memberMonth)
-    return { id: item.id, platform: 'YouTube', kind: 'membership', user, userId, months: Number.isFinite(months) && months > 0 ? months : undefined, message: item.snippet?.memberMilestoneChatDetails?.memberLevelName, time }
-  }
-  if (type === 'membershipGiftingEvent') {
-    const count = Number(item.snippet?.membershipGiftingDetails?.giftMembershipsCount)
-    return { id: item.id, platform: 'YouTube', kind: 'gift', user, userId, amount: Number.isFinite(count) && count > 0 ? `${count} gift${count === 1 ? '' : 's'}` : undefined, time }
-  }
-}
-
 function addActivity(event: ActivityEvent) {
   if (!activityStore.add(event)) return
   state.activity = activityStore.list()
@@ -1568,13 +1247,6 @@ function streamElementsJwtSlots() {
     { platform: 'Kick', jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
     { platform: 'YouTube', jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
   ]
-}
-
-function missingStreamElementsMessage(missing: string[]) {
-  if (!missing.length) return
-  const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
-  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in production.env, then restart.`
-  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in production.env, then restart.`
 }
 
 function setActivityWarning(key: string, message?: string) {
@@ -1623,116 +1295,21 @@ async function startStreamElements(backfill = false) {
   }
 }
 
-function youtubeSameAuthor(left: ChatMessage, right: ChatMessage) {
-  if (left.userId && right.userId) return left.userId.toLowerCase() === right.userId.toLowerCase()
-  return left.user.toLowerCase() === right.user.toLowerCase()
-}
-
-function foldChatText(message: ChatMessage) {
-  const raw = message.parts?.length
-    ? message.parts.filter((part) => part.type === 'text').map((part) => part.text).join('')
-    : message.text
-  return raw.replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
-}
-
-function youtubeChatKeys(sourceId?: string) {
-  if (!sourceId) return []
-  const keys = [sourceId]
-  for (const target of youtubeTargets) {
-    if (target.liveChatId !== sourceId && target.videoId !== sourceId) continue
-    if (target.liveChatId) keys.push(target.liveChatId)
-    keys.push(target.videoId)
-  }
-  return keys
-}
-
-function youtubeSameChat(left?: string, right?: string) {
-  if (!left || !right) return true
-  if (left === right) return true
-  const keys = new Set(youtubeChatKeys(left))
-  return youtubeChatKeys(right).some((key) => keys.has(key))
-}
-
-function sortedYouTubeBadges(badges?: ChatBadge[]) {
-  if (!badges?.length) return badges
-  const rank = (label?: string) => label === 'HOST' ? 0 : label === 'MOD' ? 1 : label === '✓' ? 2 : label === 'MEM' ? 3 : 4
-  return [...badges].sort((left, right) => rank(left.label) - rank(right.label) || left.title.localeCompare(right.title))
-}
-
 function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
-  if (!message.text && !message.parts?.length) return
-  if (state.messages.some((item) => item.id === message.id)) {
-    if (message.id) youtubeSeen.add(message.id)
-    return
-  }
-  const incomingTime = Date.parse(message.time) || Date.now()
-  const incomingPlatforms = message.platforms?.length ? message.platforms : [message.platform]
-  const incomingIsOwn = ownHandles().has(message.user.toLowerCase())
-  const tracked = recentOutgoing.find((item) => item.text === message.text && Math.abs(incomingTime - item.at) < 20_000)
-  const incomingIngest = options?.ingest
-
-  let mergeAt = -1
-  let mergeDelta = Infinity
-  for (let index = 0; index < state.messages.length; index++) {
-    const item = state.messages[index]
-    const exactText = item.text === message.text
-    if (!exactText && foldChatText(item) !== foldChatText(message)) continue
-    const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
-    const itemIsOwn = ownHandles().has(item.user.toLowerCase())
-    const itemPlatforms = item.platforms || [item.platform]
-    const youtubeEcho = message.platform === 'YouTube'
-      && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
-      && youtubeSameAuthor(item, message)
-      && youtubeSameChat(item.sourceId, message.sourceId)
-    let match = youtubeEcho && delta <= 2_000
-    if (!match && exactText && tracked && delta <= 20_000 && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
-    else if (!match && exactText && incomingIsOwn && itemIsOwn && delta <= 90_000) {
-      const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-      match = !samePlatforms
-    }
-    if (!match || delta >= mergeDelta) continue
-    mergeAt = index
-    mergeDelta = delta
-  }
-
-  if (mergeAt >= 0) {
-    const current = state.messages[mergeAt]
-    const preferred = tracked?.platforms || []
-    const platforms = [...new Set([...preferred, ...(current.platforms || [current.platform]), ...incomingPlatforms])]
-    const already = current.platforms || [current.platform]
-    const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
-    const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
-    const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
-    if (current.id) youtubeSeen.add(current.id)
-    if (message.id) youtubeSeen.add(message.id)
-    const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
-    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged) return
-    state.messages = state.messages.map((item, index) => index === mergeAt ? {
-      ...item,
-      ...(takeIncomingId ? { id: message.id } : {}),
-      platform: platforms[0],
-      platforms,
-      sourceId: item.sourceId || message.sourceId,
-      userId: item.userId || message.userId,
-      ingest: incomingIngest || item.ingest,
-      ...(parts ? { parts } : {}),
-      avatar: item.avatar || message.avatar,
-      badges: sortedYouTubeBadges(item.badges?.length ? item.badges : message.badges),
-      color: item.color || message.color,
-      sourceLabel: item.sourceLabel || message.sourceLabel,
-    } : item)
-    persistChat()
-    broadcast()
-    return
-  }
-
-  const stored = { ...message, platforms: incomingPlatforms, ...(incomingIngest ? { ingest: incomingIngest } : {}) }
-  if (stored.id && stored.platform === 'YouTube') youtubeSeen.add(stored.id)
-  state.messages = [...state.messages, stored].slice(-CHAT_MAX)
+  const result = mergeIncomingChat(state.messages, message, options, {
+    ownHandles: ownHandles(),
+    recentOutgoing,
+    targets: youtubeTargets,
+  })
+  for (const id of result.seenIds) youtubeSeen.add(id)
+  if (!result.changed) return
+  state.messages = result.messages
   persistChat()
   broadcast()
-  queueTranslation(stored)
-  if (stored.platform === 'Twitch') queueTwitchAvatar(stored.userId)
+  if (result.added) {
+    queueTranslation(result.added)
+    if (result.added.platform === 'Twitch') queueTwitchAvatar(result.added.userId)
+  }
 }
 
 async function pollLiveState() {
@@ -1925,7 +1502,7 @@ async function refreshYouTubeViewers() {
 
 async function seedYouTubeHistory(token: Token) {
   if (youtubeQuotaBlocked()) return
-  const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
+  const chatIds = youtubeLiveChatIds()
   if (youtubeChat.connected) {
     for (const chatId of chatIds) youtubeHistorySeeded.add(chatId)
     collapseYouTubeHydrationDuplicates()
@@ -1974,7 +1551,7 @@ async function syncYouTubeChat(token: Token) {
 }
 
 async function pollYouTubeOfficialChat(token: Token) {
-  const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
+  const chatIds = youtubeLiveChatIds()
   if (!chatIds.length) return
   setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
   for (const chatId of chatIds) {
@@ -1995,15 +1572,10 @@ async function pollYouTubeOfficialChat(token: Token) {
   }
 }
 
-function youtubeTitleIsShorts(title?: string) {
-  return /#shortsfeed\b/i.test(title || '')
-}
-
 function relabelYouTubeTargets() {
   youtubeChatLabels.clear()
-  const multi = youtubeTargets.length > 1 && youtubeTargets.some((target) => youtubeTitleIsShorts(target.title))
   for (const target of youtubeTargets) {
-    target.label = multi ? (youtubeTitleIsShorts(target.title) ? 'Shorts' : 'Live') : undefined
+    target.label = youtubeChatLabel(youtubeTargets, target)
     if (target.liveChatId && target.label) youtubeChatLabels.set(target.liveChatId, target.label)
   }
 }
@@ -2030,11 +1602,16 @@ function retagYouTubeMessages() {
   return true
 }
 
+function youtubeLiveChatIds() {
+  return resolveYouTubeLiveChatIds(youtubeTargets, tokens.YouTube)
+}
+
 function setYouTubeTargets(targets: YouTubeChatTarget[]) {
   youtubeTargets = targets
   relabelYouTubeTargets()
   retagYouTubeMessages()
   collapseYouTubeHydrationDuplicates()
+  if (tokens.YouTube) syncYouTubeTokenChatIds(targets, tokens.YouTube)
 }
 
 async function pollKick() {
@@ -2123,15 +1700,26 @@ async function sendYouTubeMessage(text: string) {
   if (youtubeQuotaBlocked()) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
   const token = await ensureToken('YouTube')
   if (!token) return { ok: false, error: 'Not connected' }
-  const chatIds = token.liveChatIds?.length ? token.liveChatIds : token.liveChatId ? [token.liveChatId] : []
-  if (!chatIds.length) return { ok: false, error: 'YouTube chat is not live' }
+  let chatIds = youtubeLiveChatIds()
+  if (!chatIds.length) {
+    try {
+      youtubeForceStatus = true
+      await pollYouTubeStatus(token)
+    } catch (error) {
+      if (noteYouTubeQuota(error)) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+    chatIds = youtubeLiveChatIds()
+  }
+  const guard = youtubeSendGuard({ connected: true, quotaBlocked: false, chatIds })
+  if (guard.ok === false) return guard
   const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/messages?part=snippet', token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ snippet: { liveChatId, type: 'textMessageEvent', textMessageDetails: { messageText: text } } }),
+    body: JSON.stringify(youtubeLiveChatMessageBody(liveChatId, text)),
   })))
   const failed = results.filter((result) => !result.ok)
-  return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
+  return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
 }
 
 async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
@@ -2190,10 +1778,10 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
   if (body.action === 'delete') {
     if (!body.messageId) return { ok: false, error: 'Message id is required' }
     const result = await youtubeRequest(`/liveChat/messages?id=${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
-    if (!result.ok) return { ok: false, error: result.text }
+    if (!result.ok) return { ok: false, error: youtubeApiErrorReason(result.text) }
     return { ok: true }
   }
-  const chatIds = [...new Set([body.sourceId, ...(token.liveChatIds || []), token.liveChatId].filter(Boolean))] as string[]
+  const chatIds = [...new Set([body.sourceId, ...youtubeLiveChatIds()].filter(Boolean))] as string[]
   if (!body.userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
   const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/bans?part=snippet', token, {
     method: 'POST',
@@ -2273,63 +1861,6 @@ function broadcast() {
   for (const client of clients) client.write(payload)
 }
 function loadTokens(): Partial<Record<TokenPlatform, Token>> { try { return JSON.parse(fs.readFileSync(tokenFile, 'utf8')) } catch { return {} } }
-function emptyStreamDetails(): StreamDetails {
-  return { title: '', category: '' }
-}
-
-function emptyStreamInfo(): Record<StreamPlatform, StreamDetails> {
-  return { Twitch: emptyStreamDetails(), Kick: emptyStreamDetails() }
-}
-
-function normalizeStreamDetails(value: unknown): StreamDetails {
-  if (!value || typeof value !== 'object') return emptyStreamDetails()
-  const item = value as Partial<StreamDetails>
-  const title = String(item.title || '').trim()
-  const category = String(item.category || '').trim()
-  const categoryId = item.categoryId != null && String(item.categoryId).trim() ? String(item.categoryId).trim() : undefined
-  return { title, category, ...(categoryId ? { categoryId } : {}) }
-}
-
-function loadStreamInfo(value: unknown): Record<StreamPlatform, StreamDetails> {
-  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return { Twitch: normalizeStreamDetails(raw.Twitch), Kick: normalizeStreamDetails(raw.Kick) }
-}
-
-function isMoreSpecificCategory(specific: string, general: string) {
-  const a = specific.trim().toLowerCase()
-  const b = general.trim().toLowerCase()
-  if (!a || !b || a === b || !a.startsWith(b)) return false
-  const next = a[b.length]
-  return next === ' ' || next === ':' || next === '-' || next === '('
-}
-
-function applyLiveStreamDetails(current: StreamDetails, live: StreamDetails): StreamDetails {
-  const title = (live.title || current.title || '').trim()
-  const liveCategory = (live.category || '').trim()
-  const currentCategory = (current.category || '').trim()
-  if (!liveCategory) return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
-  if (isMoreSpecificCategory(currentCategory, liveCategory)) {
-    return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
-  }
-  return { title, category: liveCategory, ...(live.categoryId ? { categoryId: live.categoryId } : current.categoryId ? { categoryId: current.categoryId } : {}) }
-}
-
-function kickStreamDetails(channel: any): StreamDetails {
-  const candidates = [
-    channel?.category,
-    channel?.subcategory,
-    channel?.livestream?.category,
-    ...(Array.isArray(channel?.livestream?.categories) ? channel.livestream.categories : []),
-  ]
-  let best: { name: string; id?: string } | undefined
-  for (const item of candidates) {
-    const name = String(item?.name || '').trim()
-    const id = item?.id != null && String(item.id).trim() ? String(item.id) : undefined
-    if (!name) continue
-    if (!best || isMoreSpecificCategory(name, best.name) || (id && !best.id && name.toLowerCase() === best.name.toLowerCase())) best = { name, id }
-  }
-  return { title: String(channel?.stream_title || '').trim(), category: best?.name || '', ...(best?.id ? { categoryId: best.id } : {}) }
-}
 
 function persistStreamInfo() {
   const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick } }
@@ -2340,24 +1871,10 @@ function persistStreamInfo() {
 
 function loadSettings(): AppSettings {
   try {
-    const parsed = JSON.parse(fs.readFileSync(settingsFile, 'utf8')) as Partial<AppSettings>
-    return {
-      activityFallback: parsed.activityFallback !== false,
-      ignoreMissingJwt: parsed.ignoreMissingJwt === true,
-      dropOldAlerts: parsed.dropOldAlerts === true,
-      streamInfo: loadStreamInfo(parsed.streamInfo),
-      youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
-    }
+    return parseAppSettings(JSON.parse(fs.readFileSync(settingsFile, 'utf8')))
   } catch {
-    return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
+    return defaultAppSettings()
   }
-}
-
-function loadYouTubeQuota(value: unknown): YoutubeQuota {
-  if (!value || typeof value !== 'object') return { day: '', used: 0 }
-  const item = value as Partial<YoutubeQuota>
-  const limit = item.limit != null ? Math.floor(Number(item.limit) || 0) : 0
-  return { day: String(item.day || ''), used: Math.max(0, Math.floor(Number(item.used) || 0)), ...(limit > 0 ? { limit } : {}) }
 }
 
 function openInDefaultBrowser(url: string) {

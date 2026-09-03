@@ -1,13 +1,14 @@
 {
   "name": "obs-multi-chat",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.3.2",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "dev:backend": "tsx server/server.ts",
     "start": "tsx server/server.ts",
+    "test": "node scripts/run-tests.mjs",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "package:win": "npm run build && tsc -p tsconfig.package.json && node -e \"require('fs').cpSync('dist','dist-package/dist',{recursive:true}); require('fs').copyFileSync('package-runtime.json','dist-package/package.json')\" && pkg dist-package/server.js --targets node18-win-x64 --output relay-chat-dock.build.exe && node scripts/finish-win-package.cjs"

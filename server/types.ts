@@ -1,0 +1,20 @@
+export type Platform = 'Twitch' | 'Kick' | 'YouTube'
+export type TokenPlatform = Platform | 'StreamElements'
+export type StreamPlatform = 'Twitch' | 'Kick'
+export type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[]; provider?: string }
+export type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
+export type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
+export type ChatBadge = { title: string; url?: string; label?: string }
+export type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
+export type StreamDetails = { title: string; category: string; categoryId?: string }
+export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
+export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
+export type YoutubeQuota = { day: string; used: number; limit?: number }
+export type YoutubeQuotaStatus = { used: number; limit: number }
+export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
+
+export const CHAT_MAX = 200
+export const YOUTUBE_QUOTA_LIMIT = 10_000
+export const YOUTUBE_OAUTH_SCOPES = 'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl'
+export const TWITCH_OAUTH_SCOPES = 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read'
+export const KICK_OAUTH_SCOPES = 'user:read channel:read channel:write chat:write events:subscribe moderation:ban moderation:chat_message:manage'

@@ -2,6 +2,7 @@ import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
+import { preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
@@ -29,14 +30,6 @@ const initialConnections: Connection[] = [
 ]
 const initialStreamDetails: StreamDetailsByPlatform = { Twitch: { title: '', category: '' }, Kick: { title: '', category: '' } }
 const initialHealth: Record<Platform, Health> = { Twitch: { status: 'ok', message: '' }, Kick: { status: 'ok', message: '' }, YouTube: { status: 'ok', message: '' } }
-
-function preferredCategory(twitch: string, kick: string) {
-  const twitchName = twitch.trim()
-  const kickName = kick.trim()
-  if (!twitchName) return kickName
-  if (!kickName) return twitchName
-  return twitchName.length >= kickName.length ? twitchName : kickName
-}
 
 const platformIcon = (platform: Platform, size = 14) => {
   if (platform === 'Twitch') return <Twitch size={size} strokeWidth={2.5} />
@@ -74,7 +67,7 @@ function App() {
   const kickGame = streamDetails.Kick.category
   const headerGame = preferredCategory(twitchGame, kickGame)
   const headerTip = [headerTitle, twitchGame && `Twitch: ${twitchGame}`, kickGame && `Kick: ${kickGame}`].filter(Boolean).join('\n')
-  const visibleMessages = activeFilter === 'All' ? messages : messages.filter((message) => (message.platforms || [message.platform]).includes(activeFilter))
+  const visibleMessages = visibleChatMessages(messages, activeFilter)
   const chatListRef = useRef<HTMLDivElement>(null)
   const { paused: chatPaused, onScroll: onChatScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
   useEffect(() => {
@@ -86,7 +79,7 @@ function App() {
 
   useEffect(() => {
     const connected = connections.filter((connection) => connection.connected).map((connection) => connection.platform)
-    setSelectedPlatforms((['Twitch', 'Kick', 'YouTube'] as Platform[]).filter((platform) => connected.includes(platform) && !sendOptOutRef.current.has(platform)))
+    setSelectedPlatforms(selectedSendPlatforms(connected, sendOptOutRef.current))
   }, [connections])
 
   useEffect(() => {
