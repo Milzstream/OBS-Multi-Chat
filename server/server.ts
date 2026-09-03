@@ -20,6 +20,7 @@ import {
   isDailyQuotaHeader,
   isEndedYouTubeChat,
   isStoredChatMessage,
+  normalizeChatHandle,
   kickBadges,
   kickStreamDetails,
   looksLikePlaceholder,
@@ -135,7 +136,7 @@ function beginYouTubeHydration() {
 }
 
 function collapseYouTubeHydrationDuplicates() {
-  const result = collapseYouTubeDuplicates(state.messages, youtubeTargets)
+  const result = collapseYouTubeDuplicates(state.messages, youtubeTargets, { ownHandles: ownHandles(), ownUserIds: ownUserIds() })
   if (!result.changed) return
   for (const id of result.seenIds) youtubeSeen.add(id)
   state.messages = result.messages
@@ -1142,12 +1143,24 @@ function rememberOutgoing(entry: { id: string; text: string; platforms: Platform
 
 function ownHandles() {
   const names = new Set<string>(['you'])
-  for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) {
-    const user = tokens[platform]?.user
-    if (user) names.add(user.toLowerCase())
+  const add = (value?: string) => {
+    if (!value) return
+    names.add(value.toLowerCase())
+    names.add(normalizeChatHandle(value))
   }
-  for (const account of state.accounts) if (account.handle) names.add(account.handle.toLowerCase())
+  for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) add(tokens[platform]?.user)
+  for (const account of state.accounts) add(account.handle)
   return names
+}
+
+function ownUserIds() {
+  const ids = new Set<string>()
+  for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) {
+    const token = tokens[platform]
+    if (token?.userId) ids.add(token.userId.toLowerCase())
+    if (token?.channelId) ids.add(token.channelId.toLowerCase())
+  }
+  return ids
 }
 
 const translationCache = new Map<string, string>()
@@ -1298,6 +1311,7 @@ async function startStreamElements(backfill = false) {
 function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
   const result = mergeIncomingChat(state.messages, message, options, {
     ownHandles: ownHandles(),
+    ownUserIds: ownUserIds(),
     recentOutgoing,
     targets: youtubeTargets,
   })

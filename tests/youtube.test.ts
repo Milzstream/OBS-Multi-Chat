@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  chatTextMatches,
   collapseYouTubeDuplicates,
   foldChatText,
   isEndedYouTubeChat,
+  isOwnChatMessage,
   isStoredChatMessage,
+  isTruncatedText,
   labelYouTubeTargets,
   mergeIncomingChat,
   parseYouTubeQuotaInput,
+  preferChatText,
   quotaWarnAt,
   resolveYouTubeLiveChatIds,
   syncYouTubeTokenChatIds,
@@ -32,6 +36,8 @@ import {
   parseActions,
   parseYouTubeTitle,
   parseYouTubeViewers,
+  expandRunText,
+  runLinkUrl,
   runsToParts,
 } from '../server/youtube-chat.js'
 import { chat, own } from './helpers.js'
@@ -180,6 +186,25 @@ describe('YouTube chat matching', () => {
     assert.equal(result.changed, false)
     assert.equal(result.messages.length, 2)
   })
+
+  it('collapses host copies from Live and Shorts', () => {
+    const host = [{ title: 'Owner', label: 'HOST' }]
+    const live = chat({ id: 'a', user: 'milzstream', text: 'hello', sourceId: 'CHAT_LIVE', sourceLabel: 'Live', badges: host, time: '2026-09-02T12:00:00.000Z' })
+    const shorts = chat({ id: 'b', user: 'milzstream', text: 'hello', sourceId: 'CHAT_SHORTS', sourceLabel: 'Shorts', badges: host, time: '2026-09-02T12:00:00.500Z' })
+    const result = collapseYouTubeDuplicates([live, shorts], targets)
+    assert.equal(result.changed, true)
+    assert.equal(result.messages.length, 1)
+    assert.equal(result.messages[0].sourceLabel, undefined)
+  })
+
+  it('matches truncated YouTube URL text with the full send', () => {
+    const full = 'Wow Character: https://classic-armory.org/character/us/tbc-anniversary/dreamscythe/Tuskinrader'
+    const clipped = 'Wow Character: https://classic-armory.org/character/...'
+    assert.equal(isTruncatedText(clipped), true)
+    assert.equal(chatTextMatches(full, clipped), true)
+    assert.equal(preferChatText(full, clipped), full)
+    assert.equal(isOwnChatMessage(chat({ id: '1', user: 'Host', text: 'x', userId: 'UC1' }), { ownHandles: own('other'), ownUserIds: ['UC1'] }), true)
+  })
 })
 
 describe('YouTube message ingest', () => {
@@ -194,6 +219,89 @@ describe('YouTube message ingest', () => {
     assert.equal(result.messages.length, 1)
     assert.deepEqual(result.messages[0].platforms, ['Twitch', 'YouTube'])
     assert.equal(result.messages[0].sourceId, 'CHAT')
+  })
+
+  it('merges truncated Live and Shorts host echoes into the dock send', () => {
+    const full = 'Wow Character: https://classic-armory.org/character/us/tbc-anniversary/dreamscythe/Tuskinrader'
+    const clipped = 'Wow Character: https://classic-armory.org/character/...'
+    const outgoing = chat({
+      id: 'local',
+      platform: 'Twitch',
+      platforms: ['Twitch', 'Kick', 'YouTube'],
+      user: 'milzstream',
+      text: full,
+      time: '2026-09-02T16:59:00.000Z',
+    })
+    const live = chat({
+      id: 'yt-live',
+      user: 'milzstream',
+      text: clipped,
+      sourceId: 'CHAT_LIVE',
+      sourceLabel: 'Live',
+      badges: [{ title: 'Owner', label: 'HOST' }],
+      time: '2026-09-02T16:59:04.000Z',
+    })
+    const shorts = chat({
+      id: 'yt-shorts',
+      user: 'milzstream',
+      text: clipped,
+      sourceId: 'CHAT_SHORTS',
+      sourceLabel: 'Shorts',
+      badges: [{ title: 'Owner', label: 'HOST' }],
+      time: '2026-09-02T16:59:05.000Z',
+    })
+    const youtubeTargets = [
+      { videoId: 'videoLive01', liveChatId: 'CHAT_LIVE' },
+      { videoId: 'videoShorts1', liveChatId: 'CHAT_SHORTS' },
+    ]
+    const ctx = {
+      ownHandles: own('milzstream'),
+      recentOutgoing: [{ id: 'local', text: full, platforms: ['Twitch', 'Kick', 'YouTube'] as const, at: Date.parse('2026-09-02T16:59:00.000Z') }],
+      targets: youtubeTargets,
+    }
+    const afterLive = mergeIncomingChat([outgoing], live, { ingest: 'innertube' }, ctx)
+    assert.equal(afterLive.changed, true)
+    assert.equal(afterLive.messages.length, 1)
+    assert.equal(afterLive.messages[0].text, full)
+    assert.equal(afterLive.messages[0].sourceLabel, undefined)
+    assert.equal(afterLive.messages[0].badges?.[0].label, 'HOST')
+    const afterShorts = mergeIncomingChat(afterLive.messages, shorts, { ingest: 'innertube' }, ctx)
+    assert.equal(afterShorts.messages.length, 1)
+    assert.deepEqual(afterShorts.messages[0].platforms, ['Twitch', 'Kick', 'YouTube'])
+    assert.equal(afterShorts.messages[0].text, full)
+    assert.equal(afterShorts.messages[0].sourceLabel, undefined)
+  })
+
+  it('merges own Live and Shorts YouTube copies without a dock send', () => {
+    const youtubeTargets = [
+      { videoId: 'videoLive01', liveChatId: 'CHAT_LIVE' },
+      { videoId: 'videoShorts1', liveChatId: 'CHAT_SHORTS' },
+    ]
+    const live = chat({
+      id: 'yt-live',
+      user: 'Host',
+      text: 'hello',
+      sourceId: 'CHAT_LIVE',
+      sourceLabel: 'Live',
+      badges: [{ title: 'Owner', label: 'HOST' }],
+      time: '2026-09-02T12:00:00.000Z',
+    })
+    const shorts = chat({
+      id: 'yt-shorts',
+      user: 'Host',
+      text: 'hello',
+      sourceId: 'CHAT_SHORTS',
+      sourceLabel: 'Shorts',
+      badges: [{ title: 'Owner', label: 'HOST' }],
+      time: '2026-09-02T12:00:01.000Z',
+    })
+    const result = mergeIncomingChat([live], shorts, { ingest: 'innertube' }, {
+      ownHandles: own('Host'),
+      recentOutgoing: [],
+      targets: youtubeTargets,
+    })
+    assert.equal(result.messages.length, 1)
+    assert.equal(result.messages[0].sourceLabel, undefined)
   })
 
   it('rejects stored chat rows that are missing required fields', () => {
@@ -262,6 +370,29 @@ describe('YouTube InnerTube parsing', () => {
     assert.deepEqual(nextContinuation(payload), { continuation: 'NEXT', timeoutMs: 4000, ended: false })
     assert.equal(classifyChatItem({ liveChatPaidStickerRenderer: { purchaseAmountText: { simpleText: '$2' } } })?.activityKind, 'superchat')
     assert.deepEqual(runsToParts([{ text: 'x' }]), [{ type: 'text', text: 'x' }])
+    const full = 'https://classic-armory.org/character/us/tbc-anniversary/dreamscythe/Tuskinrader'
+    const truncatedLink = {
+      text: 'https://classic-armory.org/character/...',
+      navigationEndpoint: { urlEndpoint: { url: `https://www.youtube.com/redirect?event=live_chat&q=${encodeURIComponent(full)}` } },
+    }
+    assert.equal(runLinkUrl(truncatedLink), full)
+    assert.equal(expandRunText(truncatedLink), full)
+    assert.deepEqual(runsToParts([{ text: 'Wow Character: ' }, truncatedLink]), [{ type: 'text', text: 'Wow Character: ' }, { type: 'text', text: full }])
+    assert.equal(expandRunText({ text: `Wow Character: https://classic-armory.org/character/...`, navigationEndpoint: truncatedLink.navigationEndpoint }), `Wow Character: ${full}`)
+    assert.equal(expandRunText({ text: '@Ada', navigationEndpoint: { browseEndpoint: { browseId: 'UC1' } } }), '@Ada')
+    const parsedLink = parseActions({
+      continuationContents: {
+        liveChatContinuation: {
+          actions: [{ addChatItemAction: { item: { liveChatTextMessageRenderer: {
+            id: 'link1',
+            timestampUsec: '1690000003000000',
+            authorName: { simpleText: 'Ada' },
+            message: { runs: [{ text: 'Wow Character: ' }, truncatedLink] },
+          } } } }],
+        },
+      },
+    }, 'abcdefghijk')
+    assert.equal(parsedLink[0]?.text, `Wow Character: ${full}`)
     assert.deepEqual(authorBadges({ authorBadges: [{ liveChatAuthorBadgeRenderer: { icon: { iconType: 'MODERATOR' } } }] }), [{ title: 'Moderator', label: 'MOD' }])
     assert.deepEqual(youtubeBadges({ isChatOwner: true, isChatModerator: true }), [{ title: 'Owner', label: 'HOST' }, { title: 'Moderator', label: 'MOD' }])
   })
