@@ -195,14 +195,82 @@ export function youtubeSameChatFor(left: string | undefined, right: string | und
 
 export function youtubeSameAuthor(left: ChatMessage, right: ChatMessage) {
   if (left.userId && right.userId) return left.userId.toLowerCase() === right.userId.toLowerCase()
-  return left.user.toLowerCase() === right.user.toLowerCase()
+  return normalizeChatHandle(left.user) === normalizeChatHandle(right.user)
+}
+
+export function normalizeChatHandle(name: string) {
+  return name.replace(/^@+/, '').trim().toLowerCase()
+}
+
+export function isOwnChatMessage(
+  message: { user: string; userId?: string },
+  ctx: { ownHandles: Set<string>; ownUserIds?: Iterable<string> },
+) {
+  const handle = normalizeChatHandle(message.user)
+  if (ctx.ownHandles.has(handle) || ctx.ownHandles.has(message.user.toLowerCase())) return true
+  if (!message.userId || !ctx.ownUserIds) return false
+  for (const id of ctx.ownUserIds) if (id.toLowerCase() === message.userId.toLowerCase()) return true
+  return false
+}
+
+export function foldRawText(text: string) {
+  return text.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 export function foldChatText(message: ChatMessage) {
   const raw = message.parts?.length
     ? message.parts.filter((part) => part.type === 'text').map((part) => part.text).join('')
     : message.text
-  return raw.replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
+  return foldRawText(raw)
+}
+
+export function isTruncatedText(text: string) {
+  return /(?:\.{2,}|…)\s*$/.test(text.trim())
+}
+
+export function truncatedFoldMatches(left: string, right: string) {
+  if (!left || !right) return false
+  if (left === right) return true
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left]
+  if (!isTruncatedText(short)) return false
+  const prefix = short.replace(/(?:\.{2,}|…)\s*$/g, '').trim()
+  return prefix.length >= 12 && long.startsWith(prefix)
+}
+
+export function chatTextMatches(left: ChatMessage | string, right: ChatMessage | string) {
+  const leftText = typeof left === 'string' ? left : left.text
+  const rightText = typeof right === 'string' ? right : right.text
+  if (leftText === rightText) return true
+  const leftFold = typeof left === 'string' ? foldRawText(left) : foldChatText(left)
+  const rightFold = typeof right === 'string' ? foldRawText(right) : foldChatText(right)
+  if (leftFold === rightFold) return true
+  if (truncatedFoldMatches(leftFold, rightFold)) return true
+  return truncatedFoldMatches(foldRawText(leftText), foldRawText(rightText))
+}
+
+export function preferChatText(current: string, incoming: string) {
+  if (!incoming) return current
+  if (!current) return incoming
+  if (!chatTextMatches(current, incoming)) return current
+  if (isTruncatedText(current) && !isTruncatedText(incoming)) return incoming
+  if (isTruncatedText(incoming) && !isTruncatedText(current)) return current
+  return incoming.length > current.length ? incoming : current
+}
+
+export function mergedSourceLabel(current: ChatMessage, incoming: ChatMessage, targets: YouTubeChatTarget[] = []) {
+  const currentPlatforms = current.platforms || [current.platform]
+  const incomingPlatforms = incoming.platforms || [incoming.platform]
+  if (!current.sourceId && currentPlatforms.length > 1) return current.sourceLabel
+  if (!incoming.sourceId && incomingPlatforms.length > 1) return incoming.sourceLabel
+  if (current.sourceId && incoming.sourceId && !youtubeSameChatFor(current.sourceId, incoming.sourceId, targets)) return undefined
+  if (current.sourceLabel && incoming.sourceLabel && current.sourceLabel !== incoming.sourceLabel) return undefined
+  return current.sourceLabel || incoming.sourceLabel
+}
+
+function isHostOrOwn(message: ChatMessage, ctx?: { ownHandles?: Set<string>; ownUserIds?: Iterable<string> }) {
+  if (message.badges?.some((badge) => badge.label === 'HOST')) return true
+  if (!ctx?.ownHandles) return false
+  return isOwnChatMessage(message, { ownHandles: ctx.ownHandles, ownUserIds: ctx.ownUserIds })
 }
 
 export function sortedYouTubeBadges(badges?: ChatBadge[]) {
@@ -226,7 +294,11 @@ export function isStoredChatMessage(value: unknown): value is ChatMessage {
   return Boolean(item.id) && (item.platform === 'Twitch' || item.platform === 'Kick' || item.platform === 'YouTube') && typeof item.user === 'string' && typeof item.text === 'string' && typeof item.time === 'string'
 }
 
-export function collapseYouTubeDuplicates(messages: ChatMessage[], targets: YouTubeChatTarget[] = []) {
+export function collapseYouTubeDuplicates(
+  messages: ChatMessage[],
+  targets: YouTubeChatTarget[] = [],
+  ctx?: { ownHandles?: Set<string>; ownUserIds?: Iterable<string> },
+) {
   const kept: ChatMessage[] = []
   const seenIds: string[] = []
   let changed = false
@@ -234,12 +306,14 @@ export function collapseYouTubeDuplicates(messages: ChatMessage[], targets: YouT
     const at = Date.parse(message.time) || 0
     const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
     const match = youtube ? kept.findIndex((item) => {
-      if (foldChatText(item) !== foldChatText(message)) return false
+      if (!chatTextMatches(item, message)) return false
       if (!(item.platform === 'YouTube' || (item.platforms || []).includes('YouTube'))) return false
       if (!youtubeSameAuthor(item, message)) return false
-      if (!youtubeSameChatFor(item.sourceId, message.sourceId, targets)) return false
+      const sameChat = youtubeSameChatFor(item.sourceId, message.sourceId, targets)
+      const ownPair = isHostOrOwn(item, ctx) && isHostOrOwn(message, ctx)
+      if (!sameChat && !ownPair) return false
       const delta = Math.abs((Date.parse(item.time) || 0) - at)
-      return delta <= 2_000
+      return delta <= (sameChat ? 2_000 : 20_000)
     }) : -1
     if (match < 0) {
       kept.push(message)
@@ -248,18 +322,24 @@ export function collapseYouTubeDuplicates(messages: ChatMessage[], targets: YouT
     changed = true
     const current = kept[match]
     const platforms = [...new Set([...(current.platforms || [current.platform]), ...(message.platforms || [message.platform])])]
+    const text = preferChatText(current.text, message.text)
+    const takeIncomingParts = text === message.text && !isTruncatedText(message.text)
+    const parts = current.parts?.some((part) => part.type === 'emote')
+      ? current.parts
+      : takeIncomingParts && message.parts?.length ? message.parts : current.parts
     kept[match] = {
       ...current,
+      text,
       platforms,
       platform: platforms[0],
       sourceId: current.sourceId || message.sourceId,
       userId: current.userId || message.userId,
       ingest: message.ingest || current.ingest,
-      parts: current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts,
+      parts,
       avatar: current.avatar || message.avatar,
       badges: sortedYouTubeBadges(current.badges?.length ? current.badges : message.badges),
       color: current.color || message.color,
-      sourceLabel: current.sourceLabel || message.sourceLabel,
+      sourceLabel: mergedSourceLabel(current, message, targets),
     }
     if (current.id) seenIds.push(current.id)
     if (message.id) seenIds.push(message.id)
@@ -275,6 +355,7 @@ export function mergeIncomingChat(
     ownHandles: Set<string>
     recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[]
     targets?: YouTubeChatTarget[]
+    ownUserIds?: Iterable<string>
     max?: number
   },
 ) {
@@ -286,8 +367,8 @@ export function mergeIncomingChat(
   }
   const incomingTime = Date.parse(message.time) || Date.now()
   const incomingPlatforms = message.platforms?.length ? message.platforms : [message.platform]
-  const incomingIsOwn = ctx.ownHandles.has(message.user.toLowerCase())
-  const tracked = ctx.recentOutgoing.find((item) => item.text === message.text && Math.abs(incomingTime - item.at) < 20_000)
+  const incomingIsOwn = isOwnChatMessage(message, ctx)
+  const tracked = ctx.recentOutgoing.find((item) => chatTextMatches(item.text, message) && Math.abs(incomingTime - item.at) < 20_000)
   const incomingIngest = options?.ingest
   const targets = ctx.targets || []
 
@@ -295,20 +376,21 @@ export function mergeIncomingChat(
   let mergeDelta = Infinity
   for (let index = 0; index < messages.length; index++) {
     const item = messages[index]
-    const exactText = item.text === message.text
-    if (!exactText && foldChatText(item) !== foldChatText(message)) continue
+    if (!chatTextMatches(item, message)) continue
     const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
-    const itemIsOwn = ctx.ownHandles.has(item.user.toLowerCase())
+    const itemIsOwn = isOwnChatMessage(item, ctx)
     const itemPlatforms = item.platforms || [item.platform]
-    const youtubeEcho = message.platform === 'YouTube'
+    const sameYouTubeChat = youtubeSameChatFor(item.sourceId, message.sourceId, targets)
+    const youtubePair = message.platform === 'YouTube'
       && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
       && youtubeSameAuthor(item, message)
-      && youtubeSameChatFor(item.sourceId, message.sourceId, targets)
-    let match = youtubeEcho && delta <= 2_000
-    if (!match && exactText && tracked && delta <= 20_000 && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
-    else if (!match && exactText && incomingIsOwn && itemIsOwn && delta <= 90_000) {
+    const ownYouTube = youtubePair && (incomingIsOwn || itemIsOwn)
+    let match = youtubePair && sameYouTubeChat && delta <= 2_000
+    if (!match && ownYouTube && !sameYouTubeChat && delta <= 20_000) match = true
+    if (!match && tracked && delta <= 20_000 && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
+    else if (!match && incomingIsOwn && itemIsOwn && delta <= 90_000) {
       const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-      match = !samePlatforms
+      match = !samePlatforms || Boolean(youtubePair && !sameYouTubeChat)
     }
     if (!match || delta >= mergeDelta) continue
     mergeAt = index
@@ -320,17 +402,28 @@ export function mergeIncomingChat(
     const preferred = tracked?.platforms || []
     const platforms = [...new Set([...preferred, ...(current.platforms || [current.platform]), ...incomingPlatforms])]
     const already = current.platforms || [current.platform]
-    const parts = current.parts?.some((part) => part.type === 'emote') ? current.parts : message.parts?.length ? message.parts : current.parts
+    const text = preferChatText(current.text, message.text)
+    const takeIncomingParts = text === message.text && !isTruncatedText(message.text)
+    const parts = current.parts?.some((part) => part.type === 'emote')
+      ? current.parts
+      : takeIncomingParts && message.parts?.length ? message.parts : current.parts
     const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
+    const sourceLabel = mergedSourceLabel(current, message, targets)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
     if (current.id) seenIds.push(current.id)
     if (message.id) seenIds.push(message.id)
     const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
-    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged) return { messages, changed: false, seenIds }
+    const textChanged = text !== current.text
+    const labelChanged = sourceLabel !== current.sourceLabel
+    const metaChanged = Boolean((message.userId && !current.userId) || (message.avatar && !current.avatar) || (!current.badges?.length && message.badges?.length))
+    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged) {
+      return { messages, changed: false, seenIds }
+    }
     return {
       messages: messages.map((item, index) => index === mergeAt ? {
         ...item,
         ...(takeIncomingId ? { id: message.id } : {}),
+        text,
         platform: platforms[0],
         platforms,
         sourceId: item.sourceId || message.sourceId,
@@ -340,7 +433,7 @@ export function mergeIncomingChat(
         avatar: item.avatar || message.avatar,
         badges: sortedYouTubeBadges(item.badges?.length ? item.badges : message.badges),
         color: item.color || message.color,
-        sourceLabel: item.sourceLabel || message.sourceLabel,
+        sourceLabel,
       } : item),
       changed: true,
       seenIds,

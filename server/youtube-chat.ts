@@ -97,10 +97,38 @@ export function parseYouTubeTitle(html: string) {
   return unescapeYouTubeText(meta).replace(/\s*-\s*YouTube\s*$/i, '').trim()
 }
 
+const TRAILING_TRUNCATED_URL = /https?:\/\/\S*(?:\.{2,}|…)\s*$/i
+
+export function runLinkUrl(run: any) {
+  const endpoint = run?.navigationEndpoint || run?.command
+  const raw = String(endpoint?.urlEndpoint?.url || endpoint?.commandMetadata?.webCommandMetadata?.url || '').trim()
+  if (!raw) return
+  try {
+    const href = raw.startsWith('http') ? raw : `https://www.youtube.com${raw.startsWith('/') ? raw : `/${raw}`}`
+    const url = new URL(href)
+    const target = url.searchParams.get('q') || url.searchParams.get('redir')
+    if (target && /^https?:\/\//i.test(target)) return target
+    if (/^https?:\/\//i.test(href) && !/youtube\.com\/redirect/i.test(href)) return href
+  } catch { /* ignore malformed URLs */ }
+}
+
+export function expandRunText(run: any) {
+  const text = String(run?.text || '')
+  const link = runLinkUrl(run)
+  if (!link) return text
+  const trimmed = text.trim()
+  if (!trimmed) return text
+  if (TRAILING_TRUNCATED_URL.test(text) && !/^https?:\/\//i.test(trimmed)) return text.replace(TRAILING_TRUNCATED_URL, link)
+  const stripped = trimmed.replace(/(?:\.{2,}|…)\s*$/, '')
+  if (!/^https?:\/\//i.test(stripped) && !/^www\./i.test(stripped)) return text
+  if (!/(?:\.{2,}|…)\s*$/.test(trimmed) && trimmed.length > link.length) return trimmed
+  return link
+}
+
 export function runsToParts(runs: any[]): YouTubeChatMessage['parts'] {
   const parts: NonNullable<YouTubeChatMessage['parts']> = []
   for (const run of runs || []) {
-    if (run?.text) parts.push({ type: 'text', text: String(run.text) })
+    if (run?.text) parts.push({ type: 'text', text: expandRunText(run) })
     else if (run?.emoji) {
       const url = run.emoji.image?.thumbnails?.slice(-1)[0]?.url || run.emoji.image?.thumbnails?.[0]?.url
       const name = run.emoji.shortcuts?.[0] || run.emoji.emojiId || 'emoji'
