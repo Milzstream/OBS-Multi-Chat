@@ -23,14 +23,14 @@ function browserPath() {
   return candidates.find((candidate) => candidate && fs.existsSync(candidate))
 }
 
-function parseJson(value: unknown) {
+export function parseJson(value: unknown) {
   if (typeof value === 'string') {
     try { return JSON.parse(value) as any } catch { return undefined }
   }
   return value as any
 }
 
-function chatroomIdFrom(payload: any): number | undefined {
+export function chatroomIdFrom(payload: any): number | undefined {
   const id = payload?.chatroom?.id ?? payload?.chatroom_id ?? payload?.data?.chatroom?.id
   const numeric = Number(id)
   return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined
@@ -86,7 +86,7 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
   }
 }
 
-function pickName(...values: unknown[]): string | undefined {
+export function pickName(...values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value === 'string' && value.trim() && !/^(null|undefined)$/i.test(value.trim())) return value.trim()
     if (value && typeof value === 'object') {
@@ -97,7 +97,7 @@ function pickName(...values: unknown[]): string | undefined {
   }
 }
 
-function kickEventToActivity(eventName: string, data: any): KickActivity | undefined {
+export function kickEventToActivity(eventName: string, data: any): KickActivity | undefined {
   const event = eventName.replace(/\\/g, '')
   if (/FollowersUpdated/i.test(event) && !pickName(data?.username, data?.user, data?.follower)) return
   if (/FollowEvent|FollowersUpdated/i.test(event)) {
