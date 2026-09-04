@@ -3,9 +3,12 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements } from '../server/streamelements.js'
+import { ActivityWarningBanner } from '../src/activity/ActivityApp.tsx'
 import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
 describe('activity time and profiles', () => {
@@ -90,5 +93,18 @@ describe('activity display', () => {
     assert.equal(activitySubtitle({ amount: '$5.00', months: 3, viewers: 12, message: 'hi' }), '$5.00 · 3 mo · 12 viewers · hi')
     assert.equal(kindLabel.superchat, 'SUPER CHAT')
     assert.equal(kindLabel.follow, 'FOLLOW')
+  })
+
+  it('renders backend warnings and deduplicates them in the activity banner', () => {
+    const markup = renderToStaticMarkup(createElement(ActivityWarningBanner, { messages: ['Reconnect Twitch', 'Reconnect Twitch', 'StreamElements offline'], missingJwts: [], seConnected: true, onDismiss: () => undefined }))
+    assert.match(markup, /Activity warning/)
+    assert.equal(markup.match(/Reconnect Twitch/g)?.length, 1)
+    assert.match(markup, /StreamElements offline/)
+  })
+
+  it('renders the existing missing-JWT fallback when there are no backend warnings', () => {
+    const markup = renderToStaticMarkup(createElement(ActivityWarningBanner, { messages: [], missingJwts: ['Twitch'], seConnected: false, onDismiss: () => undefined }))
+    assert.match(markup, /StreamElements not configured/)
+    assert.match(markup, /STREAMELEMENTS_JWT_TWITCH/)
   })
 })

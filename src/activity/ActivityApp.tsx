@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
 import { ConnectionSettings } from '../ConnectionSettings'
@@ -53,6 +53,27 @@ function platformIcon(platform: Platform | ActivityPlatform, size = 13) {
   if (platform === 'YouTube') return <Youtube size={size} strokeWidth={2.5} />
   if (platform === 'StreamElements') return <Bell size={size} strokeWidth={2.5} />
   return <span className="kick-mark">K</span>
+}
+
+export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDismiss }: { messages: string[]; missingJwts: string[]; seConnected: boolean; onDismiss: () => void }) {
+  const warningMessages = [...new Set(messages)]
+  return (
+    <div className="activity-setup">
+      <button type="button" className="activity-setup-close" aria-label="Dismiss warning" onClick={onDismiss}>×</button>
+      {warningMessages.length ? (
+        <>
+          <strong>Activity warning</strong>
+          {warningMessages.map((message) => <span key={message}>{message}</span>)}
+        </>
+      ) : (
+        <>
+          <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
+          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
+          <span>Save, then restart this app.</span>
+        </>
+      )}
+    </div>
+  )
 }
 
 export default function ActivityApp() {
@@ -192,21 +213,7 @@ export default function ActivityApp() {
         note="Connect accounts here for backup or chat."
       />}
       {showSetup ? (
-        <div className="activity-setup">
-          <button type="button" className="activity-setup-close" aria-label="Dismiss warning" onClick={() => setDismissedWarning(true)}>×</button>
-          {warningMessages.length ? (
-            <>
-              <strong>Activity warning</strong>
-              {warningMessages.map((message) => <span key={message}>{message}</span>)}
-            </>
-          ) : (
-            <>
-              <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-              <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
-              <span>Save, then restart this app.</span>
-            </>
-          )}
-        </div>
+        <ActivityWarningBanner messages={warningMessages} missingJwts={missingJwts} seConnected={seConnected} onDismiss={() => setDismissedWarning(true)} />
       ) : null}
       <section className="activity-feed">
         <div className="activity-list" ref={listRef} onScroll={onScroll}>
