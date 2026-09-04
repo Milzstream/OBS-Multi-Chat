@@ -57,6 +57,7 @@ function platformIcon(platform: Platform | ActivityPlatform, size = 13) {
 
 export default function ActivityApp() {
   const [events, setEvents] = useState<ActivityEvent[]>([])
+  const [activityWarnings, setActivityWarnings] = useState<string[]>([])
   const [missingJwts, setMissingJwts] = useState<string[]>([])
   const [seConnected, setSeConnected] = useState(false)
   const [streamelements, setStreamelements] = useState({ connected: false, handle: '', missing: [] as string[] })
@@ -85,6 +86,7 @@ export default function ActivityApp() {
   useEffect(() => {
     const apply = (remote: BackendState) => {
       setEvents(remote.activity || [])
+      setActivityWarnings(remote.activityWarnings || [])
       setMissingJwts(remote.streamelements?.missing || [])
       setSeConnected(Boolean(remote.streamelements?.connected))
       if (remote.streamelements) setStreamelements({ connected: remote.streamelements.connected, handle: remote.streamelements.handle, missing: remote.streamelements.missing || [] })
@@ -106,7 +108,8 @@ export default function ActivityApp() {
     return [...rows].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
   }, [events, filter])
   const { paused, onScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
-  const showSetup = !ignoreMissingJwt && !dismissedWarning && (missingJwts.length > 0 || !seConnected)
+  const warningMessages = [...new Set(activityWarnings)]
+  const showSetup = !dismissedWarning && (warningMessages.length > 0 || (!ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
 
   const sendTest = (item: (typeof tests)[number]) => {
     setShowTests(false)
@@ -191,9 +194,18 @@ export default function ActivityApp() {
       {showSetup ? (
         <div className="activity-setup">
           <button type="button" className="activity-setup-close" aria-label="Dismiss warning" onClick={() => setDismissedWarning(true)}>×</button>
-          <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
-          <span>Save, then restart this app.</span>
+          {warningMessages.length ? (
+            <>
+              <strong>Activity warning</strong>
+              {warningMessages.map((message) => <span key={message}>{message}</span>)}
+            </>
+          ) : (
+            <>
+              <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
+              <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
+              <span>Save, then restart this app.</span>
+            </>
+          )}
         </div>
       ) : null}
       <section className="activity-feed">
