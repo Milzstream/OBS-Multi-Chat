@@ -59,21 +59,50 @@ export function pacificDate(now = Date.now()) {
 
 export function youtubeQuotaCost(endpoint: string, method = 'GET') {
   const path = endpoint.split('?')[0].replace(/^\//, '')
-  if (path.startsWith('liveChat/bans')) return 50
-  if (path.startsWith('liveChat/messages')) return 5
+  const verb = method.toUpperCase()
+
+  // 1. Live Chat Bans
+  if (path.startsWith('liveChat/bans')) {
+    return verb === 'DELETE' ? 50 : 50 // Both insert and delete cost 50 units
+  }
+
+  // 2. Live Chat Messages (Splitting list from insert/delete)
+  if (path.startsWith('liveChat/messages')) {
+    if (verb === 'POST' || verb === 'DELETE') {
+      return 50 // liveChatMessages.insert or .delete
+    }
+    return 1 // liveChatMessages.list costs exactly 1 unit
+  }
+
+  // 3. Other standard list endpoints
+  if (path.startsWith('liveBroadcasts') || path.startsWith('channels') || path.startsWith('videos')) {
+    return 1
+  }
+
   return 1
 }
 
 export function youtubeQuotaLabel(endpoint: string, method = 'GET') {
-  const path = endpoint.split('?')[0].replace(/^\//, '')
+  const path = endpoint.split(/[?#]/)[0].replace(/^\//, '')
   const verb = method.toUpperCase()
-  if (path.startsWith('liveChat/bans')) return verb === 'DELETE' ? 'liveChatBans.delete' : 'liveChatBans.insert'
-  if (path.startsWith('liveChat/messages')) return verb === 'POST' ? 'liveChatMessages.insert' : verb === 'DELETE' ? 'liveChatMessages.delete' : 'liveChatMessages.list'
+
+  if (path.startsWith('liveChat/bans')) {
+    return verb === 'DELETE' ? 'liveChatBans.delete' : 'liveChatBans.insert'
+  }
+  
+  if (path.startsWith('liveChat/messages')) {
+    if (verb === 'POST') return 'liveChatMessages.insert'
+    if (verb === 'DELETE') return 'liveChatMessages.delete'
+    return 'liveChatMessages.list'
+  }
+
   if (path.startsWith('liveBroadcasts')) return 'liveBroadcasts.list'
   if (path.startsWith('channels')) return 'channels.list'
   if (path.startsWith('videos')) return 'videos.list'
+  
   return `${path} ${verb}`
 }
+
 
 export function quotaWarnAt(limit: number) {
   return Math.floor(limit * 0.8)
