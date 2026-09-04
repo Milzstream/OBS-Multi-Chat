@@ -59,6 +59,10 @@ http://localhost:4173/oauth/callback
 
 The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, follower, subscription, and bits permissions. After updating the app, disconnect and reconnect Twitch so the new chat and alert scopes can be granted. The client secret stays in the backend environment file and is never sent to OBS.
 
+### Automatic chat translation
+
+Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text are automatically translated to English for the dock. The original message remains visible with an **EN** marker. Translation sends the message text to Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`); this is an outbound third-party request and currently has no settings toggle. Do not connect platforms or use this feature if that handling is not acceptable for your stream.
+
 ### Google / YouTube
 
 1. Visit https://console.cloud.google.com/.

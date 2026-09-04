@@ -639,6 +639,15 @@ export function needsTranslation(text: string) {
   return NON_ENGLISH.test(text)
 }
 
+export function sanitizeIrcMessage(text: string) {
+  return text.replace(/[\r\n\0]/g, ' ')
+}
+
+export function pruneYouTubeSeenIds(seenIds: Set<string>, messages: ChatMessage[]) {
+  const retained = new Set(messages.filter((message) => message.platform === 'YouTube' || message.platforms?.includes('YouTube')).map((message) => message.id))
+  for (const id of seenIds) if (!retained.has(id)) seenIds.delete(id)
+}
+
 export function twitchEventToActivity(type: string, event: any, now = new Date().toISOString()): ActivityEvent | undefined {
   const time = now
   if (type === 'channel.follow') {

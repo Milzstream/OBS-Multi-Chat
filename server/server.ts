@@ -35,10 +35,12 @@ import {
   parseKickParts,
   parseTwitchChatLine,
   parseYouTubeQuotaInput,
+  pruneYouTubeSeenIds,
   partsFromTwitchFragments,
   quotaFromHeaders,
   quotaWarnAt,
   resolveYouTubeLiveChatIds,
+  sanitizeIrcMessage,
   summarizeApiError,
   syncYouTubeTokenChatIds,
   twitchBadgesFromList,
@@ -183,6 +185,7 @@ const state: State = {
 
 function persistChat() {
   try {
+    pruneYouTubeSeenIds(youtubeSeen, state.messages)
     fs.mkdirSync(dataDir, { recursive: true })
     const stored = state.messages.slice(-CHAT_MAX).map((message) => {
       const rest = { ...message }
@@ -512,7 +515,10 @@ async function ensureToken(platform: Platform): Promise<Token | undefined> {
   const token = tokens[platform]
   if (!token) return
   if (!token.expiresAt || token.expiresAt - 120_000 > Date.now()) return token
-  if (!token.refreshToken) return token
+  if (!token.refreshToken) {
+    markTokenRefreshFailure(platform)
+    return
+  }
   if (!refreshLocks.has(platform)) {
     refreshLocks.set(platform, refreshAccessToken(platform).finally(() => refreshLocks.delete(platform)))
   }
@@ -540,8 +546,15 @@ async function refreshAccessToken(platform: Platform): Promise<Token | undefined
     return tokens[platform]
   } catch (error) {
     console.error(`${platform} token refresh:`, error instanceof Error ? error.message : error)
-    return tokens[platform]
+    markTokenRefreshFailure(platform)
+    return
   }
+}
+
+function markTokenRefreshFailure(platform: Platform) {
+  const account = state.accounts.find((item) => item.platform === platform)
+  if (account) Object.assign(account, { connected: false, live: false, viewers: 0 })
+  setHealth(platform, 'down', `${platform} token refresh failed - reconnect in settings`)
 }
 
 async function fetchTimed(url: string, options: RequestInit = {}, ms = 8_000) {
@@ -1667,9 +1680,10 @@ async function sendMessage(platform: Platform, text: string) {
 }
 
 async function sendTwitchMessage(text: string) {
+  const safeText = sanitizeIrcMessage(text)
   const nick = tokens.Twitch?.user?.toLowerCase()
   if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-    twitchIrc.send(`PRIVMSG #${nick} :${text}\r\n`)
+    twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
     return { ok: true }
   }
   const helix = await sendTwitchHelix(text)
