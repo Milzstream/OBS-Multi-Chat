@@ -10,6 +10,8 @@ import {
   parseTwitchChatLine,
   parseTwitchEmoteParts,
   partsFromTwitchFragments,
+  pruneYouTubeSeenIds,
+  sanitizeIrcMessage,
   summarizeApiError,
   twitchBadgeLabel,
   twitchBadgesFromTag,
@@ -38,6 +40,10 @@ describe('Twitch IRC', () => {
   it('returns ping for PING lines and ignores noise', () => {
     assert.equal(parseTwitchChatLine('PING :tmi.twitch.tv'), 'ping')
     assert.equal(parseTwitchChatLine(':tmi.twitch.tv 001 ada :Welcome'), undefined)
+  })
+
+  it('sanitizes line breaks and NULs before IRC sends', () => {
+    assert.equal(sanitizeIrcMessage('hello\r\nJOIN #other\0world'), 'hello  JOIN #other world')
   })
 
   it('maps badge labels', () => {
@@ -82,6 +88,14 @@ describe('Emotes and avatars', () => {
     assert.equal(needsTranslation('hello'), false)
     assert.equal(needsTranslation('こんにちは'), true)
     assert.equal(needsTranslation('Привет chat'), true)
+  })
+})
+
+describe('YouTube chat memory', () => {
+  it('prunes seen ids that are no longer in retained chat history', () => {
+    const seen = new Set(['keep', 'drop'])
+    pruneYouTubeSeenIds(seen, [{ id: 'keep', platform: 'YouTube', user: 'Ada', text: 'hi', time: '2026-09-02T12:00:00.000Z' }])
+    assert.deepEqual([...seen], ['keep'])
   })
 })
 
