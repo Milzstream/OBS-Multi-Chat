@@ -83,7 +83,7 @@ export function youtubeQuotaCost(endpoint: string, method = 'GET') {
 }
 
 export function youtubeQuotaLabel(endpoint: string, method = 'GET') {
-  const path = endpoint.split('[?#]')[0].replace(/^\//, '')
+  const path = endpoint.split(/[?#]/)[0].replace(/^\//, '')
   const verb = method.toUpperCase()
 
   if (path.startsWith('liveChat/bans')) {
