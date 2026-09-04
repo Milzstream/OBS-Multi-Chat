@@ -90,10 +90,13 @@ describe('YouTube send', () => {
 describe('YouTube quota', () => {
   it('charges the documented unit costs', () => {
     assert.equal(youtubeQuotaCost('/liveBroadcasts?part=snippet'), 1)
-    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'GET'), 5)
-    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'POST'), 5)
+    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'GET'), 1)
+    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'POST'), 50)
     assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'POST'), 50)
+    assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'DELETE'), 50)
     assert.equal(youtubeQuotaCost('/channels?mine=true'), 1)
+    assert.equal(youtubeQuotaCost('/videos?id=abc'), 1)
+    assert.equal(youtubeQuotaCost('/unmapped-endpoint', 'GET'), 1)
   })
 
   it('labels insert vs list vs delete', () => {
@@ -101,6 +104,9 @@ describe('YouTube quota', () => {
     assert.equal(youtubeQuotaLabel('/liveChat/messages?liveChatId=x', 'GET'), 'liveChatMessages.list')
     assert.equal(youtubeQuotaLabel('/liveChat/messages?id=x', 'DELETE'), 'liveChatMessages.delete')
     assert.equal(youtubeQuotaLabel('/liveChat/bans?part=snippet', 'POST'), 'liveChatBans.insert')
+    assert.equal(youtubeQuotaLabel('/videos?chart=mostPopular', 'GET'), 'videos.list')
+    assert.equal(youtubeQuotaLabel('/liveBroadcasts?status=active', 'GET'), 'liveBroadcasts.list')
+    assert.equal(youtubeQuotaLabel('/playlists', 'PATCH'), 'playlists PATCH')
   })
 
   it('parses console quota input', () => {
