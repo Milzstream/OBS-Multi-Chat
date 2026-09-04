@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
 import { ConnectionSettings } from '../ConnectionSettings'
@@ -55,8 +55,30 @@ function platformIcon(platform: Platform | ActivityPlatform, size = 13) {
   return <span className="kick-mark">K</span>
 }
 
+export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDismiss }: { messages: string[]; missingJwts: string[]; seConnected: boolean; onDismiss: () => void }) {
+  const warningMessages = [...new Set(messages)]
+  return (
+    <div className="activity-setup">
+      <button type="button" className="activity-setup-close" aria-label="Dismiss warning" onClick={onDismiss}>×</button>
+      {warningMessages.length ? (
+        <>
+          <strong>Activity warning</strong>
+          {warningMessages.map((message) => <span key={message}>{message}</span>)}
+        </>
+      ) : (
+        <>
+          <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
+          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
+          <span>Save, then restart this app.</span>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function ActivityApp() {
   const [events, setEvents] = useState<ActivityEvent[]>([])
+  const [activityWarnings, setActivityWarnings] = useState<string[]>([])
   const [missingJwts, setMissingJwts] = useState<string[]>([])
   const [seConnected, setSeConnected] = useState(false)
   const [streamelements, setStreamelements] = useState({ connected: false, handle: '', missing: [] as string[] })
@@ -85,6 +107,7 @@ export default function ActivityApp() {
   useEffect(() => {
     const apply = (remote: BackendState) => {
       setEvents(remote.activity || [])
+      setActivityWarnings(remote.activityWarnings || [])
       setMissingJwts(remote.streamelements?.missing || [])
       setSeConnected(Boolean(remote.streamelements?.connected))
       if (remote.streamelements) setStreamelements({ connected: remote.streamelements.connected, handle: remote.streamelements.handle, missing: remote.streamelements.missing || [] })
@@ -106,7 +129,8 @@ export default function ActivityApp() {
     return [...rows].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
   }, [events, filter])
   const { paused, onScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
-  const showSetup = !ignoreMissingJwt && !dismissedWarning && (missingJwts.length > 0 || !seConnected)
+  const warningMessages = [...new Set(activityWarnings)]
+  const showSetup = !dismissedWarning && (warningMessages.length > 0 || (!ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
 
   const sendTest = (item: (typeof tests)[number]) => {
     setShowTests(false)
@@ -189,12 +213,7 @@ export default function ActivityApp() {
         note="Connect accounts here for backup or chat."
       />}
       {showSetup ? (
-        <div className="activity-setup">
-          <button type="button" className="activity-setup-close" aria-label="Dismiss warning" onClick={() => setDismissedWarning(true)}>×</button>
-          <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
-          <span>Save, then restart this app.</span>
-        </div>
+        <ActivityWarningBanner messages={warningMessages} missingJwts={missingJwts} seConnected={seConnected} onDismiss={() => setDismissedWarning(true)} />
       ) : null}
       <section className="activity-feed">
         <div className="activity-list" ref={listRef} onScroll={onScroll}>
