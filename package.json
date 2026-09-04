@@ -1,7 +1,7 @@
 {
   "name": "obs-multi-chat",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.3.4",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
