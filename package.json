@@ -1,7 +1,7 @@
 {
   "name": "obs-multi-chat",
   "private": true,
-  "version": "0.3.6",
+  "version": "0.3.7",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
@@ -38,6 +38,7 @@
     "@types/react-dom": "^18.3.1",
     "@types/ws": "^8.5.13",
     "pkg": "^5.8.1",
+    "resedit": "^3.1.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vite": "^6.1.0"
