@@ -97,6 +97,9 @@ const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
 const localApi = { port, bindHost, lanEnabled, apiToken }
 const app = express()
 const httpServer = createServer(app)
+httpServer.requestTimeout = 0
+httpServer.headersTimeout = 0
+httpServer.timeout = 0
 const clients = new Set<express.Response>()
 const dataDir = resolveDataDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd(), env: process.env })
 const tokenFile = path.join(dataDir, 'tokens.json')
@@ -224,7 +227,7 @@ app.get('/api/state', (_request, response) => {
 app.get('/events', (request, response) => {
   const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
   const origin = request.get('origin')
-  if (origin && isTrustedOrigin(origin, localApi)) headers['Access-Control-Allow-Origin'] = origin
+  if (origin && isTrustedOrigin(origin, localApi, request.get('host'))) headers['Access-Control-Allow-Origin'] = origin
   response.writeHead(200, headers)
   response.write(`data: ${JSON.stringify(state)}\n\n`)
   clients.add(response)
@@ -1931,11 +1934,27 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
   return { platform, ok: false, error: 'Unsupported stream platform' }
 }
 
+function writeSse(client: express.Response, chunk: string) {
+  if (client.writableEnded || client.destroyed) {
+    clients.delete(client)
+    return
+  }
+  try {
+    client.write(chunk)
+  } catch {
+    clients.delete(client)
+  }
+}
+
 function broadcast() {
   state.activity = activityStore.list()
   const payload = `data: ${JSON.stringify(state)}\n\n`
-  for (const client of clients) client.write(payload)
+  for (const client of [...clients]) writeSse(client, payload)
 }
+
+setInterval(() => {
+  for (const client of [...clients]) writeSse(client, ': keepalive\n\n')
+}, 15_000).unref()
 function loadTokens(): Partial<Record<TokenPlatform, Token>> {
   const parsed = readJsonFile<unknown>(tokenFile, {})
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}

@@ -108,7 +108,7 @@ function App() {
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
     events.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
-    events.onerror = () => setBackendOnline(false)
+    events.onerror = () => { if (events.readyState === EventSource.CLOSED) setBackendOnline(false) }
     return () => events.close()
   }, [])
 

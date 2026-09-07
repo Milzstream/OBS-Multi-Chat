@@ -128,7 +128,7 @@ export default function ActivityApp() {
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
     const source = new EventSource('/events')
     source.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
-    source.onerror = () => setBackendOnline(false)
+    source.onerror = () => { if (source.readyState === EventSource.CLOSED) setBackendOnline(false) }
     return () => source.close()
   }, [])
 
