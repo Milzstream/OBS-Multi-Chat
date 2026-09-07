@@ -817,3 +817,25 @@ export function oauthAuthorizeUrl(platform: Platform, options: { clientId: strin
   }
   return platform === 'Twitch' ? `https://id.twitch.tv/oauth2/authorize?${params}` : platform === 'Kick' ? `https://id.kick.com/oauth/authorize?${params}` : `https://accounts.google.com/o/oauth2/v2/auth?${params}`
 }
+
+export function tokenRefreshFailureMessage(platform: Platform) {
+  return `${platform} token refresh failed - reconnect in settings`
+}
+
+export function tokenRefreshRetryMessage(platform: Platform) {
+  return `${platform} token refresh failed — retrying`
+}
+
+export function isTokenRefreshHealthMessage(message: string) {
+  return /token refresh failed/i.test(message)
+}
+
+export function shouldKeepTokenRefreshBanner(health: Health, connected: boolean) {
+  return isTokenRefreshHealthMessage(health.message) && !connected
+}
+
+export function isPermanentTokenRefreshError(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error)
+  if (/timed out|timeout|AbortError|ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|network|socket|429|502|503|504/i.test(text)) return false
+  return /invalid_grant|invalid_token|unauthorized_client|invalid_client|invalid_request|\b400\b|\b401\b/i.test(text)
+}

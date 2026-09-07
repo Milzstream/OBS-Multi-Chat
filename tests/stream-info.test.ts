@@ -4,11 +4,16 @@ import {
   applyLiveStreamDetails,
   defaultAppSettings,
   isMoreSpecificCategory,
+  isPermanentTokenRefreshError,
+  isTokenRefreshHealthMessage,
   kickStreamDetails,
   loadStreamInfo,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
   parseAppSettings,
+  shouldKeepTokenRefreshBanner,
+  tokenRefreshFailureMessage,
+  tokenRefreshRetryMessage,
   YOUTUBE_OAUTH_SCOPES,
 } from '../server/logic.js'
 
@@ -92,5 +97,28 @@ describe('OAuth URLs', () => {
     const kick = new URL(oauthAuthorizeUrl('Kick', { clientId: 'k', redirectUri: 'http://localhost:4173/oauth/callback', state: 's', codeChallenge: 'chal' }))
     assert.equal(kick.searchParams.get('code_challenge_method'), 'S256')
     assert.equal(kick.searchParams.get('code_challenge'), 'chal')
+  })
+})
+
+describe('token refresh health', () => {
+  it('keeps the reconnect banner until the account is connected again', () => {
+    const down = { status: 'down' as const, message: tokenRefreshFailureMessage('YouTube') }
+    const retry = { status: 'warn' as const, message: tokenRefreshRetryMessage('YouTube') }
+    assert.equal(isTokenRefreshHealthMessage(down.message), true)
+    assert.equal(isTokenRefreshHealthMessage(retry.message), true)
+    assert.equal(isTokenRefreshHealthMessage('YouTube is live but chat is unavailable'), false)
+    assert.equal(shouldKeepTokenRefreshBanner(down, false), true)
+    assert.equal(shouldKeepTokenRefreshBanner(down, true), false)
+    assert.equal(shouldKeepTokenRefreshBanner(retry, false), true)
+    assert.equal(shouldKeepTokenRefreshBanner({ status: 'ok', message: '' }, false), false)
+  })
+
+  it('treats invalid grants as permanent and network/quota errors as retryable', () => {
+    assert.equal(isPermanentTokenRefreshError(new Error('YouTube token request: 400 {"error":"invalid_grant"}')), true)
+    assert.equal(isPermanentTokenRefreshError(new Error('Twitch token request: 401 unauthorized')), true)
+    assert.equal(isPermanentTokenRefreshError(new Error('Request timed out after 8000ms')), false)
+    assert.equal(isPermanentTokenRefreshError(new Error('fetch failed')), false)
+    assert.equal(isPermanentTokenRefreshError(new Error('YouTube token request: 503 Service Unavailable')), false)
+    assert.equal(isPermanentTokenRefreshError(new Error('Kick token request: 429')), false)
   })
 })

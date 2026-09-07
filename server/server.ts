@@ -21,7 +21,9 @@ import {
   defaultAppSettings,
   isDailyQuotaHeader,
   isEndedYouTubeChat,
+  isPermanentTokenRefreshError,
   isStoredChatMessage,
+  isTokenRefreshHealthMessage,
   normalizeChatHandle,
   kickBadges,
   kickStreamDetails,
@@ -43,8 +45,11 @@ import {
   quotaWarnAt,
   resolveYouTubeLiveChatIds,
   sanitizeIrcMessage,
+  shouldKeepTokenRefreshBanner,
   summarizeApiError,
   syncYouTubeTokenChatIds,
+  tokenRefreshFailureMessage,
+  tokenRefreshRetryMessage,
   twitchBadgesFromList,
   twitchEventToActivity,
   youtubeApiErrorReason,
@@ -363,6 +368,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes') }
   if (platform === 'Kick') void kickChat.stop()
   if (platform === 'YouTube') { setYouTubeTargets([]); void youtubeChat.stop() }
+  setHealth(platform, 'ok')
   broadcast()
   response.json({ ok: true })
 })
@@ -390,6 +396,7 @@ app.get('/oauth/callback', async (request, response) => {
     saveTokens()
     const account = state.accounts.find((item) => item.platform === platform)
     if (account) Object.assign(account, { connected: true, handle: tokens[platform]?.user || platform })
+    setHealth(platform, 'ok')
     startAdapter(platform)
     broadcast()
     response.send('<script>window.close()</script>Connected. You can close this window.')
@@ -534,7 +541,10 @@ async function ensureToken(platform: Platform): Promise<Token | undefined> {
 
 async function refreshAccessToken(platform: Platform): Promise<Token | undefined> {
   const token = tokens[platform]
-  if (!token?.refreshToken) return token
+  if (!token?.refreshToken) {
+    markTokenRefreshFailure(platform)
+    return
+  }
   try {
     const json = await requestToken(platform, {
       client_id: process.env[`${platform.toUpperCase()}_CLIENT_ID`] || '',
@@ -550,10 +560,12 @@ async function refreshAccessToken(platform: Platform): Promise<Token | undefined
     }
     saveTokens()
     console.log(`${platform} access token refreshed`)
+    restorePlatformConnection(platform)
     return tokens[platform]
   } catch (error) {
     console.error(`${platform} token refresh:`, error instanceof Error ? error.message : error)
-    markTokenRefreshFailure(platform)
+    if (isPermanentTokenRefreshError(error)) markTokenRefreshFailure(platform)
+    else setHealth(platform, 'warn', tokenRefreshRetryMessage(platform))
     return
   }
 }
@@ -561,7 +573,14 @@ async function refreshAccessToken(platform: Platform): Promise<Token | undefined
 function markTokenRefreshFailure(platform: Platform) {
   const account = state.accounts.find((item) => item.platform === platform)
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0 })
-  setHealth(platform, 'down', `${platform} token refresh failed - reconnect in settings`)
+  setHealth(platform, 'down', tokenRefreshFailureMessage(platform))
+}
+
+function restorePlatformConnection(platform: Platform) {
+  const token = tokens[platform]
+  const account = state.accounts.find((item) => item.platform === platform)
+  if (account && token) Object.assign(account, { connected: true, handle: token.user || account.handle || platform })
+  if (isTokenRefreshHealthMessage(state.health[platform].message)) setHealth(platform, 'ok')
 }
 
 async function fetchTimed(url: string, options: RequestInit = {}, ms = 8_000) {
@@ -1020,22 +1039,36 @@ function ensureTwitchChat() {
 
 function refreshChatHealth() {
   if (tokens.Twitch) {
-    if (twitchEventSubReady || twitchIrcReady) { if (state.health.Twitch.status === 'down') setHealth('Twitch', 'ok') }
-    else setHealth('Twitch', 'down', 'Twitch chat disconnected — messages may be missing')
+    const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
+    if (!shouldKeepTokenRefreshBanner(state.health.Twitch, Boolean(twitchAccount?.connected))) {
+      if (twitchEventSubReady || twitchIrcReady) { if (state.health.Twitch.status === 'down') setHealth('Twitch', 'ok') }
+      else setHealth('Twitch', 'down', 'Twitch chat disconnected — messages may be missing')
+    }
     if (!twitchEventSubReady) ensureTwitchChat()
+  } else if (isTokenRefreshHealthMessage(state.health.Twitch.message)) {
+    setHealth('Twitch', 'ok')
   }
   if (tokens.Kick) {
-    if (kickChat.connected) { if (state.health.Kick.status === 'down') setHealth('Kick', 'ok') }
-    else setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
+    const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
+    if (!shouldKeepTokenRefreshBanner(state.health.Kick, Boolean(kickAccount?.connected))) {
+      if (kickChat.connected) { if (state.health.Kick.status === 'down') setHealth('Kick', 'ok') }
+      else setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
+    }
+  } else if (isTokenRefreshHealthMessage(state.health.Kick.message)) {
+    setHealth('Kick', 'ok')
   }
   if (tokens.YouTube) {
     const account = state.accounts.find((item) => item.platform === 'YouTube')
-    const quota = youtubeQuotaHealth()
-    if (quota && (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit)) setHealth('YouTube', quota.status, quota.message)
-    else if (account?.live && youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
-    else if (quota) setHealth('YouTube', quota.status, quota.message)
-    else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
-    else if (account?.live && !youtubeLiveChatIds().length) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
+    if (!shouldKeepTokenRefreshBanner(state.health.YouTube, Boolean(account?.connected))) {
+      const quota = youtubeQuotaHealth()
+      if (quota && (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit)) setHealth('YouTube', quota.status, quota.message)
+      else if (account?.live && youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
+      else if (quota) setHealth('YouTube', quota.status, quota.message)
+      else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
+      else if (account?.live && !youtubeLiveChatIds().length) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
+    }
+  } else if (isTokenRefreshHealthMessage(state.health.YouTube.message)) {
+    setHealth('YouTube', 'ok')
   }
 }
 
@@ -1360,12 +1393,15 @@ async function pollLiveState() {
     ensureTwitchChat()
   }
   if (twitchWasLive && !twitchAccount?.live) youtubeForceStatus = true
-  if (tokens.YouTube) try { await pollYouTube(); if (youtubeChat.connected && state.health.YouTube.status === 'warn' && !youtubeQuotaBlocked()) setHealth('YouTube', 'ok') } catch (error) {
+  if (tokens.YouTube) try {
+    await pollYouTube()
+    if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
+  } catch (error) {
     if (noteYouTubeQuota(error)) { /* site chat continues */ }
     else {
       const message = error instanceof Error ? error.message : String(error)
       console.error('YouTube poll:', message)
-      if (!youtubeChat.connected) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
+      if (!youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
     }
   }
   if (tokens.Kick) try { await pollKick(); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
@@ -1386,6 +1422,7 @@ async function pollTwitch() {
   const streams = await twitchApi(`/helix/streams?user_id=${token.userId}`, token)
   const account = state.accounts.find((item) => item.platform === 'Twitch')!
   const stream = streams.data?.[0]
+  restorePlatformConnection('Twitch')
   Object.assign(account, { live: Boolean(stream), viewers: stream?.viewer_count || 0, handle: token.user || account.handle })
   if (stream) {
     state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined })
@@ -1480,6 +1517,7 @@ async function pollYouTubeStatus(token: Token) {
     }
   }).filter((item: YouTubeChatTarget) => item.videoId)
   setYouTubeTargets(next)
+  restorePlatformConnection('YouTube')
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) {
     const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
@@ -1670,6 +1708,7 @@ async function pollKick() {
     token.userId = String(channel.broadcaster_user_id)
     saveTokens()
   }
+  restorePlatformConnection('Kick')
   Object.assign(account, { live: Boolean(channel?.stream?.is_live), viewers: Number(channel?.stream?.viewer_count || 0), handle: slug || account.handle })
   if (channel) state.streamInfo.Kick = applyLiveStreamDetails(state.streamInfo.Kick, kickStreamDetails(channel))
   if (slug) startKickChat(slug)
