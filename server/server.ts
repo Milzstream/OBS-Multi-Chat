@@ -84,7 +84,7 @@ const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
 dotenv.config({ path: envPath })
 
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -181,6 +181,7 @@ const state: State = {
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
   dropOldAlerts: settings.dropOldAlerts,
+  translateChat: settings.translateChat,
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
 
@@ -296,7 +297,7 @@ app.post('/api/stream-info', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results })
 })
 app.post('/api/settings', (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }
   let changed = false
   if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
     settings.activityFallback = body.activityFallback
@@ -320,11 +321,16 @@ app.post('/api/settings', (request, response) => {
     activityStore.setMaxAge(body.dropOldAlerts ? ACTIVITY_MAX_AGE_MS : 0)
     changed = true
   }
+  if (typeof body.translateChat === 'boolean' && body.translateChat !== settings.translateChat) {
+    settings.translateChat = body.translateChat
+    state.translateChat = body.translateChat
+    changed = true
+  }
   if (changed) {
     saveSettings()
     broadcast()
   }
-  response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, streamelements: state.streamelements })
+  response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, translateChat: settings.translateChat, streamelements: state.streamelements })
 })
 app.post('/api/open', createOpenHandler(openInDefaultBrowser))
 app.post('/api/activity/test', (request, response) => {
@@ -1199,6 +1205,7 @@ async function translateToEnglish(text: string) {
 }
 
 async function applyTranslation(message: ChatMessage) {
+  if (!settings.translateChat) return
   const parts = message.parts?.length ? message.parts : (message.text ? [{ type: 'text' as const, text: message.text }] : [])
   let changed = false
   const next: MessagePart[] = []
@@ -1221,6 +1228,7 @@ async function applyTranslation(message: ChatMessage) {
 }
 
 function queueTranslation(message: ChatMessage) {
+  if (!settings.translateChat) return
   const source = message.parts?.some((part) => part.type === 'text' && needsTranslation(part.text)) || needsTranslation(message.text)
   if (!source) return
   translateQueue.push(message)

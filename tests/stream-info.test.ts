@@ -51,15 +51,19 @@ describe('settings', () => {
   it('defaults and normalizes persisted settings', () => {
     const defaults = defaultAppSettings()
     assert.equal(defaults.activityFallback, true)
+    assert.equal(defaults.translateChat, true)
     assert.equal(defaults.youtubeQuota.used, 0)
     const parsed = parseAppSettings({
       activityFallback: false,
       ignoreMissingJwt: true,
       dropOldAlerts: true,
+      translateChat: false,
       streamInfo: { Twitch: { title: ' A ', category: 'IRL', categoryId: '9' }, Kick: null },
       youtubeQuota: { day: '2026-09-02', used: '12', limit: '10000' },
     })
     assert.equal(parsed.activityFallback, false)
+    assert.equal(parsed.translateChat, false)
+    assert.equal(parseAppSettings({}).translateChat, true)
     assert.equal(parsed.streamInfo.Twitch.title, 'A')
     assert.equal(parsed.streamInfo.Kick.category, '')
     assert.deepEqual(loadYouTubeQuota({ day: '2026-09-02', used: 12, limit: 10000 }), { day: '2026-09-02', used: 12, limit: 10000 })

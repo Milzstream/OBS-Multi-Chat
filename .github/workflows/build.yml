@@ -124,9 +124,11 @@ jobs:
             Windows x64 build of Relay Chat Dock.
 
             1. Unzip the archive
-            2. Fill in `production.env` with your Twitch, Kick, and YouTube API credentials
+            2. Fill in `production.env` with Twitch, Kick, and YouTube API credentials plus StreamElements JWTs
             3. Run `relay-chat-dock.exe`
-            4. In OBS, add a Browser Source or custom dock pointed at `http://localhost:4173`
+            4. In OBS, add custom browser docks:
+               Chat      `http://localhost:4173`
+               Activity  `http://localhost:4173/activity`
 
             Do not commit or share `production.env` or the `data` folder that appears beside the executable.
           files: |

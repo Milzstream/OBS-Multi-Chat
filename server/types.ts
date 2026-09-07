@@ -11,7 +11,7 @@ export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
 export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
-export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
+export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
 
 export const CHAT_MAX = 200
 export const YOUTUBE_QUOTA_LIMIT = 10_000

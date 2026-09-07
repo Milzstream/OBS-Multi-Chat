@@ -3,8 +3,9 @@ import { Bell, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'luc
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
 import { ConnectionSettings } from '../ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
+import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, parseStoredFilter, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
 
-type Filter = 'All' | ActivityPlatform
+type Filter = ActivityFilter
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
 
@@ -36,6 +37,7 @@ type BackendState = {
   activityFallback?: boolean
   ignoreMissingJwt?: boolean
   dropOldAlerts?: boolean
+  translateChat?: boolean
 }
 
 function relativeTime(iso: string, now: number) {
@@ -86,8 +88,9 @@ export default function ActivityApp() {
   const [activityFallback, setActivityFallback] = useState(true)
   const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
   const [dropOldAlerts, setDropOldAlerts] = useState(false)
+  const [translateChat, setTranslateChat] = useState(true)
   const [dismissedWarning, setDismissedWarning] = useState(false)
-  const [filter, setFilter] = useState<Filter>('All')
+  const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
   const [now, setNow] = useState(Date.now())
   const [backendOnline, setBackendOnline] = useState(false)
   const [showTests, setShowTests] = useState(false)
@@ -98,6 +101,10 @@ export default function ActivityApp() {
   useEffect(() => {
     document.title = 'Relay Activity'
   }, [])
+
+  useEffect(() => {
+    writeLocalPref(ACTIVITY_FILTER_KEY, filter)
+  }, [filter])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
@@ -115,6 +122,7 @@ export default function ActivityApp() {
       if (typeof remote.activityFallback === 'boolean') setActivityFallback(remote.activityFallback)
       if (typeof remote.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(remote.ignoreMissingJwt)
       if (typeof remote.dropOldAlerts === 'boolean') setDropOldAlerts(remote.dropOldAlerts)
+      if (typeof remote.translateChat === 'boolean') setTranslateChat(remote.translateChat)
       setBackendOnline(true)
     }
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
@@ -152,13 +160,14 @@ export default function ActivityApp() {
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
-  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean }) => {
+  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }) => {
     if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
     if (typeof body.ignoreMissingJwt === 'boolean') {
       setIgnoreMissingJwt(body.ignoreMissingJwt)
       if (body.ignoreMissingJwt) setDismissedWarning(true)
     }
     if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
+    if (typeof body.translateChat === 'boolean') setTranslateChat(body.translateChat)
     void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   }
 
@@ -168,7 +177,7 @@ export default function ActivityApp() {
         <Bell size={15} />
         <span className="activity-title">ACTIVITY</span>
         <nav className="activity-filters">
-          {(['All', 'Twitch', 'Kick', 'YouTube', 'StreamElements'] as Filter[]).map((item) => (
+          {ACTIVITY_FILTERS.map((item) => (
             <button key={item} type="button" className={filter === item ? 'activity-filter active' : 'activity-filter'} aria-label={item === 'StreamElements' ? 'SE' : item} title={item === 'StreamElements' ? 'SE' : item} onClick={() => setFilter(item)}>
               {item === 'All' ? <Hash size={13} /> : <span style={{ color: platformColor[item] }}>{platformIcon(item, 13)}</span>}
             </button>
@@ -201,6 +210,7 @@ export default function ActivityApp() {
         activityFallback={activityFallback}
         ignoreMissingJwt={ignoreMissingJwt}
         dropOldAlerts={dropOldAlerts}
+        translateChat={translateChat}
         showActivityOptions
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}
@@ -210,6 +220,7 @@ export default function ActivityApp() {
         onToggleFallback={() => patchSettings({ activityFallback: !activityFallback })}
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
+        onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
         note="Connect accounts here for backup or chat."
       />}
       {showSetup ? (

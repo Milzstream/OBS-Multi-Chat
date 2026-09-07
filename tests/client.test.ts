@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
+import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
   it('prefers the longer category name when both platforms have one', () => {
@@ -24,5 +25,19 @@ describe('chat dock helpers', () => {
     assert.deepEqual(selectedSendPlatforms(['Twitch', 'YouTube']), ['Twitch', 'YouTube'])
     assert.deepEqual(selectedSendPlatforms(['Twitch', 'Kick', 'YouTube'], ['YouTube']), ['Twitch', 'Kick'])
     assert.deepEqual(selectedSendPlatforms([]), [])
+  })
+})
+
+describe('dock UI prefs', () => {
+  it('restores compact mode and platform filters, and keeps current defaults on junk', () => {
+    assert.equal(parseStoredBoolean(null, true), true)
+    assert.equal(parseStoredBoolean('false', true), false)
+    assert.equal(parseStoredBoolean('true', false), true)
+    assert.equal(parseStoredBoolean('nope', true), true)
+    assert.equal(parseStoredFilter(null, CHAT_FILTERS, 'All'), 'All')
+    assert.equal(parseStoredFilter('Kick', CHAT_FILTERS, 'All'), 'Kick')
+    assert.equal(parseStoredFilter('Nope', CHAT_FILTERS, 'All'), 'All')
+    assert.equal(parseStoredFilter('StreamElements', ACTIVITY_FILTERS, 'All'), 'StreamElements')
+    assert.equal(parseStoredFilter('Twitch', ACTIVITY_FILTERS, 'All'), 'Twitch')
   })
 })

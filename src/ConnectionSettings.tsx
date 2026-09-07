@@ -17,6 +17,7 @@ export function ConnectionSettings({
   activityFallback,
   ignoreMissingJwt,
   dropOldAlerts,
+  translateChat,
   showActivityOptions,
   platformIcon,
   onClose,
@@ -26,6 +27,7 @@ export function ConnectionSettings({
   onToggleFallback,
   onToggleIgnoreMissing,
   onToggleDropOld,
+  onToggleTranslateChat,
   note,
 }: {
   connections: Connection[]
@@ -33,6 +35,7 @@ export function ConnectionSettings({
   activityFallback: boolean
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
+  translateChat: boolean
   showActivityOptions: boolean
   platformIcon: (platform: Platform, size?: number) => ReactNode
   onClose: () => void
@@ -42,6 +45,7 @@ export function ConnectionSettings({
   onToggleFallback: () => void
   onToggleIgnoreMissing: () => void
   onToggleDropOld: () => void
+  onToggleTranslateChat: () => void
   note?: string
 }) {
   const missing = streamelements.missing || []
@@ -74,6 +78,12 @@ export function ConnectionSettings({
             : <button type="button" className="connect" onClick={() => onConnect(connection.platform)}>Connect</button>}
         </div>
       ))}
+      <div className="settings-divider" />
+      <span className="settings-section-title">CHAT</span>
+      <label className="settings-toggle">
+        <span>Translate non-English chat to English</span>
+        <input type="checkbox" checked={translateChat} onChange={onToggleTranslateChat} />
+      </label>
       {showActivityOptions ? (
         <>
           <div className="settings-divider" />

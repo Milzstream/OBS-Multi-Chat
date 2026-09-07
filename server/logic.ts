@@ -781,7 +781,7 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
 }
 
 export function defaultAppSettings(): AppSettings {
-  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
+  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, translateChat: true, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
 }
 
 export function parseAppSettings(value: unknown): AppSettings {
@@ -791,6 +791,7 @@ export function parseAppSettings(value: unknown): AppSettings {
     activityFallback: parsed.activityFallback !== false,
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
+    translateChat: parsed.translateChat !== false,
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }
