@@ -8,8 +8,10 @@ import WebSocket from 'ws'
 import { createServer } from 'node:http'
 import { KickChat, type KickActivity } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget } from './youtube-chat.js'
-import { spawn } from 'node:child_process'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
+import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
+import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
+import { corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import {
   CHAT_MAX,
@@ -85,10 +87,13 @@ dotenv.config({ path: envPath })
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
+const { host: bindHost, lanEnabled } = resolveBindHost()
+const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
+const localApi = { port, bindHost, lanEnabled, apiToken }
 const app = express()
 const httpServer = createServer(app)
 const clients = new Set<express.Response>()
-const dataDir = path.resolve(process.env.RELAY_DATA_DIR || './data')
+const dataDir = resolveDataDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd(), env: process.env })
 const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
@@ -100,7 +105,7 @@ const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
 const activityWarnings = new Map<string, string>()
 const streamElements = new StreamElementsClient()
 let twitchEventSubSessionId = ''
-const oauthStates = new Map<string, { platform: Platform; createdAt: number; codeVerifier?: string }>()
+const oauthStates = createOAuthStateStore()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
 const liveCheckLocks = new Map<Platform, Promise<void>>()
@@ -156,14 +161,10 @@ function rememberYouTubeFromChat(messages: ChatMessage[]) {
 }
 
 function loadChat(): ChatMessage[] {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(chatFile, 'utf8')) as unknown
-    const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-CHAT_MAX)
-    rememberYouTubeFromChat(messages)
-    return messages
-  } catch {
-    return []
-  }
+  const parsed = readJsonFile<unknown>(chatFile, [])
+  const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-CHAT_MAX)
+  rememberYouTubeFromChat(messages)
+  return messages
 }
 
 const state: State = {
@@ -186,13 +187,12 @@ const state: State = {
 function persistChat() {
   try {
     pruneYouTubeSeenIds(youtubeSeen, state.messages)
-    fs.mkdirSync(dataDir, { recursive: true })
     const stored = state.messages.slice(-CHAT_MAX).map((message) => {
       const rest = { ...message }
       delete rest.ingest
       return rest
     })
-    fs.writeFileSync(chatFile, JSON.stringify(stored, null, 2), { mode: 0o600 })
+    writeJsonAtomic(chatFile, stored)
   } catch (error) {
     console.error('Chat save:', error instanceof Error ? error.message : error)
   }
@@ -208,14 +208,18 @@ let twitchKeepaliveMs = 10_000
 let twitchLastEventSub = 0
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
 
-app.use(cors())
+app.use(cors({ origin: corsOriginDelegate(localApi) }))
 app.use(express.json())
+app.use(createControlGuard(localApi))
 app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
   response.json(state)
 })
 app.get('/events', (request, response) => {
-  response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' })
+  const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
+  const origin = request.get('origin')
+  if (origin && isTrustedOrigin(origin, localApi)) headers['Access-Control-Allow-Origin'] = origin
+  response.writeHead(200, headers)
   response.write(`data: ${JSON.stringify(state)}\n\n`)
   clients.add(response)
   request.on('close', () => clients.delete(response))
@@ -322,16 +326,7 @@ app.post('/api/settings', (request, response) => {
   }
   response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, streamelements: state.streamelements })
 })
-app.post('/api/open', (request, response) => {
-  const url = String((request.body as { url?: string })?.url || '').trim()
-  if (!/^https?:\/\//i.test(url)) return response.status(400).json({ error: 'url must be http or https' })
-  try {
-    openInDefaultBrowser(url)
-    response.json({ ok: true })
-  } catch (error) {
-    response.status(502).json({ error: error instanceof Error ? error.message : String(error) })
-  }
-})
+app.post('/api/open', createOpenHandler(openInDefaultBrowser))
 app.post('/api/activity/test', (request, response) => {
   const body = request.body as Partial<ActivityEvent>
   const platform = body.platform
@@ -382,7 +377,7 @@ app.get('/oauth/callback', async (request, response) => {
   const oauthState = oauthStates.get(String(request.query.state || ''))
   const platform = oauthState?.platform
   const code = String(request.query.code || '')
-  if (!code || !platform || Date.now() - oauthState.createdAt > 10 * 60 * 1000) return response.status(400).send('OAuth callback is missing a valid state or code.')
+  if (!code || !platform || Date.now() - oauthState.createdAt > OAUTH_STATE_TTL_MS) return response.status(400).send('OAuth callback is missing a valid state or code.')
   oauthStates.delete(String(request.query.state))
   try {
     tokens[platform] = await exchangeCode(platform, code, oauthState.codeVerifier)
@@ -415,7 +410,7 @@ httpServer.on('error', (error: NodeJS.ErrnoException) => {
   else console.error('Relay backend failed to start:', error)
   process.exitCode = 1
 })
-httpServer.listen(port, '0.0.0.0', () => {
+httpServer.listen(port, bindHost, () => {
   ensureYouTubeQuotaDay()
   collapseYouTubeHydrationDuplicates()
   const base = `http://127.0.0.1:${port}`
@@ -427,6 +422,12 @@ httpServer.listen(port, '0.0.0.0', () => {
   console.log(`  Activity dock  ${base}/activity`)
   console.log('')
   console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
+  if (lanEnabled) {
+    console.log(`  Listening on ${bindHost}:${port} (LAN). Docks on this PC still use the URLs above.`)
+    console.log(apiToken ? '  Non-browser LAN clients must send x-relay-token or Authorization: Bearer.' : '  Warning: LAN clients can use the docks. Set RELAY_API_TOKEN to require a secret from non-loopback tools.')
+  } else {
+    console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
+  }
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Use YouTube Data API v3 → Queries per day → Current usage (example 35), not the 1,247 quota-count card.')
@@ -1888,7 +1889,11 @@ function broadcast() {
   const payload = `data: ${JSON.stringify(state)}\n\n`
   for (const client of clients) client.write(payload)
 }
-function loadTokens(): Partial<Record<TokenPlatform, Token>> { try { return JSON.parse(fs.readFileSync(tokenFile, 'utf8')) } catch { return {} } }
+function loadTokens(): Partial<Record<TokenPlatform, Token>> {
+  const parsed = readJsonFile<unknown>(tokenFile, {})
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  return parsed as Partial<Record<TokenPlatform, Token>>
+}
 
 function persistStreamInfo() {
   const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick } }
@@ -1898,20 +1903,10 @@ function persistStreamInfo() {
 }
 
 function loadSettings(): AppSettings {
-  try {
-    return parseAppSettings(JSON.parse(fs.readFileSync(settingsFile, 'utf8')))
-  } catch {
-    return defaultAppSettings()
-  }
+  return readJsonFile(settingsFile, defaultAppSettings(), parseAppSettings)
 }
 
-function openInDefaultBrowser(url: string) {
-  if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref()
-  else if (process.platform === 'darwin') spawn('open', [url], { detached: true, stdio: 'ignore' }).unref()
-  else spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref()
-}
 function saveSettings() {
-  fs.mkdirSync(dataDir, { recursive: true })
-  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), { mode: 0o600 })
+  writeJsonAtomic(settingsFile, settings)
 }
-function saveTokens() { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 }) }
+function saveTokens() { writeJsonAtomic(tokenFile, tokens) }

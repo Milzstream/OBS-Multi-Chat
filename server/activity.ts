@@ -1,5 +1,4 @@
-import fs from 'node:fs'
-import path from 'node:path'
+import { readJsonFile, writeJsonAtomic } from './persist.js'
 
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
@@ -87,27 +86,26 @@ export function createActivityStore(filePath: string) {
   }
 
   function save() {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true })
-    fs.writeFileSync(filePath, JSON.stringify(persistable(), null, 2), { mode: 0o600 })
+    writeJsonAtomic(filePath, persistable())
   }
 
   function load() {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as ActivityEvent[]
-      const incoming = Array.isArray(parsed) ? parsed : []
-      events = newestFirst(prune(incoming, maxAgeMs).map((event) => {
-        const source = event.source || (event.profileUrl?.includes('youtube.com') ? 'YouTube' : event.profileUrl?.includes('kick.com') ? 'Kick' : event.profileUrl?.includes('twitch.tv') ? 'Twitch' : event.platform)
-        return {
-          ...event,
-          source,
-          time: parseActivityTime(event.time),
-          profileUrl: event.profileUrl || profileUrl(source, event.user, event.userId),
-        }
-      }))
-      save()
-    } catch {
+    const parsed = readJsonFile<unknown>(filePath, null)
+    if (!Array.isArray(parsed)) {
       events = []
+      return
     }
+    const incoming = parsed as ActivityEvent[]
+    events = newestFirst(prune(incoming, maxAgeMs).map((event) => {
+      const source = event.source || (event.profileUrl?.includes('youtube.com') ? 'YouTube' : event.profileUrl?.includes('kick.com') ? 'Kick' : event.profileUrl?.includes('twitch.tv') ? 'Twitch' : event.platform)
+      return {
+        ...event,
+        source,
+        time: parseActivityTime(event.time),
+        profileUrl: event.profileUrl || profileUrl(source, event.user, event.userId),
+      }
+    }))
+    save()
   }
 
   load()

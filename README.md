@@ -21,7 +21,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 
 - Responsive OBS chat dock with platform filters and compact mode
 - OAuth callback server for Twitch, Kick, and YouTube
-- Server-side token persistence in the local `data/tokens.json` file
+- Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
 - Chat history persistence in `data/chat.json` (last 200 messages) so a backend restart does not empty the dock
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
@@ -108,6 +108,9 @@ Fill in the values:
 ```env
 PORT=4173
 OAUTH_REDIRECT_URI=http://localhost:4173/oauth/callback
+# RELAY_BIND=127.0.0.1
+# RELAY_API_TOKEN=
+# RELAY_DATA_DIR=
 
 TWITCH_CLIENT_ID=your_twitch_client_id
 TWITCH_CLIENT_SECRET=your_twitch_client_secret
@@ -127,6 +130,8 @@ STREAMELEMENTS_JWT_TWITCH=
 STREAMELEMENTS_JWT_KICK=
 STREAMELEMENTS_JWT_YOUTUBE=
 ```
+
+The backend binds to `127.0.0.1` by default so only this computer can reach the control API. Set `RELAY_BIND=0.0.0.0` only if another device on your LAN must open the docks, and set `RELAY_API_TOKEN` so non-browser LAN clients must send that secret. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location.
 
 Never commit or share `.env` or `production.env`. Client secrets, JWTs, access tokens, and refresh tokens must remain on the backend and must not be placed in `VITE_` variables or the OBS Browser Source.
 
@@ -162,13 +167,13 @@ Newest alerts stay at the top; older rows drop down. Each row shows the platform
 
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 
-Flask test rows are in-memory only and are not saved to disk.
+Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json` (last 200 messages). Restarting the backend reloads both files, so the docks are not empty. Messages that arrived while the backend was down are not backfilled: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json` (last 200 messages). Packaged runs keep that `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Messages that arrived while the backend was down are not backfilled: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 
-1. Open the Activity dock and click the flask. That injects a local test row through `/api/activity/test`. It proves the dock and filters without hitting platform APIs, and it is not persisted.
+1. Open the Activity dock and click the flask icon. That injects a local test row through `/api/activity/test`. It proves the dock and filters without hitting platform APIs, and it is not persisted.
 2. With JWTs in `production.env`, replay an event from the SE dashboard activity feed. Overlay **Emulate** usually only hits the overlay iframe, not this dock.
 3. Native backup (if the settings checkbox is on): reconnect Twitch so follow/sub/bits EventSub is granted, then follow from an alt. Kick follows/subs appear on the public chat socket. YouTube Super Chats/memberships appear in live chat. YouTube subscribers are SE-only.
 
@@ -188,7 +193,7 @@ This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime support
 
 The same command also creates a ready-to-copy `deploy` folder containing the latest executable and frontend `dist` files. Existing values in `deploy/production.env` (including StreamElements JWTs) are preserved; the packager only adds missing keys. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`.
 
-The executable serves the docks at `http://localhost:4173`. Start it before opening OBS.
+The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
 
 ## Backend endpoints
 
@@ -196,7 +201,7 @@ The executable serves the docks at `http://localhost:4173`. Start it before open
 - `GET /events` - Server-Sent Events stream for dock updates
 - `POST /api/messages` - send a message to selected platforms
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
-- `POST /api/open` - open a profile URL in the system default browser
+- `POST /api/open` - open an allowlisted Twitch, Kick, or YouTube profile URL in the system default browser
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category to one platform
