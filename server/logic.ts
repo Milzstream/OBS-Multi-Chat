@@ -781,7 +781,7 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
 }
 
 export function defaultAppSettings(): AppSettings {
-  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
+  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, translateChat: true, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
 }
 
 export function parseAppSettings(value: unknown): AppSettings {
@@ -791,6 +791,7 @@ export function parseAppSettings(value: unknown): AppSettings {
     activityFallback: parsed.activityFallback !== false,
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
+    translateChat: parsed.translateChat !== false,
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }
@@ -815,4 +816,26 @@ export function oauthAuthorizeUrl(platform: Platform, options: { clientId: strin
     params.set('scope', YOUTUBE_OAUTH_SCOPES)
   }
   return platform === 'Twitch' ? `https://id.twitch.tv/oauth2/authorize?${params}` : platform === 'Kick' ? `https://id.kick.com/oauth/authorize?${params}` : `https://accounts.google.com/o/oauth2/v2/auth?${params}`
+}
+
+export function tokenRefreshFailureMessage(platform: Platform) {
+  return `${platform} token refresh failed - reconnect in settings`
+}
+
+export function tokenRefreshRetryMessage(platform: Platform) {
+  return `${platform} token refresh failed — retrying`
+}
+
+export function isTokenRefreshHealthMessage(message: string) {
+  return /token refresh failed/i.test(message)
+}
+
+export function shouldKeepTokenRefreshBanner(health: Health, connected: boolean) {
+  return isTokenRefreshHealthMessage(health.message) && !connected
+}
+
+export function isPermanentTokenRefreshError(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error)
+  if (/timed out|timeout|AbortError|ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|network|socket|429|502|503|504/i.test(text)) return false
+  return /invalid_grant|invalid_token|unauthorized_client|invalid_client|invalid_request|\b400\b|\b401\b/i.test(text)
 }

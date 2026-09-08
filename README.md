@@ -2,7 +2,7 @@
 
 A local OBS companion that combines Twitch, Kick, and YouTube live chat into one dock, plus a second Activity dock for follows, subs, gifts, cheers, raids, Super Chats, memberships, merch, and StreamElements donations.
 
-![OBS Multi Chat combining Twitch, Kick, and YouTube](docs/screenshot.png)
+![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshot.png)
 
 ![Activity dock with follows, donations, and platform icons](docs/activity.png)
 
@@ -61,7 +61,7 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 ### Automatic chat translation
 
-Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text are automatically translated to English for the dock. The original message remains visible with an **EN** marker. Translation sends the message text to Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`); this is an outbound third-party request and currently has no settings toggle. Do not connect platforms or use this feature if that handling is not acceptable for your stream.
+Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message remains visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings. When on, the message text is sent to Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`). This is an outbound third-party request — turn the setting off if that handling is not acceptable for your stream.
 
 ### Google / YouTube
 

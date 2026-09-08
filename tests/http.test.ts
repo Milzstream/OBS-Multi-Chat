@@ -9,6 +9,7 @@ import {
   createControlGuard,
   createOpenHandler,
   isSafeExternalUrl,
+  isTrustedOrigin,
   parseOpenUrl,
   resolveBindHost,
 } from '../server/local-api.js'
@@ -45,6 +46,14 @@ describe('local control authorization', () => {
     }, options)
     assert.equal(result.ok, false)
     if (!result.ok) assert.equal(result.status, 403)
+  })
+
+  it('trusts OBS loopback dock origins on localhost and 127.0.0.1', () => {
+    const trust = { port: 4173, lanEnabled: false }
+    assert.equal(isTrustedOrigin('http://127.0.0.1:4173', trust), true)
+    assert.equal(isTrustedOrigin('http://localhost:4173', trust), true)
+    assert.equal(isTrustedOrigin('http://[::1]:4173', trust), true)
+    assert.equal(isTrustedOrigin('https://evil.example', trust), false)
   })
 
   it('allows same-origin loopback docks and token-authenticated LAN tools', () => {
