@@ -234,8 +234,8 @@ function Avatar({ name, src, color }: { name: string; src?: string; color: strin
 }
 
 function getChatProfileUrl(message: ChatMessage): string | undefined {
-  const handle = message.user.replace(/^@+/, '').trim()
-  if (!handle || /^anonymous$/i.test(handle) || handle === 'TestUser') return
+  const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
+  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const platform = message.platform
   if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
   if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
