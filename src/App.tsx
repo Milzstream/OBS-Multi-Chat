@@ -237,13 +237,15 @@ function getChatProfileUrl(message: ChatMessage): string | undefined {
   const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const platform = message.platform
-  if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
-  if (platform === 'YouTube') {
-    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
-    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
-  }
-  return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  let url: string | undefined
+  if (platform === 'Twitch') url = `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  else if (platform === 'Kick') url = `https://kick.com/${encodeURIComponent(handle)}`
+  else if (platform === 'YouTube') {
+    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) url = `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
+    else url = `https://www.youtube.com/@${encodeURIComponent(handle)}`
+  } else url = `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  if (url) console.log(`[Profile URL] ${platform}/${handle}:`, url)
+  return url
 }
 
 function MessageItem({ message, showTranslationMark, onModerate }: { message: ChatMessage; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
@@ -251,6 +253,7 @@ function MessageItem({ message, showTranslationMark, onModerate }: { message: Ch
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
   const profileUrl = getChatProfileUrl(message)
+  if (profileUrl) console.log(`[MessageItem] ${name}: profileUrl=${profileUrl}, clickable=${!!profileUrl}`)
   const openProfile = (event: React.MouseEvent) => {
     if (!profileUrl) return
     event.stopPropagation()
