@@ -74,7 +74,7 @@ export function ActivityRow({ event, age }: { event: ActivityEvent; age: string 
   const href = profileHref(event)
   const openProfile = () => {
     if (!href) return
-    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: href }) })
+    window.open(href, '_blank')
   }
   return (
     <button type="button" className={href ? 'activity-row activity-row-link' : 'activity-row'} style={{ ['--row-color' as string]: color }} title={href ? `Open ${event.user} on ${source}` : undefined} onClick={href ? openProfile : undefined}>

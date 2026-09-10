@@ -237,15 +237,13 @@ function getChatProfileUrl(message: ChatMessage): string | undefined {
   const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const platform = message.platform
-  let url: string | undefined
-  if (platform === 'Twitch') url = `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  else if (platform === 'Kick') url = `https://kick.com/${encodeURIComponent(handle)}`
-  else if (platform === 'YouTube') {
-    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) url = `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
-    else url = `https://www.youtube.com/@${encodeURIComponent(handle)}`
-  } else url = `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (url) console.log(`[Profile URL] ${platform}/${handle}:`, url)
-  return url
+  if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
+  if (platform === 'YouTube') {
+    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
+    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
+  }
+  return `https://www.twitch.tv/${encodeURIComponent(handle)}`
 }
 
 function MessageItem({ message, showTranslationMark, onModerate }: { message: ChatMessage; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
@@ -253,15 +251,10 @@ function MessageItem({ message, showTranslationMark, onModerate }: { message: Ch
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
   const profileUrl = getChatProfileUrl(message)
-  if (profileUrl) console.log(`[MessageItem] ${name}: profileUrl=${profileUrl}, clickable=${!!profileUrl}`)
   const openProfile = (event: React.MouseEvent) => {
     if (!profileUrl) return
     event.stopPropagation()
-    console.log('Opening profile:', profileUrl)
-    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: profileUrl }) }).then(r => {
-      console.log('Open response:', r.status)
-      return r.json()
-    }).then(data => console.log('Open result:', data)).catch(err => console.error('Open error:', err))
+    window.open(profileUrl, '_blank')
   }
   return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={message.avatar} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{message.deleted ? <span className="deleted-text">Message deleted</span> : parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
