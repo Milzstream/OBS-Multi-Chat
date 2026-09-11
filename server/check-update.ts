@@ -1,6 +1,5 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 interface GitHubRelease {
   tag_name: string
@@ -42,13 +41,33 @@ function compareVersions(version1: string, version2: string): number {
 
 /**
  * Gets the current version from package.json
+ * Tries multiple paths to support both dev and packaged contexts
  */
 function getCurrentVersion(): string {
-  const __filename = fileURLToPath(import.meta.url)
-  const __dirname = path.dirname(__filename)
-  const packageJsonPath = path.join(__dirname, '..', 'package.json')
-  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'))
-  return packageJson.version || '0.0.0'
+  const pathsToTry = [
+    // Packaged: package.json beside the executable
+    path.join(process.cwd(), 'package.json'),
+    // Dev: package.json in project root
+    path.join(process.cwd(), '..', 'package.json'),
+    path.join(process.cwd(), '../..', 'package.json'),
+    // Fallback: look in common locations
+    path.join(path.dirname(process.execPath), 'package.json'),
+  ]
+
+  for (const filePath of pathsToTry) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const packageJson = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+        if (packageJson.version) {
+          return packageJson.version
+        }
+      }
+    } catch {
+      // Try next path
+    }
+  }
+
+  return '0.0.0'
 }
 
 /**
