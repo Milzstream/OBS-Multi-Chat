@@ -54,11 +54,11 @@ function KindIcon({ kind }: { kind: ActivityKind }) {
 
 export function profileHref(event: ActivityEvent) {
   if (event.profileUrl) return event.profileUrl
-  const handle = event.user.replace(/^@+/, '').trim()
-  if (!handle || /^anonymous$/i.test(handle) || handle === 'TestUser') return
+  const handle = event.user.replace(/^@+/, '').trim().toLowerCase()
+  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const source = event.source || event.platform
   if (source === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (source === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
+  if (source === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
   if (source === 'YouTube') {
     if (event.userId && /^UC[\w-]{20,}$/i.test(event.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(event.userId)}`
     return `https://www.youtube.com/@${encodeURIComponent(handle)}`
@@ -74,7 +74,7 @@ export function ActivityRow({ event, age }: { event: ActivityEvent; age: string 
   const href = profileHref(event)
   const openProfile = () => {
     if (!href) return
-    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: href }) })
+    window.open(href, '_blank')
   }
   return (
     <button type="button" className={href ? 'activity-row activity-row-link' : 'activity-row'} style={{ ['--row-color' as string]: color }} title={href ? `Open ${event.user} on ${source}` : undefined} onClick={href ? openProfile : undefined}>

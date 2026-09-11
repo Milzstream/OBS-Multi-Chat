@@ -92,18 +92,20 @@ function App() {
 
   useEffect(() => {
     const apply = (remote: BackendState) => {
-      setConnections(remote.accounts)
-      setMessages(remote.messages)
-      if (remote.health) setHealth(remote.health)
-      if (remote.youtubeQuota) setYoutubeQuota(remote.youtubeQuota)
-      if (remote.streamelements) setStreamelements(remote.streamelements)
-      if (typeof remote.activityFallback === 'boolean') setActivityFallback(remote.activityFallback)
-      if (typeof remote.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(remote.ignoreMissingJwt)
-      if (typeof remote.dropOldAlerts === 'boolean') setDropOldAlerts(remote.dropOldAlerts)
-      if (typeof remote.translateChat === 'boolean') setTranslateChat(remote.translateChat)
+      // Only update if values actually changed to reduce flicker
+      setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
+      setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
+      if (remote.health && JSON.stringify(health) !== JSON.stringify(remote.health)) setHealth(remote.health)
+      if (remote.youtubeQuota && JSON.stringify(youtubeQuota) !== JSON.stringify(remote.youtubeQuota)) setYoutubeQuota(remote.youtubeQuota)
+      if (remote.streamelements && JSON.stringify(streamelements) !== JSON.stringify(remote.streamelements)) setStreamelements(remote.streamelements)
+      if (typeof remote.activityFallback === 'boolean' && activityFallback !== remote.activityFallback) setActivityFallback(remote.activityFallback)
+      if (typeof remote.ignoreMissingJwt === 'boolean' && ignoreMissingJwt !== remote.ignoreMissingJwt) setIgnoreMissingJwt(remote.ignoreMissingJwt)
+      if (typeof remote.dropOldAlerts === 'boolean' && dropOldAlerts !== remote.dropOldAlerts) setDropOldAlerts(remote.dropOldAlerts)
+      if (typeof remote.translateChat === 'boolean' && translateChat !== remote.translateChat) setTranslateChat(remote.translateChat)
       setBackendOnline(true)
-      setStreamDetails(remote.streamInfo)
-      setStreamTitle(remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title)
+      if (JSON.stringify(streamDetails) !== JSON.stringify(remote.streamInfo)) setStreamDetails(remote.streamInfo)
+      const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
+      if (streamTitle !== newTitle) setStreamTitle(newTitle)
     }
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')
@@ -231,11 +233,30 @@ function Avatar({ name, src, color }: { name: string; src?: string; color: strin
   return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
 }
 
+function getChatProfileUrl(message: ChatMessage): string | undefined {
+  const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
+  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
+  const platform = message.platform
+  if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
+  if (platform === 'YouTube') {
+    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
+    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
+  }
+  return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+}
+
 function MessageItem({ message, showTranslationMark, onModerate }: { message: ChatMessage; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
   const platforms = message.platforms || [message.platform]
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
-  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={message.avatar} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{message.deleted ? <span className="deleted-text">Message deleted</span> : parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
+  const profileUrl = getChatProfileUrl(message)
+  const openProfile = (event: React.MouseEvent) => {
+    if (!profileUrl) return
+    event.stopPropagation()
+    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: profileUrl }) }).catch(err => console.error('Failed to open profile:', err))
+  }
+  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={message.avatar} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{message.deleted ? <span className="deleted-text">Message deleted</span> : parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {

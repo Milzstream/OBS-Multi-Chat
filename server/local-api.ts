@@ -132,7 +132,7 @@ export function isSafeExternalUrl(raw: string) {
   const host = parsed.hostname.toLowerCase()
   const pathname = parsed.pathname
   if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
-  if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
+  if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,25}\/?$/.test(pathname)
   if (PROFILE_HOSTS.youtube.has(host)) return /^\/channel\/UC[\w-]{20,}\/?$/.test(pathname) || /^\/@[A-Za-z0-9._-]{1,60}\/?$/.test(pathname)
   return false
 }
