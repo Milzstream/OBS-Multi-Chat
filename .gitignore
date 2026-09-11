@@ -26,3 +26,5 @@ release-staging/
 Thumbs.db
 .vscode/
 .idea/
+.continue/agents/LM-Studio.yaml
+.continuerules
