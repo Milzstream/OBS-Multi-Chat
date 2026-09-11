@@ -238,7 +238,7 @@ function getChatProfileUrl(message: ChatMessage): string | undefined {
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const platform = message.platform
   if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
+  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
   if (platform === 'YouTube') {
     if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
     return `https://www.youtube.com/@${encodeURIComponent(handle)}`
