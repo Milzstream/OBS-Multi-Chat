@@ -13,6 +13,7 @@ import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
+import { checkForUpdates } from './check-update.js'
 import {
   CHAT_MAX,
   YOUTUBE_QUOTA_LIMIT,
@@ -451,6 +452,7 @@ httpServer.listen(port, bindHost, () => {
   console.log('  Optional: type 35 or 35/10000 and press Enter anytime. Logging will not wait.')
   console.log('')
   listenForYouTubeQuotaInput()
+  void checkForUpdates()
   if (missing.length && !settings.ignoreMissingJwt) {
     const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
     console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
