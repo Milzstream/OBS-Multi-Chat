@@ -95,17 +95,40 @@ function App() {
       // Only update if values actually changed to reduce flicker
       setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
       setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
-      if (remote.health && JSON.stringify(health) !== JSON.stringify(remote.health)) setHealth(remote.health)
-      if (remote.youtubeQuota && JSON.stringify(youtubeQuota) !== JSON.stringify(remote.youtubeQuota)) setYoutubeQuota(remote.youtubeQuota)
-      if (remote.streamelements && JSON.stringify(streamelements) !== JSON.stringify(remote.streamelements)) setStreamelements(remote.streamelements)
-      if (typeof remote.activityFallback === 'boolean' && activityFallback !== remote.activityFallback) setActivityFallback(remote.activityFallback)
-      if (typeof remote.ignoreMissingJwt === 'boolean' && ignoreMissingJwt !== remote.ignoreMissingJwt) setIgnoreMissingJwt(remote.ignoreMissingJwt)
-      if (typeof remote.dropOldAlerts === 'boolean' && dropOldAlerts !== remote.dropOldAlerts) setDropOldAlerts(remote.dropOldAlerts)
-      if (typeof remote.translateChat === 'boolean' && translateChat !== remote.translateChat) setTranslateChat(remote.translateChat)
+      if (remote.health) {
+        const health = remote.health
+        setHealth((prev) => JSON.stringify(prev) !== JSON.stringify(health) ? health : prev)
+      }
+      if (remote.youtubeQuota) {
+        const youtubeQuota = remote.youtubeQuota
+        setYoutubeQuota((prev) => JSON.stringify(prev) !== JSON.stringify(youtubeQuota) ? youtubeQuota : prev)
+      }
+      if (remote.streamelements) {
+        const streamelements = remote.streamelements
+        setStreamelements((prev) => JSON.stringify(prev) !== JSON.stringify(streamelements) ? streamelements : prev)
+      }
+      if (typeof remote.activityFallback === 'boolean') {
+        const activityFallback = remote.activityFallback
+        setActivityFallback((prev) => prev !== activityFallback ? activityFallback : prev)
+      }
+      if (typeof remote.ignoreMissingJwt === 'boolean') {
+        const ignoreMissingJwt = remote.ignoreMissingJwt
+        setIgnoreMissingJwt((prev) => prev !== ignoreMissingJwt ? ignoreMissingJwt : prev)
+      }
+      if (typeof remote.dropOldAlerts === 'boolean') {
+        const dropOldAlerts = remote.dropOldAlerts
+        setDropOldAlerts((prev) => prev !== dropOldAlerts ? dropOldAlerts : prev)
+      }
+      if (typeof remote.translateChat === 'boolean') {
+        const translateChat = remote.translateChat
+        setTranslateChat((prev) => prev !== translateChat ? translateChat : prev)
+      }
       setBackendOnline(true)
-      if (JSON.stringify(streamDetails) !== JSON.stringify(remote.streamInfo)) setStreamDetails(remote.streamInfo)
-      const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
-      if (streamTitle !== newTitle) setStreamTitle(newTitle)
+      setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(remote.streamInfo) ? remote.streamInfo : prev)
+      setStreamTitle((prev) => {
+        const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
+        return prev !== newTitle ? newTitle : prev
+      })
     }
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
     const events = new EventSource('/events')

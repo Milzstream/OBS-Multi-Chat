@@ -119,7 +119,9 @@ KICK_CLIENT_ID=your_kick_client_id
 KICK_CLIENT_SECRET=your_kick_client_secret
 KICK_API_BASE=
 # Optional if Edge/Chrome is installed in a non-standard location:
-# KICK_BROWSER_PATH=C:\\Path\\To\\msedge.exe
+# Shared by the Kick chatroom-ID lookup and the YouTube InnerTube fallback:
+# BROWSER_PATH=C:\\Path\\To\\msedge.exe
+# (KICK_BROWSER_PATH still works as a deprecated alias for it)
 
 YOUTUBE_CLIENT_ID=your_google_client_id
 YOUTUBE_CLIENT_SECRET=your_google_client_secret
