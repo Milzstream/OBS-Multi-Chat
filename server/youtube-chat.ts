@@ -28,6 +28,8 @@ const BROWSER_HEADERS = {
 
 function browserPath() {
   const candidates = [
+    process.env.BROWSER_PATH,
+    // deprecated alias kept for backward compatibility
     process.env.KICK_BROWSER_PATH,
     process.env.PROGRAMFILES && path.join(process.env.PROGRAMFILES, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
     process.env['PROGRAMFILES(X86)'] && path.join(process.env['PROGRAMFILES(X86)'], 'Microsoft', 'Edge', 'Application', 'msedge.exe'),

@@ -21,10 +21,11 @@ describe('activity time and profiles', () => {
   })
 
   it('builds platform profile URLs and skips test users', () => {
-    assert.equal(profileUrl('Twitch', 'Ada'), 'https://www.twitch.tv/Ada')
+    assert.equal(profileUrl('Twitch', 'Ada'), 'https://www.twitch.tv/ada')
+    assert.equal(profileUrl('Kick', 'superiogame_tyle88'), 'https://kick.com/superiogame-tyle88')
     assert.equal(profileUrl('Kick', 'ada'), 'https://kick.com/ada')
     assert.equal(profileUrl('YouTube', 'Ada', 'UC1234567890123456789012'), 'https://www.youtube.com/channel/UC1234567890123456789012')
-    assert.equal(profileUrl('YouTube', '@Ada'), 'https://www.youtube.com/@Ada')
+    assert.equal(profileUrl('YouTube', '@Ada'), 'https://www.youtube.com/@ada')
     assert.equal(profileUrl('Twitch', 'TestUser'), undefined)
     assert.equal(profileUrl('Twitch', 'Anonymous'), undefined)
   })

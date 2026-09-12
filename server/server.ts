@@ -601,7 +601,7 @@ async function fetchTimed(url: string, options: RequestInit = {}, ms = 8_000) {
   }
 }
 
-async function twitchApi(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<any> {
+async function twitchApi(endpoint: string, token: Token, options: RequestInit = {}, networkRetried = false, authRetried = false): Promise<any> {
   let response: Response
   try {
     response = await fetchTimed(`https://api.twitch.tv${endpoint}`, {
@@ -609,16 +609,16 @@ async function twitchApi(endpoint: string, token: Token, options: RequestInit = 
       headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID || '', Authorization: `Bearer ${token.accessToken}`, ...options.headers },
     })
   } catch (error) {
-    if (!retried) return twitchApi(endpoint, token, options, true)
+    if (!networkRetried) return twitchApi(endpoint, token, options, true, authRetried)
     throw error
   }
-  if (response.status === 401 && !retried) {
+  if (response.status === 401 && !authRetried) {
     const refreshed = await refreshAccessToken('Twitch')
-    if (refreshed) return twitchApi(endpoint, refreshed, options, true)
+    if (refreshed) return twitchApi(endpoint, refreshed, options, networkRetried, true)
   }
-  if ((response.status === 502 || response.status === 503 || response.status === 504) && !retried) {
+  if ((response.status === 502 || response.status === 503 || response.status === 504) && !networkRetried) {
     await new Promise((resolve) => setTimeout(resolve, 800))
-    return twitchApi(endpoint, token, options, true)
+    return twitchApi(endpoint, token, options, true, authRetried)
   }
   const text = await response.text()
   if (!response.ok) throw new Error(`Twitch API ${response.status}: ${summarizeApiError(response.status, text)}`)
@@ -791,6 +791,8 @@ async function youtubeRequest(endpoint: string, token: Token, options: RequestIn
     if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
     const refreshed = await refreshAccessToken('YouTube')
     if (refreshed) return youtubeRequest(endpoint, refreshed, options, true)
+    const text = await response.text()
+    return { ok: false, status: response.status, text }
   }
   if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
   const text = await response.text()
@@ -1822,6 +1824,7 @@ async function moderateTwitch(body: { action: string; messageId?: string; userId
   }
   if (!body.userId) return { ok: false, error: 'User id is required' }
   const data: { user_id: string; duration?: number; reason: string } = { user_id: body.userId, reason: 'Relayed from OBS dock' }
+  // Twitch expects timeout duration in seconds (the UI sends seconds too)
   if (body.action === 'timeout') data.duration = Math.max(1, Number(body.duration || 60))
   await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}`, token, {
     method: 'POST',
@@ -1846,6 +1849,8 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
     user_id: Number(body.userId),
     reason: 'Relayed from OBS dock',
   }
+  // Kick expects timeout duration in minutes (its /moderation/bans API: 1-10080),
+  // while the UI sends seconds — hence the /60 conversion. Not a mismatch with Twitch.
   if (body.action === 'timeout') payload.duration = Math.max(1, Math.round(Number(body.duration || 60) / 60) || 1)
   const response = await kickApi('/moderation/bans', token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
   if (!response.ok) return { ok: false, error: await response.text() }

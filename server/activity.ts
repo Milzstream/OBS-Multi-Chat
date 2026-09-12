@@ -40,10 +40,11 @@ export function parseActivityTime(value: unknown) {
 }
 
 export function profileUrl(platform: ActivityPlatform, user: string, userId?: string) {
-  const handle = String(user || '').replace(/^@+/, '').trim()
-  if (!handle || /^anonymous$/i.test(handle) || handle === 'TestUser') return
+  const handle = String(user || '').replace(/^@+/, '').trim().toLowerCase()
+  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle)}`
+  // Kick channel URLs use hyphens (e.g. "superiogame-tyle88") while usernames can contain underscores
+  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
   if (platform === 'YouTube') {
     if (userId && /^UC[\w-]{20,}$/i.test(userId)) return `https://www.youtube.com/channel/${encodeURIComponent(userId)}`
     return `https://www.youtube.com/@${encodeURIComponent(handle)}`
