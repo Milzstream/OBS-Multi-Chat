@@ -16,6 +16,7 @@ if (!exe) {
 
 fs.copyFileSync(exe, path.join(stage, 'relay-chat-dock.exe'))
 fs.copyFileSync('.env.example', path.join(stage, 'production.env'))
+fs.writeFileSync(path.join(stage, 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
 
 const stagedEnv = fs.readFileSync(path.join(stage, 'production.env'), 'utf8')
 if (/CLIENT_SECRET=\S+/.test(stagedEnv) || /CLIENT_ID=\S+/.test(stagedEnv)) {
