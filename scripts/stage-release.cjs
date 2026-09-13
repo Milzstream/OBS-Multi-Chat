@@ -16,7 +16,12 @@ if (!exe) {
 
 fs.copyFileSync(exe, path.join(stage, 'relay-chat-dock.exe'))
 fs.copyFileSync('.env.example', path.join(stage, 'production.env'))
-fs.writeFileSync(path.join(stage, 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
+const versionManifest = path.join(stage, 'package.json')
+fs.writeFileSync(versionManifest, `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
+if (!JSON.parse(fs.readFileSync(versionManifest, 'utf8')).version) {
+  console.error('Release package.json must include version so the exe can check GitHub for updates.')
+  process.exit(1)
+}
 
 const stagedEnv = fs.readFileSync(path.join(stage, 'production.env'), 'utf8')
 if (/CLIENT_SECRET=\S+/.test(stagedEnv) || /CLIENT_ID=\S+/.test(stagedEnv)) {
@@ -34,6 +39,7 @@ fs.writeFileSync(
    Chat      http://localhost:4173
    Activity  http://localhost:4173/activity
 
+Keep package.json beside the exe. The app reads its version from that file to check GitHub for updates.
 OAuth tokens are stored in a local data/tokens.json file beside the executable.
 Never share production.env or the data folder.
 `,

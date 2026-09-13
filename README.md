@@ -12,8 +12,9 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env` with your API credentials and StreamElements JWTs
-3. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
-4. In OBS, add custom browser docks for chat and activity
+3. Keep `package.json` beside `relay-chat-dock.exe` (it is in the zip). The app reads its version from that file to check GitHub for updates
+4. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
+5. In OBS, add custom browser docks for chat and activity
 
 GitHub Actions builds that zip and attaches it to the GitHub Release when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
 
