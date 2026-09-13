@@ -9,6 +9,7 @@ export type ActivityEvent = {
   kind: ActivityKind
   user: string
   userId?: string
+  handle?: string
   amount?: string
   months?: number
   viewers?: number
@@ -16,6 +17,12 @@ export type ActivityEvent = {
   time: string
   profileUrl?: string
   source?: ActivityPlatform
+}
+
+export function kickProfileSlug(user: string, slug?: string) {
+  const fromSlug = String(slug || '').replace(/^@+/, '').trim().toLowerCase()
+  if (fromSlug) return fromSlug
+  return String(user || '').replace(/^@+/, '').trim().toLowerCase().replace(/_/g, '-')
 }
 
 export function parseActivityTime(value: unknown) {
@@ -39,12 +46,11 @@ export function parseActivityTime(value: unknown) {
   return new Date().toISOString()
 }
 
-export function profileUrl(platform: ActivityPlatform, user: string, userId?: string) {
+export function profileUrl(platform: ActivityPlatform, user: string, userId?: string, slug?: string) {
   const handle = String(user || '').replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  // Kick channel URLs use hyphens (e.g. "superiogame-tyle88") while usernames can contain underscores
-  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
+  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(user, slug))}`
   if (platform === 'YouTube') {
     if (userId && /^UC[\w-]{20,}$/i.test(userId)) return `https://www.youtube.com/channel/${encodeURIComponent(userId)}`
     return `https://www.youtube.com/@${encodeURIComponent(handle)}`
@@ -103,7 +109,7 @@ export function createActivityStore(filePath: string) {
         ...event,
         source,
         time: parseActivityTime(event.time),
-        profileUrl: event.profileUrl || profileUrl(source, event.user, event.userId),
+        profileUrl: event.profileUrl || profileUrl(source, event.user, event.userId, event.handle),
       }
     }))
     save()
@@ -139,7 +145,7 @@ export function createActivityStore(filePath: string) {
         source,
         id: incoming.id || fallbackId({ ...incoming, user }),
         time: parseActivityTime(incoming.time),
-        profileUrl: incoming.profileUrl || profileUrl(source, incoming.user || user, incoming.userId),
+        profileUrl: incoming.profileUrl || profileUrl(source, incoming.user || user, incoming.userId, incoming.handle),
       }
       if (events.some((item) => item.id === event.id)) return false
       const at = Date.parse(event.time) || Date.now()

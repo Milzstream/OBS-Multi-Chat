@@ -1,4 +1,5 @@
 import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, Youtube, Zap } from 'lucide-react'
+import { kickProfileSlug } from '../chat-helpers'
 import { activitySubtitle, kindLabel } from './format'
 
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
@@ -9,6 +10,7 @@ export type ActivityEvent = {
   kind: ActivityKind
   user: string
   userId?: string
+  handle?: string
   amount?: string
   months?: number
   viewers?: number
@@ -58,7 +60,7 @@ export function profileHref(event: ActivityEvent) {
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   const source = event.source || event.platform
   if (source === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (source === 'Kick') return `https://kick.com/${encodeURIComponent(handle.replace(/_/g, '-'))}`
+  if (source === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(event.user, event.handle))}`
   if (source === 'YouTube') {
     if (event.userId && /^UC[\w-]{20,}$/i.test(event.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(event.userId)}`
     return `https://www.youtube.com/@${encodeURIComponent(handle)}`

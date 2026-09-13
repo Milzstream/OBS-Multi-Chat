@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
+import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
+  it('uses a Kick slug when present and otherwise converts underscores', () => {
+    assert.equal(kickProfileSlug('SuperIOgame_Tyle88', 'superiogame-tyle88'), 'superiogame-tyle88')
+    assert.equal(kickProfileSlug('SuperIOgame_Tyle88'), 'superiogame-tyle88')
+  })
+
   it('prefers the longer category name when both platforms have one', () => {
     assert.equal(preferredCategory('Just Chatting', 'Just Chatting (IRL)'), 'Just Chatting (IRL)')
     assert.equal(preferredCategory('', 'Kick Game'), 'Kick Game')

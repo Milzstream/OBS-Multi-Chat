@@ -198,6 +198,19 @@ function chatActionItems(action: any): any[] {
   return []
 }
 
+export type YouTubeModeration = { action: 'delete' | 'ban'; messageId?: string; userId?: string }
+
+export function parseModerationActions(payload: any): YouTubeModeration[] {
+  const result: YouTubeModeration[] = []
+  for (const action of liveChatActions(payload)) {
+    const deleted = action?.markChatItemAsDeletedAction
+    if (deleted?.targetItemId) result.push({ action: 'delete', messageId: String(deleted.targetItemId) })
+    const authorDeleted = action?.markChatItemsByAuthorAsDeletedAction
+    if (authorDeleted?.externalChannelId) result.push({ action: 'ban', userId: String(authorDeleted.externalChannelId) })
+  }
+  return result
+}
+
 export function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeChatMessage[] {
   const messages: YouTubeChatMessage[] = []
   for (const action of liveChatActions(payload)) {
@@ -294,8 +307,12 @@ async function loadLivePage(videoId: string) {
     if (!html) continue
     const session = extractSession(html, videoId)
     if (!session) continue
-    const initial = extractInitialPayload(html)
-    return { session, bootstrap: initial ? parseActions(initial, session.videoId) : [] }
+      const initial = extractInitialPayload(html)
+      return {
+        session,
+        bootstrap: initial ? parseActions(initial, session.videoId) : [],
+        moderation: initial ? parseModerationActions(initial) : [],
+      }
   }
 }
 
@@ -323,6 +340,7 @@ async function pollLiveChat(session: Session) {
 export class YouTubeLiveChat {
   private loops = new Map<string, { stop: () => void; target: YouTubeChatTarget }>()
   private onMessage?: (message: YouTubeChatMessage, target: YouTubeChatTarget) => void
+  private onModeration?: (event: YouTubeModeration) => void
   private closed = true
   private lastOk = 0
   private failures = 0
@@ -331,8 +349,9 @@ export class YouTubeLiveChat {
   get connected() { return !this.closed && this.loops.size > 0 && Date.now() - this.lastOk < 45_000 }
   get failed() { return !this.closed && this.loops.size > 0 && this.failures >= 3 && Date.now() - this.lastOk > 20_000 }
 
-  async start(targets: YouTubeChatTarget[], onMessage: (message: YouTubeChatMessage, target: YouTubeChatTarget) => void) {
+  async start(targets: YouTubeChatTarget[], onMessage: (message: YouTubeChatMessage, target: YouTubeChatTarget) => void, onModeration?: (event: YouTubeModeration) => void) {
     this.onMessage = onMessage
+    this.onModeration = onModeration
     this.closed = false
     for (const target of targets) {
       const existing = this.loops.get(target.videoId)
@@ -351,6 +370,7 @@ export class YouTubeLiveChat {
   async stop() {
     this.closed = true
     this.onMessage = undefined
+    this.onModeration = undefined
     this.key = ''
     this.failures = 0
     this.clearLoops()
@@ -403,11 +423,13 @@ export class YouTubeLiveChat {
         this.failures = 0
         this.lastOk = Date.now()
         for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, loop.target)
+        for (const event of loaded.moderation) this.onModeration?.(event)
         let firstPoll = true
         while (!stopped()) {
           const payload = await pollLiveChat(session)
           const messages = parseActions(payload, loop.target.videoId)
           for (const message of messages) this.onMessage?.(firstPoll ? { ...message, preload: true } : message, loop.target)
+          for (const event of parseModerationActions(payload)) this.onModeration?.(event)
           firstPoll = false
           const next = nextContinuation(payload)
           if (next.ended || !next.continuation) throw new Error('live chat ended')

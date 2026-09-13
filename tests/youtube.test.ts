@@ -18,6 +18,7 @@ import {
   youtubeApiErrorReason,
   youtubeBadges,
   youtubeLiveChatMessageBody,
+  youtubeOfficialModeration,
   youtubeOfficialToActivity,
   youtubeQuotaCost,
   youtubeQuotaHealthStatus,
@@ -34,6 +35,7 @@ import {
   extractVideoId,
   nextContinuation,
   parseActions,
+  parseModerationActions,
   parseYouTubeTitle,
   parseYouTubeViewers,
   expandRunText,
@@ -417,5 +419,32 @@ describe('YouTube official activity', () => {
     assert.equal(member?.kind, 'membership')
     const gift = youtubeOfficialToActivity({ id: 'g1', snippet: { type: 'membershipGiftingEvent', membershipGiftingDetails: { giftMembershipsCount: 5 } }, authorDetails: { displayName: 'Pat' } })
     assert.equal(gift?.amount, '5 gifts')
+  })
+
+  it('maps official delete and ban events', () => {
+    assert.deepEqual(youtubeOfficialModeration({ snippet: { type: 'messageDeletedEvent', messageDeletedDetails: { deletedMessageId: 'm1' } } }), { action: 'delete', platform: 'YouTube', messageId: 'm1' })
+    const banned = youtubeOfficialModeration({ snippet: { type: 'userBannedEvent', userBannedDetails: { bannedUserDetails: { channelId: 'UC1', displayName: '@Ada' } } } })
+    assert.equal(banned?.action, 'ban')
+    assert.equal(banned?.userId, 'UC1')
+    assert.equal(banned?.user, 'Ada')
+  })
+})
+
+describe('YouTube InnerTube moderation', () => {
+  it('parses deleted items and author wipes', () => {
+    const payload = {
+      continuationContents: {
+        liveChatContinuation: {
+          actions: [
+            { markChatItemAsDeletedAction: { targetItemId: 'm1' } },
+            { markChatItemsByAuthorAsDeletedAction: { externalChannelId: 'UC1' } },
+          ],
+        },
+      },
+    }
+    assert.deepEqual(parseModerationActions(payload), [
+      { action: 'delete', messageId: 'm1' },
+      { action: 'ban', userId: 'UC1' },
+    ])
   })
 })

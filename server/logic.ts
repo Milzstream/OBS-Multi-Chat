@@ -9,6 +9,7 @@ import {
   type AppSettings,
   type ChatBadge,
   type ChatMessage,
+  type ChatModeration,
   type Health,
   type MessagePart,
   type Platform,
@@ -323,6 +324,40 @@ export function isStoredChatMessage(value: unknown): value is ChatMessage {
   return Boolean(item.id) && (item.platform === 'Twitch' || item.platform === 'Kick' || item.platform === 'YouTube') && typeof item.user === 'string' && typeof item.text === 'string' && typeof item.time === 'string'
 }
 
+export function chatUserMatches(message: ChatMessage, target: { userId?: string; user?: string }) {
+  if (target.userId && message.userId) return message.userId.toLowerCase() === target.userId.toLowerCase()
+  if (target.user) return normalizeChatHandle(message.user) === normalizeChatHandle(target.user)
+  return false
+}
+
+export function messageOnPlatform(message: ChatMessage, platform: Platform) {
+  return (message.platforms || [message.platform]).includes(platform)
+}
+
+export function applyChatModeration(messages: ChatMessage[], change: ChatModeration): { messages: ChatMessage[]; changed: boolean } {
+  if (change.action === 'delete') {
+    if (!change.messageId) return { messages, changed: false }
+    let changed = false
+    const next = messages.map((item) => {
+      if (item.id !== change.messageId || item.deleted) return item
+      changed = true
+      return { ...item, deleted: true }
+    })
+    return { messages: changed ? next : messages, changed }
+  }
+  if (!change.userId && !change.user) return { messages, changed: false }
+  const hide = change.action === 'ban' || change.action === 'timeout'
+  if (!hide && change.action !== 'unban') return { messages, changed: false }
+  let changed = false
+  const next = messages.map((item) => {
+    if (!messageOnPlatform(item, change.platform) || !chatUserMatches(item, change)) return item
+    if (hide ? item.deleted : !item.deleted) return item
+    changed = true
+    return { ...item, deleted: hide }
+  })
+  return { messages: changed ? next : messages, changed }
+}
+
 export function collapseYouTubeDuplicates(
   messages: ChatMessage[],
   targets: YouTubeChatTarget[] = [],
@@ -444,7 +479,7 @@ export function mergeIncomingChat(
     const ingestChanged = Boolean(incomingIngest && current.ingest !== incomingIngest)
     const textChanged = text !== current.text
     const labelChanged = sourceLabel !== current.sourceLabel
-    const metaChanged = Boolean((message.userId && !current.userId) || (message.avatar && !current.avatar) || (!current.badges?.length && message.badges?.length))
+    const metaChanged = Boolean((message.userId && !current.userId) || (message.handle && !current.handle) || (message.avatar && !current.avatar) || (!current.badges?.length && message.badges?.length))
     if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged) {
       return { messages, changed: false, seenIds }
     }
@@ -457,6 +492,7 @@ export function mergeIncomingChat(
         platforms,
         sourceId: item.sourceId || message.sourceId,
         userId: item.userId || message.userId,
+        handle: item.handle || message.handle,
         ingest: incomingIngest || item.ingest,
         ...(parts ? { parts } : {}),
         avatar: item.avatar || message.avatar,
@@ -635,6 +671,23 @@ export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: 
   }
 }
 
+export function parseTwitchModerationLine(line: string): ChatModeration | undefined {
+  const clearmsg = line.match(/^(?:@([^ ]+) )?:tmi\.twitch\.tv CLEARMSG #/)
+  if (clearmsg) {
+    const tags = parseIrcTags(clearmsg[1] || '')
+    const messageId = tags['target-msg-id']
+    if (!messageId) return
+    return { action: 'delete', platform: 'Twitch', messageId, user: tags.login || undefined }
+  }
+  const clearchat = line.match(/^(?:@([^ ]+) )?:tmi\.twitch\.tv CLEARCHAT #[^ ]*(?: :(.+))?$/)
+  if (!clearchat) return
+  const tags = parseIrcTags(clearchat[1] || '')
+  const user = String(clearchat[2] || '').trim() || undefined
+  const userId = tags['target-user-id'] || undefined
+  if (!user && !userId) return
+  return { action: tags['ban-duration'] ? 'timeout' : 'ban', platform: 'Twitch', userId, user }
+}
+
 export function needsTranslation(text: string) {
   return NON_ENGLISH.test(text)
 }
@@ -705,6 +758,22 @@ export function youtubeOfficialToActivity(item: any): ActivityEvent | undefined 
   if (type === 'membershipGiftingEvent') {
     const count = Number(item.snippet?.membershipGiftingDetails?.giftMembershipsCount)
     return { id: item.id, platform: 'YouTube', kind: 'gift', user, userId, amount: Number.isFinite(count) && count > 0 ? `${count} gift${count === 1 ? '' : 's'}` : undefined, time }
+  }
+}
+
+export function youtubeOfficialModeration(item: any): ChatModeration | undefined {
+  const type = String(item?.snippet?.type || '')
+  if (type === 'messageDeletedEvent') {
+    const messageId = item?.snippet?.messageDeletedDetails?.deletedMessageId
+    if (!messageId) return
+    return { action: 'delete', platform: 'YouTube', messageId: String(messageId) }
+  }
+  if (type === 'userBannedEvent') {
+    const details = item?.snippet?.userBannedDetails?.bannedUserDetails
+    const userId = details?.channelId ? String(details.channelId) : undefined
+    const user = details?.displayName ? String(details.displayName).replace(/^@+/, '') : undefined
+    if (!userId && !user) return
+    return { action: 'ban', platform: 'YouTube', userId, user }
   }
 }
 
@@ -838,4 +907,47 @@ export function isPermanentTokenRefreshError(error: unknown) {
   const text = error instanceof Error ? error.message : String(error)
   if (/timed out|timeout|AbortError|ECONNRESET|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|fetch failed|network|socket|429|502|503|504/i.test(text)) return false
   return /invalid_grant|invalid_token|unauthorized_client|invalid_client|invalid_request|\b400\b|\b401\b/i.test(text)
+}
+
+export type TranslateProvider = 'gtx' | 'google-v2' | 'libre'
+
+export function resolveTranslateConfig(env: Record<string, string | undefined> = process.env): { provider: TranslateProvider; url: string; key?: string } {
+  const key = String(env.TRANSLATE_API_KEY || env.GOOGLE_TRANSLATE_API_KEY || '').trim() || undefined
+  const url = String(env.TRANSLATE_URL || '').trim()
+  if (url) return { provider: 'libre', url, key }
+  if (key) return { provider: 'google-v2', url: 'https://translation.googleapis.com/language/translate/v2', key }
+  return { provider: 'gtx', url: 'https://translate.googleapis.com/translate_a/single' }
+}
+
+export function parseTranslatedText(provider: TranslateProvider, data: any, original: string) {
+  let translated = ''
+  if (provider === 'gtx') translated = Array.isArray(data?.[0]) ? data[0].map((row: any) => String(row?.[0] || '')).join('').trim() : ''
+  else if (provider === 'google-v2') translated = String(data?.data?.translations?.[0]?.translatedText || '').trim()
+  else translated = String(data?.translatedText || data?.translation || '').trim()
+  if (!translated || translated === original) return
+  return translated
+}
+
+export function translateFailureMessage(provider: TranslateProvider) {
+  if (provider === 'google-v2') return 'Chat translation failed (Google Translate API). Check TRANSLATE_API_KEY.'
+  if (provider === 'libre') return 'Chat translation failed (TRANSLATE_URL). Messages stay untranslated.'
+  return 'Chat translation failed (unofficial Google endpoint). Set TRANSLATE_API_KEY or TRANSLATE_URL, or turn translation off.'
+}
+
+export function sseBroadcastEvent(data: unknown, previous?: string) {
+  const json = JSON.stringify(data)
+  if (json === previous) return { json, payload: undefined, unchanged: true as const }
+  return { json, payload: `data: ${json}\n\n`, unchanged: false as const }
+}
+
+export const TWITCH_EVENTSUB_DEFAULT_URL = 'wss://eventsub.wss.twitch.tv/ws'
+
+export function twitchEventSubConnectPlan(url: string, currentGeneration: number) {
+  const resume = url !== TWITCH_EVENTSUB_DEFAULT_URL
+  return { resume, generation: resume ? currentGeneration : currentGeneration + 1, keepPreviousUntilWelcome: resume }
+}
+
+export function twitchEventSubCloseAction(socketIsCurrent: boolean, generation: number, currentGeneration: number) {
+  if (generation !== currentGeneration || !socketIsCurrent) return 'ignore' as const
+  return 'reconnect' as const
 }

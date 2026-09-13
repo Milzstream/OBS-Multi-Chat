@@ -6,8 +6,8 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat, type KickActivity } from './kick-chat.js'
-import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget } from './youtube-chat.js'
+import { KickChat, type KickActivity, type KickModeration } from './kick-chat.js'
+import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
@@ -17,6 +17,7 @@ import { checkForUpdates } from './check-update.js'
 import {
   CHAT_MAX,
   YOUTUBE_QUOTA_LIMIT,
+  applyChatModeration,
   applyLiveStreamDetails,
   collapseYouTubeDuplicates,
   defaultAppSettings,
@@ -38,25 +39,34 @@ import {
   pacificDate,
   parseAppSettings,
   parseKickParts,
+  parseTranslatedText,
   parseTwitchChatLine,
+  parseTwitchModerationLine,
   parseYouTubeQuotaInput,
   pruneYouTubeSeenIds,
   partsFromTwitchFragments,
   quotaFromHeaders,
   quotaWarnAt,
+  resolveTranslateConfig,
   resolveYouTubeLiveChatIds,
   sanitizeIrcMessage,
+  sseBroadcastEvent,
   shouldKeepTokenRefreshBanner,
   summarizeApiError,
   syncYouTubeTokenChatIds,
   tokenRefreshFailureMessage,
   tokenRefreshRetryMessage,
+  translateFailureMessage,
+  TWITCH_EVENTSUB_DEFAULT_URL,
   twitchBadgesFromList,
+  twitchEventSubCloseAction,
+  twitchEventSubConnectPlan,
   twitchEventToActivity,
   youtubeApiErrorReason,
   youtubeBadges,
   youtubeChatLabel,
   youtubeLiveChatMessageBody,
+  youtubeOfficialModeration,
   youtubeOfficialToActivity,
   youtubeQuotaCost,
   youtubeQuotaHealthStatus,
@@ -67,6 +77,7 @@ import type {
   Account,
   AppSettings,
   ChatMessage,
+  ChatModeration,
   Health,
   MessagePart,
   Platform,
@@ -90,7 +101,7 @@ const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
 dotenv.config({ path: envPath })
 
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -191,6 +202,7 @@ const state: State = {
   ignoreMissingJwt: settings.ignoreMissingJwt,
   dropOldAlerts: settings.dropOldAlerts,
   translateChat: settings.translateChat,
+  translateError: '',
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
 
@@ -206,6 +218,14 @@ function persistChat() {
   } catch (error) {
     console.error('Chat save:', error instanceof Error ? error.message : error)
   }
+}
+
+function applyChatModerationToState(change: ChatModeration) {
+  const result = applyChatModeration(state.messages, change)
+  if (!result.changed) return
+  state.messages = result.messages
+  persistChat()
+  broadcast()
 }
 
 let twitchIrc: WebSocket | undefined
@@ -262,10 +282,15 @@ app.post('/api/moderate', async (request, response) => {
   if (!body.action || !body.platform) return response.status(400).json({ error: 'action and platform are required' })
   try {
     const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration })
-    if (result.ok && body.action === 'delete' && body.messageId) {
-      state.messages = state.messages.map((item) => item.id === body.messageId ? { ...item, deleted: true } : item)
-      persistChat()
-      broadcast()
+    if (result.ok && (body.action === 'delete' || body.action === 'timeout' || body.action === 'ban' || body.action === 'unban')) {
+      const target = state.messages.find((item) => item.id === body.messageId)
+      applyChatModerationToState({
+        action: body.action,
+        platform: body.platform,
+        messageId: body.messageId,
+        userId: body.userId,
+        user: target?.user,
+      })
     }
     response.json(result)
   } catch (error) {
@@ -463,7 +488,7 @@ httpServer.listen(port, bindHost, () => {
 for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
 void startStreamElements(true)
 void pollLiveState()
-setInterval(pollLiveState, 15_000)
+setInterval(() => { void pollLiveState() }, 15_000)
 setInterval(watchTwitchEventSub, 2_000)
 setInterval(refreshChatHealth, 5_000)
 
@@ -865,6 +890,7 @@ function startKickChat(slug: string) {
     platform: 'Kick',
     user: message.user,
     userId: message.userId,
+    handle: message.slug,
     color: message.color,
     avatar: normalizeAvatar(message.avatar),
     badges: kickBadges(message.badges),
@@ -877,11 +903,18 @@ function startKickChat(slug: string) {
     kind: event.kind,
     user: event.user,
     userId: event.userId,
+    handle: event.slug,
     amount: event.amount,
     months: event.months,
     viewers: event.viewers,
     message: event.message,
     time: new Date().toISOString(),
+  }), (event: KickModeration) => applyChatModerationToState({
+    action: event.action,
+    platform: 'Kick',
+    messageId: event.messageId,
+    userId: event.userId,
+    user: event.user,
   })).then(() => {
     if (kickChat.currentChatroomId && tokens.Kick && tokens.Kick.channelId !== String(kickChat.currentChatroomId)) {
       tokens.Kick.channelId = String(kickChat.currentChatroomId)
@@ -900,19 +933,28 @@ function closeTwitchChat() {
   twitchEventSubUnsupported = false
   twitchEventSubSessionId = ''
   twitchIrcReady = false
-  twitchEventSub?.close()
+  detachTwitchEventSub(twitchEventSub)
   twitchIrc?.close()
   twitchEventSub = undefined
   twitchIrc = undefined
 }
 
-function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
+function detachTwitchEventSub(socket?: WebSocket) {
+  if (!socket) return
+  socket.removeAllListeners()
+  try { socket.close() } catch { /* already closed */ }
+}
+
+function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
   if (!tokens.Twitch?.userId || twitchEventSubUnsupported) return
-  const generation = ++twitchEventSubGeneration
-  const isResume = url !== 'wss://eventsub.wss.twitch.tv/ws'
+  const plan = twitchEventSubConnectPlan(url, twitchEventSubGeneration)
+  twitchEventSubGeneration = plan.generation
+  const generation = plan.generation
   const socket = new WebSocket(url)
-  twitchEventSub = socket
-  twitchEventSubReady = false
+  if (!plan.resume) {
+    twitchEventSub = socket
+    twitchEventSubReady = false
+  }
   socket.on('message', (data) => {
     if (generation !== twitchEventSubGeneration) return
     twitchLastEventSub = Date.now()
@@ -920,8 +962,11 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
     try { payload = JSON.parse(String(data)) } catch { return }
     const type = payload?.metadata?.message_type
     if (type === 'session_welcome') {
+      const previous = twitchEventSub
+      twitchEventSub = socket
+      if (previous && previous !== socket) detachTwitchEventSub(previous)
       twitchKeepaliveMs = Number(payload.payload?.session?.keepalive_timeout_seconds || 10) * 1000
-      if (isResume) { twitchEventSubReady = true; console.log('Twitch EventSub resumed') }
+      if (plan.resume) { twitchEventSubReady = true; console.log('Twitch EventSub resumed') }
       else {
         twitchEventSubSessionId = String(payload.payload.session.id || '')
         void subscribeTwitchEvents(twitchEventSubSessionId)
@@ -937,7 +982,7 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
     }
   })
   socket.on('close', () => {
-    if (generation !== twitchEventSubGeneration) return
+    if (twitchEventSubCloseAction(twitchEventSub === socket, generation, twitchEventSubGeneration) === 'ignore') return
     twitchEventSub = undefined
     twitchEventSubReady = false
     if (tokens.Twitch && !twitchEventSubUnsupported) setTimeout(() => connectTwitchEventSub(), 3_000)
@@ -947,6 +992,9 @@ function connectTwitchEventSub(url = 'wss://eventsub.wss.twitch.tv/ws') {
 
 const twitchEventSubs: { type: string; version: string; condition: (userId: string) => Record<string, string>; activity?: boolean }[] = [
   { type: 'channel.chat.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
+  { type: 'channel.chat.message_delete', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
+  { type: 'channel.chat.clear_user_messages', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
+  { type: 'channel.unban', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }) },
   { type: 'channel.follow', version: '2', condition: (userId) => ({ broadcaster_user_id: userId, moderator_user_id: userId }), activity: true },
   { type: 'channel.subscribe', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
   { type: 'channel.subscription.gift', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
@@ -979,7 +1027,7 @@ async function subscribeTwitchEvents(sessionId: string) {
       if (spec.activity) activityFailed = true
       else {
         console.error(`Twitch EventSub ${spec.type}:`, message)
-        if (message.includes('403') || message.includes('401') || message.includes('scope')) {
+        if (spec.type === 'channel.chat.message' && (message.includes('403') || message.includes('401') || message.includes('scope'))) {
           twitchEventSubUnsupported = true
           console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
         }
@@ -1016,6 +1064,18 @@ function handleTwitchEventSub(payload: any) {
       emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
     })
     setHealth('Twitch', 'ok')
+    return
+  }
+  if (type === 'channel.chat.message_delete') {
+    applyChatModerationToState({ action: 'delete', platform: 'Twitch', messageId: event?.message_id ? String(event.message_id) : undefined, user: event?.target_user_name || event?.target_user_login })
+    return
+  }
+  if (type === 'channel.chat.clear_user_messages') {
+    applyChatModerationToState({ action: 'ban', platform: 'Twitch', userId: event?.target_user_id ? String(event.target_user_id) : undefined, user: event?.target_user_name || event?.target_user_login })
+    return
+  }
+  if (type === 'channel.unban') {
+    applyChatModerationToState({ action: 'unban', platform: 'Twitch', userId: event?.user_id ? String(event.user_id) : undefined, user: event?.user_name || event?.user_login })
     return
   }
   const activity = twitchEventToActivity(type, event)
@@ -1133,8 +1193,10 @@ function parseTwitchLines(raw: string): ChatMessage[] {
   return raw.split(/\r?\n/).flatMap((line) => {
     const parsed = parseTwitchChatLine(line, { urls: twitchBadgeUrls })
     if (parsed === 'ping') { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
-    if (!parsed) return []
-    return [{ ...parsed, avatar: parsed.userId ? twitchAvatars.get(parsed.userId) : undefined }]
+    if (parsed) return [{ ...parsed, avatar: parsed.userId ? twitchAvatars.get(parsed.userId) : undefined }]
+    const moderation = parseTwitchModerationLine(line)
+    if (moderation) applyChatModerationToState(moderation)
+    return []
   })
 }
 
@@ -1226,22 +1288,58 @@ function ownUserIds() {
 const translationCache = new Map<string, string>()
 const translateQueue: ChatMessage[] = []
 let translating = false
+let translateFailures = 0
+function noteTranslateFailure() {
+  translateFailures += 1
+  if (translateFailures < 2) return
+  const message = translateFailureMessage(resolveTranslateConfig().provider)
+  if (state.translateError === message) return
+  state.translateError = message
+  broadcast()
+}
+function clearTranslateFailure() {
+  translateFailures = 0
+  if (!state.translateError) return
+  state.translateError = ''
+  broadcast()
+}
 async function translateToEnglish(text: string) {
   const key = text.trim()
   if (!key || !needsTranslation(key)) return
   const cached = translationCache.get(key)
   if (cached) return cached
-  const response = await fetchTimed(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(key.slice(0, 500))}`, { headers: { Accept: 'application/json' } }, 6_000)
-  if (!response.ok) return
-  const data = await response.json() as any
-  const translated = Array.isArray(data?.[0]) ? data[0].map((row: any) => String(row?.[0] || '')).join('').trim() : ''
-  if (!translated || translated === key) return
-  translationCache.set(key, translated)
-  if (translationCache.size > 2_000) {
-    const oldest = translationCache.keys().next().value
-    if (oldest) translationCache.delete(oldest)
+  const config = resolveTranslateConfig()
+  const snippet = key.slice(0, 500)
+  try {
+    let response: Response
+    if (config.provider === 'google-v2') {
+      response = await fetchTimed(`${config.url}?key=${encodeURIComponent(config.key || '')}`, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: snippet, target: 'en', format: 'text' }),
+      }, 6_000)
+    } else if (config.provider === 'libre') {
+      response = await fetchTimed(config.url, {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: snippet, source: 'auto', target: 'en', format: 'text', ...(config.key ? { api_key: config.key } : {}) }),
+      }, 6_000)
+    } else {
+      response = await fetchTimed(`${config.url}?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(snippet)}`, { headers: { Accept: 'application/json' } }, 6_000)
+    }
+    if (!response.ok) { noteTranslateFailure(); return }
+    const translated = parseTranslatedText(config.provider, await response.json(), key)
+    if (!translated) return
+    clearTranslateFailure()
+    translationCache.set(key, translated)
+    if (translationCache.size > 2_000) {
+      const oldest = translationCache.keys().next().value
+      if (oldest) translationCache.delete(oldest)
+    }
+    return translated
+  } catch {
+    noteTranslateFailure()
   }
-  return translated
 }
 
 async function applyTranslation(message: ChatMessage) {
@@ -1286,10 +1384,17 @@ async function drainTranslations() {
 }
 
 function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[], preload = false) {
+  const moderation = youtubeOfficialModeration(item)
+  if (moderation) {
+    applyChatModerationToState(moderation)
+    return
+  }
   const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
   const time = item.snippet?.publishedAt || new Date().toISOString()
   const activity = youtubeOfficialToActivity(item)
   if (activity) addNativeActivity(activity)
+  const type = String(item.snippet?.type || 'textMessageEvent')
+  if (type !== 'textMessageEvent' && !activity) return
   if (preload) beginYouTubeHydration()
   addMessage({
     id: item.id,
@@ -1388,7 +1493,11 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
   }
 }
 
+let livePollInFlight = false
 async function pollLiveState() {
+  if (livePollInFlight) return
+  livePollInFlight = true
+  try {
   const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
   const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
   const twitchWasLive = Boolean(twitchAccount?.live)
@@ -1421,6 +1530,9 @@ async function pollLiveState() {
   persistStreamInfo()
   refreshChatHealth()
   broadcast()
+  } finally {
+    livePollInFlight = false
+  }
 }
 
 async function pollTwitch() {
@@ -1440,6 +1552,10 @@ async function pollTwitch() {
   }
   void ensureTwitchBadges()
   ensureTwitchChat()
+}
+
+function ingestYouTubeInnerModeration(event: YouTubeModeration) {
+  applyChatModerationToState({ action: event.action, platform: 'YouTube', messageId: event.messageId, userId: event.userId })
 }
 
 function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeChatTarget) {
@@ -1570,7 +1686,7 @@ async function refreshYouTubeViewers() {
     const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
     if (labels.length) console.log(`YouTube chats: ${labels.join(', ')}`)
     retagYouTubeMessages()
-    await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage)
+    await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage, ingestYouTubeInnerModeration)
   }
   const counts = pages.map((item) => item.info?.viewers).filter((count): count is number => Number.isFinite(count))
   if (!counts.length) return
@@ -1620,7 +1736,7 @@ async function syncYouTubeChat(token: Token) {
     return
   }
   beginYouTubeHydration()
-  await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage)
+  await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage, ingestYouTubeInnerModeration)
   if (youtubeChat.connected || !youtubeChat.failed) return
   if (youtubeQuotaBlocked()) {
     setHealth('YouTube', 'warn', 'YouTube site chat failed and API quota is exhausted')
@@ -1823,8 +1939,11 @@ async function moderateTwitch(body: { action: string; messageId?: string; userId
     return { ok: true }
   }
   if (!body.userId) return { ok: false, error: 'User id is required' }
+  if (body.action === 'unban') {
+    await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}&user_id=${encodeURIComponent(body.userId)}`, token, { method: 'DELETE' })
+    return { ok: true }
+  }
   const data: { user_id: string; duration?: number; reason: string } = { user_id: body.userId, reason: 'Relayed from OBS dock' }
-  // Twitch expects timeout duration in seconds (the UI sends seconds too)
   if (body.action === 'timeout') data.duration = Math.max(1, Number(body.duration || 60))
   await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}`, token, {
     method: 'POST',
@@ -1849,13 +1968,17 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
     user_id: Number(body.userId),
     reason: 'Relayed from OBS dock',
   }
-  // Kick expects timeout duration in minutes (its /moderation/bans API: 1-10080),
-  // while the UI sends seconds — hence the /60 conversion. Not a mismatch with Twitch.
   if (body.action === 'timeout') payload.duration = Math.max(1, Math.round(Number(body.duration || 60) / 60) || 1)
-  const response = await kickApi('/moderation/bans', token, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  const response = await kickApi('/moderation/bans', token, {
+    method: body.action === 'unban' ? 'DELETE' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body.action === 'unban' ? { broadcaster_user_id: payload.broadcaster_user_id, user_id: payload.user_id } : payload),
+  })
   if (!response.ok) return { ok: false, error: await response.text() }
   return { ok: true }
 }
+
+const youtubeBanIds = new Map<string, string[]>()
 
 async function moderateYouTube(body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
   if (youtubeQuotaBlocked()) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
@@ -1866,6 +1989,15 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
     const result = await youtubeRequest(`/liveChat/messages?id=${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
     if (!result.ok) return { ok: false, error: youtubeApiErrorReason(result.text) }
     return { ok: true }
+  }
+  if (body.action === 'unban') {
+    if (!body.userId) return { ok: false, error: 'User id is required' }
+    const ids = youtubeBanIds.get(body.userId.toLowerCase()) || []
+    if (!ids.length) return { ok: false, error: 'Unban this chatter on YouTube. Relay only has a ban id after banning from this dock.' }
+    const results = await Promise.all(ids.map((id) => youtubeRequest(`/liveChat/bans?id=${encodeURIComponent(id)}`, token, { method: 'DELETE' })))
+    const failed = results.filter((result) => !result.ok)
+    if (!failed.length) youtubeBanIds.delete(body.userId.toLowerCase())
+    return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
   }
   const chatIds = [...new Set([body.sourceId, ...youtubeLiveChatIds()].filter(Boolean))] as string[]
   if (!body.userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
@@ -1882,6 +2014,15 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
     }),
   })))
   const failed = results.filter((result) => !result.ok)
+  const remembered: string[] = []
+  for (const result of results) {
+    if (!result.ok || !result.text) continue
+    try {
+      const id = JSON.parse(result.text)?.id
+      if (id) remembered.push(String(id))
+    } catch { /* ignore */ }
+  }
+  if (remembered.length) youtubeBanIds.set(body.userId.toLowerCase(), remembered)
   return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
 }
 
@@ -1953,10 +2094,13 @@ function writeSse(client: express.Response, chunk: string) {
   }
 }
 
+let lastSseJson = ''
 function broadcast() {
   state.activity = activityStore.list()
-  const payload = `data: ${JSON.stringify(state)}\n\n`
-  for (const client of [...clients]) writeSse(client, payload)
+  const event = sseBroadcastEvent(state, lastSseJson)
+  lastSseJson = event.json
+  if (!event.payload) return
+  for (const client of [...clients]) writeSse(client, event.payload)
 }
 
 setInterval(() => {
