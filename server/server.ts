@@ -129,6 +129,7 @@ const oauthStates = createOAuthStateStore()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
 const liveCheckLocks = new Map<Platform, Promise<void>>()
+let livePollInFlight = false
 const twitchBadgeUrls = new Map<string, string>()
 const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
@@ -1493,7 +1494,6 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
   }
 }
 
-let livePollInFlight = false
 async function pollLiveState() {
   if (livePollInFlight) return
   livePollInFlight = true
