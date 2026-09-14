@@ -909,6 +909,7 @@ async function checkLiveNow(platform: Platform) {
 }
 
 function startKickChat(slug: string) {
+  queueKickAvatar(slug)
   void kickChat.start(slug, (message) => {
     const avatar = normalizeAvatar(message.avatar) || (message.slug ? kickAvatars.get(message.slug.toLowerCase()) : undefined)
     addMessage({

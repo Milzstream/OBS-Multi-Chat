@@ -41,6 +41,20 @@ export function chatroomIdFrom(payload: any): number | undefined {
 
 const kickProfilePicCache = new Map<string, string>()
 
+export function isKickSlug(slug: string) {
+  return /^[a-z0-9_-]{1,50}$/i.test(slug.trim())
+}
+
+export function kickChannelPowershell(slug: string) {
+  const key = slug.trim().toLowerCase()
+  if (!isKickSlug(key)) return
+  const url = `https://kick.com/api/v2/channels/${encodeURIComponent(key)}`
+  return {
+    command: 'powershell.exe',
+    args: ['-NoProfile', '-NonInteractive', '-Command', `Invoke-WebRequest -Uri '${url}' -Headers @{Accept='application/json'; 'User-Agent'='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'; Referer='https://kick.com/${key}'} -UseBasicParsing | Select-Object -ExpandProperty Content`],
+  }
+}
+
 export function rememberKickProfilePic(slug: string, payload: any) {
   const key = slug.trim().toLowerCase()
   const pic = kickProfilePicFromChannel(payload)
@@ -65,6 +79,20 @@ export async function resolveKickChatroomId(slug: string, cached?: number): Prom
   const fromBrowser = await resolveChatroomIdWithBrowser(slug)
   if (fromBrowser) return fromBrowser
   throw new Error(`Could not resolve Kick chatroom id for ${slug}`)
+}
+
+async function fetchKickChannelPayloadWindows(slug: string) {
+  if (process.platform !== 'win32') return
+  const plan = kickChannelPowershell(slug)
+  if (!plan) return
+  const { execFile } = await import('node:child_process')
+  const text = await new Promise<string>((resolve, reject) => {
+    execFile(plan.command, plan.args, { timeout: 20_000, windowsHide: true }, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(String(stdout || ''))
+    })
+  })
+  return parseJson(text.trim())
 }
 
 async function loadChromium() {
@@ -128,6 +156,15 @@ export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string
         }
       }
     } catch { /* Cloudflare often blocks Node fetch */ }
+    try {
+      const payload = await fetchKickChannelPayloadWindows(key)
+      const pic = kickProfilePicFromChannel(payload)
+      if (pic) {
+        pics.set(key, pic)
+        kickProfilePicCache.set(key, pic)
+        continue
+      }
+    } catch { /* powershell missing or blocked */ }
     missing.push(key)
   }
   if (!missing.length) return pics

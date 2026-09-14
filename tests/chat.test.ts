@@ -29,7 +29,7 @@ import {
   twitchEventSubConnectPlan,
   TWITCH_EVENTSUB_DEFAULT_URL,
 } from '../server/logic.js'
-import { chatroomIdFrom, kickAvatarFromSender, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -156,6 +156,10 @@ describe('Kick chat and activity', () => {
     assert.equal(parsed?.slug, 'ada')
     assert.equal(parsed?.avatar, undefined)
     assert.equal(parseKickChatMessage({ sender: { username: 'Ada' } }), undefined)
+    assert.equal(isKickSlug('milzstream'), true)
+    assert.equal(isKickSlug("x'; calc"), false)
+    assert.ok(kickChannelPowershell('milzstream')?.args.some((arg) => arg.includes('https://kick.com/api/v2/channels/milzstream')))
+    assert.equal(kickChannelPowershell("bad slug"), undefined)
   })
 
   it('maps Kick badges and placeholder handles', () => {
