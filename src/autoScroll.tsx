@@ -1,39 +1,53 @@
 import { useEffect, useRef, useState, type RefObject, type UIEvent } from 'react'
 import { Pause } from 'lucide-react'
 
+/**
+ * Scroll container for the docks: keeps the list glued to its live edge (the
+ * bottom for chat, the top for activity) while the user has not scrolled away
+ * from it, and pauses/resumes auto-scroll when they do.
+ */
+
 const EDGE = 72
 
-function atLiveEdge(el: HTMLElement, pin: 'top' | 'bottom') {
-  if (pin === 'top') return el.scrollTop <= EDGE
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= EDGE
+/**
+ * True when the scroll container is within `EDGE` px of its live edge — the
+ * bottom for chat (new messages) or the top for activity (newest rows).
+ */
+function atLiveEdge(listEl: HTMLElement, pin: 'top' | 'bottom') {
+  if (pin === 'top') return listEl.scrollTop <= EDGE
+  return listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight <= EDGE
 }
 
-function snap(el: HTMLElement, pin: 'top' | 'bottom') {
-  el.scrollTop = pin === 'top' ? 0 : el.scrollHeight
+function snap(listEl: HTMLElement, pin: 'top' | 'bottom') {
+  listEl.scrollTop = pin === 'top' ? 0 : listEl.scrollHeight
 }
 
 export function useAutoScroll(listRef: RefObject<HTMLElement | null>, pin: 'top' | 'bottom', liveKey: string | undefined) {
+  // pinned starts true so the list begins glued to the live edge; any user
+  // scroll away from that edge unpins it and pauses auto-scroll
   const pinned = useRef(true)
   const [paused, setPaused] = useState(false)
 
   useEffect(() => {
-    const el = listRef.current
-    if (!el || !pinned.current) return
-    snap(el, pin)
+    // A new liveKey means a fresh tail row (last chat message / newest alert);
+    // re-snap only while the user has not scrolled away from the live edge
+    const listEl = listRef.current
+    if (!listEl || !pinned.current) return
+    snap(listEl, pin)
   }, [liveKey, listRef, pin])
 
   const onScroll = (event: UIEvent<HTMLElement>) => {
-    const el = event.currentTarget
-    const live = atLiveEdge(el, pin)
+    const listEl = event.currentTarget
+    const live = atLiveEdge(listEl, pin)
     pinned.current = live
     setPaused(!live)
   }
 
   const resume = () => {
-    const el = listRef.current
+    const listEl = listRef.current
     pinned.current = true
     setPaused(false)
-    if (el) snap(el, pin)
+    if (listEl) snap(listEl, pin)
   }
 
   return { paused, onScroll, resume }

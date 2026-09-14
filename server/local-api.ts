@@ -3,6 +3,15 @@ import path from 'node:path'
 import { spawn, type SpawnOptions } from 'node:child_process'
 import type { NextFunction, Request, Response } from 'express'
 
+/**
+ * Local control API helpers: hardening and URL allowlists for the docks.
+ *
+ * This API is the dangerous control surface — it can open URLs in the local
+ * browser, so it is loopback-bound by default and gated by three allowlists:
+ * CORS origins, the bearer token (`RELAY_API_TOKEN`), and the trusted
+ * senders/ports that may submit requests. HTTP only, no TLS.
+ */
+
 export type LocalApiOptions = {
   port: number
   bindHost: string
@@ -26,11 +35,17 @@ const PROFILE_HOSTS = {
   youtube: new Set(['www.youtube.com', 'youtube.com']),
 }
 
+/** True for the loopback aliases a local process would resolve to. */
 export function isLoopbackHost(host: string) {
   const value = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
   return value === '127.0.0.1' || value === 'localhost' || value === '::1'
 }
 
+/**
+ * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
+ * (or any non-loopback `RELAY_BIND`) switches to the LAN, which forces the
+ * bearer-token requirement downstream.
+ */
 export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   const raw = String(env.RELAY_BIND || '').trim()
   const lanFlag = env.RELAY_LAN === '1' || /^true$/i.test(String(env.RELAY_LAN || ''))
@@ -44,6 +59,11 @@ export function isLoopbackAddress(address?: string | null) {
   return host === '127.0.0.1' || host === '::1' || host === 'localhost'
 }
 
+/**
+ * CORS check: allow loopback origins always, and LAN origins only when LAN is
+ * enabled and the origin host/port resolves back to this machine's bind
+ * address.
+ */
 export function isTrustedOrigin(origin: string, options: Pick<LocalApiOptions, 'port' | 'lanEnabled'>, requestHost?: string) {
   let url: URL
   try { url = new URL(origin) } catch { return false }
@@ -70,6 +90,11 @@ function safeEqual(left: string, right: string) {
   return crypto.timingSafeEqual(a, b)
 }
 
+/**
+ * The core authorization gate. Order of trust: valid CORS origin, then bearer
+ * token, then loopback caller; on the LAN a request must pass BOTH the origin
+ * check and the token. Anything else gets a 403 explaining what is missing.
+ */
 export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true } | { ok: false; status: number; error: string } {
   const origin = String(request.origin || '').trim()
   const referer = String(request.referer || '').trim()
@@ -95,6 +120,7 @@ function requestToken(request: Request) {
   return header || bearer
 }
 
+/** Express middleware that only intercepts mutating `/api/*` requests and runs them through `authorizeLocalControl`. */
 export function createControlGuard(options: LocalApiOptions) {
   return (request: Request, response: Response, next: NextFunction) => {
     if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return next()
@@ -113,6 +139,7 @@ export function createControlGuard(options: LocalApiOptions) {
   }
 }
 
+/** CORS middleware callback: no Origin (same-page fetch) passes, anything else must be a trusted origin. */
 export function corsOriginDelegate(options: Pick<LocalApiOptions, 'port' | 'lanEnabled'>) {
   return (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => {
     if (!origin) return callback(null, true)
@@ -120,6 +147,7 @@ export function corsOriginDelegate(options: Pick<LocalApiOptions, 'port' | 'lanE
   }
 }
 
+/** Allowlist external profile links: https-only, no auth/port/query, and a path shape per known profile host. */
 export function isSafeExternalUrl(raw: string) {
   if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
   if (/[\u0000-\u0020\u007f<>"'\\|`]/.test(raw)) return false
@@ -139,6 +167,7 @@ export function isSafeExternalUrl(raw: string) {
 
 const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt3.googleusercontent.com'])
 
+/** Allowlist avatar/media URLs to a fixed set of platform image hosts the docks are allowed to hotlink. */
 export function isSafeMediaUrl(raw: string) {
   if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
   let parsed: URL

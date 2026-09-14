@@ -1,5 +1,13 @@
 import { readJsonFile, writeJsonAtomic } from './persist.js'
 
+/**
+ * Activity dock store: in-memory array backed by an atomic JSON file. Feed
+ * events from every platform land here so the Activity dock can show follows,
+ * subs, gifts, cheers, raids, and donations in one timeline.
+ *
+ * Reads and writes go through `persist.ts`. This file owns no network calls.
+ */
+
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
 
@@ -19,12 +27,14 @@ export type ActivityEvent = {
   source?: ActivityPlatform
 }
 
+/** Kick handles in messages are the dash-separated URL slug, not the display username. Normalize to that form. */
 export function kickProfileSlug(user: string, slug?: string) {
   const fromSlug = String(slug || '').replace(/^@+/, '').trim().toLowerCase()
   if (fromSlug) return fromSlug
   return String(user || '').replace(/^@+/, '').trim().toLowerCase().replace(/_/g, '-')
 }
 
+/** Coerce a feed timestamp into an ISO string. Accepts epoch seconds, epoch ms, bson `$date`, and RFC dates. */
 export function parseActivityTime(value: unknown) {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value.toISOString()
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -46,6 +56,7 @@ export function parseActivityTime(value: unknown) {
   return new Date().toISOString()
 }
 
+/** Build a clickable profile link per platform. Anonymous/test users get none. */
 export function profileUrl(platform: ActivityPlatform, user: string, userId?: string, slug?: string) {
   const handle = String(user || '').replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
@@ -62,6 +73,7 @@ function newestFirst(events: ActivityEvent[]) {
 }
 
 const MAX_EVENTS = 300
+/** Live events older than this are pruned from the file store so it can't grow without bound. */
 export const ACTIVITY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
 function fallbackId(event: Omit<ActivityEvent, 'id'> & { id?: string }) {
@@ -84,6 +96,11 @@ function prune(events: ActivityEvent[], maxAgeMs = 0) {
   }).slice(0, MAX_EVENTS)
 }
 
+/**
+ * Full event store: keeps everything in memory for fast reads, persists to a
+ * single JSON file via `persist.ts`, and prunes both by age and count.
+ * Test events stay in memory only — they never touch the file.
+ */
 export function createActivityStore(filePath: string) {
   let events: ActivityEvent[] = []
   let maxAgeMs = 0

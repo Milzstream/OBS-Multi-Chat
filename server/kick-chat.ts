@@ -2,16 +2,28 @@ import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
 
+/**
+ * Kick chat, activity, and moderation over Kick's public Pusher WebSocket, plus
+ * profile-picture lookups that work around Kick's Cloudflare challenge.
+ *
+ * This file owns reading. Sending and OAuth live in server.ts.
+ *
+ * All payload shapes matched here are the unofficial Pusher message payloads
+ * that Kick's site uses, not the official Kick REST API.
+ */
+
 export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; slug?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
 export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; slug?: string; amount?: string; months?: number; viewers?: number; message?: string }
 export type KickModeration = { action: 'delete' | 'ban' | 'unban'; messageId?: string; userId?: string; user?: string; slug?: string }
 
+/** Kick's public Pusher app, used by the site for all real-time chat events. */
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
 export const BROWSER_HEADERS = {
   Accept: 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
 
+/** Resolve an Edge or Chrome path for headless lookups when Cloudflare blocks Node fetch. */
 function browserPath() {
   const candidates = [
     process.env.BROWSER_PATH,
@@ -45,6 +57,7 @@ export function isKickSlug(slug: string) {
   return /^[a-z0-9_-]{1,50}$/i.test(slug.trim())
 }
 
+/** Build a PowerShell invocation that fetches a Kick channel payload with a browser User-Agent, for machines where Node fetch is Cloudflare-blocked. */
 export function kickChannelPowershell(slug: string) {
   const key = slug.trim().toLowerCase()
   if (!isKickSlug(key)) return
@@ -61,6 +74,7 @@ export function rememberKickProfilePic(slug: string, payload: any) {
   if (key && pic) kickProfilePicCache.set(key, pic)
 }
 
+/** Resolve a channel's public chatroom id, trying plain Node fetch (v2 then v1 endpoints) before falling back to a real browser when Cloudflare blocks it. */
 export async function resolveKickChatroomId(slug: string, cached?: number): Promise<number> {
   if (cached && cached > 0) return cached
   for (const url of [
@@ -202,6 +216,7 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
   }
 }
 
+/** Pick the first image URL found anywhere in the nested sender/identity payload, to survive Kick's ever-changing shape. */
 function firstHttpUrl(...values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value === 'string') {
@@ -234,6 +249,7 @@ export function kickProfilePicFromChannel(payload: any): string | undefined {
   return kickAvatarFromSender(payload?.user || payload?.channel?.user || payload)
 }
 
+/** Convert a raw Pusher chat payload into a dock message. Field names come from Kick's site payload, not the official API. */
 export function parseKickChatMessage(data: any): KickChatMessage | undefined {
   const text = String(data?.content || '').trim()
   const emotes = data?.emotes || data?.metadata?.emotes
@@ -262,19 +278,25 @@ export function pickName(...values: unknown[]): string | undefined {
   }
 }
 
+/** Kick's URL slug (lowercase, dash-separated), never the display username with spaces. */
 function kickSlugFrom(data: any): string | undefined {
   const slug = pickName(data?.slug, data?.channel_slug, data?.user?.slug, data?.sender?.slug)
   return slug ? slug.toLowerCase() : undefined
 }
 
+/** Map Kick Pusher event names onto delete / ban / unban. Ignore normal chat lines. */
 export function kickEventToModeration(eventName: string, data: any): KickModeration | undefined {
+  // Pusher event names arrive escaped, e.g. App\\Events\\MessageDeletedEvent
   const event = eventName.replace(/\\/g, '')
+  // Normal chat messages go through parseKickChatMessage instead
   if (/ChatMessage/i.test(event)) return
+  // Message removed (one id)
   if (/MessageDeleted|ChatMessageDeleted/i.test(event)) {
     const messageId = data?.message?.id ?? data?.message_id ?? data?.id
     if (messageId == null || messageId === '') return
     return { action: 'delete', messageId: String(messageId) }
   }
+  // Timeout ended or ban lifted
   if (/UserUnbanned|BannedUserDeleted|UserUnbannedEvent/i.test(event)) {
     const userId = data?.user?.id ?? data?.banned_user?.id ?? data?.user_id
     const user = pickName(data?.user, data?.banned_user, data?.username)
@@ -282,6 +304,7 @@ export function kickEventToModeration(eventName: string, data: any): KickModerat
     if (userId == null && !user && !slug) return
     return { action: 'unban', userId: userId != null ? String(userId) : undefined, user, slug }
   }
+  // Ban or timeout (Kick sends the same payload shape for both)
   if (/UserBanned|BannedUserAdded|UserTimeout/i.test(event)) {
     const userId = data?.user?.id ?? data?.banned_user?.id ?? data?.user_id
     const user = pickName(data?.user, data?.banned_user, data?.username)
@@ -291,8 +314,11 @@ export function kickEventToModeration(eventName: string, data: any): KickModerat
   }
 }
 
+/** Map Kick Pusher event names onto activity-dock rows (follows, subs, gifts, cheers, raids). Undefined when the event is not an activity. */
 export function kickEventToActivity(eventName: string, data: any): KickActivity | undefined {
+  // Pusher event names arrive escaped, e.g. App\\Events\\FollowEvent
   const event = eventName.replace(/\\/g, '')
+  // Follower list refreshes are not a single follow; require a concrete user
   if (/FollowersUpdated/i.test(event) && !pickName(data?.username, data?.user, data?.follower)) return
   if (/FollowEvent|FollowersUpdated/i.test(event)) {
     const user = pickName(data?.username, data?.user, data?.follower, data?.follower_username)
@@ -398,11 +424,14 @@ export class KickChat {
     socket.on('error', (error) => { console.error('Kick chat:', error.message); socket.close() })
   }
 
+  /** Handle the raw Pusher protocol: connect/subscribe handshake, pings, then chat/activity/moderation events. */
   private handle(raw: string) {
     let payload: any
     try { payload = JSON.parse(raw) } catch { return }
     const event = String(payload?.event || '')
+    // Pusher handshake: first subscribe, then keep the socket alive with pings
     if (event === 'pusher:connection_established') {
+      // Chatroom id resolves to two channels depending on client version; subscribe to both
       this.ws?.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${this.chatroomId}.v2` } }))
       this.ws?.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatroom_${this.chatroomId}` } }))
       this.startPing()

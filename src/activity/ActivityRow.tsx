@@ -2,6 +2,11 @@ import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, Y
 import { kickProfileSlug } from '../chat-helpers'
 import { activitySubtitle, kindLabel } from './format'
 
+/**
+ * One activity row for the dock: platform and kind icons, user, subtitle,
+ * kind label, and relative age. Also derives the profile link a row can open.
+ */
+
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
 export type ActivityEvent = {
@@ -54,6 +59,12 @@ function KindIcon({ kind }: { kind: ActivityKind }) {
   return <Heart size={size} />
 }
 
+/**
+ * Derive the profile URL a row links out to. StreamElements events carry no
+ * profile of their own, so `event.source` inherits the platform the stream is
+ * linked to. YouTube channel ids (`UC...`) get `/channel/` links, everything
+ * else falls back to a `@handle` link.
+ */
 export function profileHref(event: ActivityEvent) {
   if (event.profileUrl) return event.profileUrl
   const handle = event.user.replace(/^@+/, '').trim().toLowerCase()

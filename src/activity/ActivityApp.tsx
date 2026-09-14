@@ -6,6 +6,12 @@ import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
 import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, parseStoredFilter, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
 import { subscribeDockSse } from '../sse'
 
+/**
+ * The activity dock: renders follows, subs, tips, raids, and more from the
+ * server's SSE stream, with a platform filter, relative-time aging, test-alert
+ * injector, settings, and the same live-edge scroll convention as chat.
+ */
+
 type Filter = ActivityFilter
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
@@ -115,6 +121,9 @@ export default function ActivityApp() {
   }, [])
 
   useEffect(() => {
+    // Subscribe to Relay's SSE stream: snapshot/presence/settings frames carry
+    // full dock state and activity frames carry new alerts — all forwarded to
+    // applySnapshot so the dock mirrors the backend
     const applySnapshot = (remote: BackendState) => {
       if (remote.activity) setEvents(remote.activity)
       if (remote.activityWarnings) setActivityWarnings(remote.activityWarnings)
@@ -140,6 +149,8 @@ export default function ActivityApp() {
   }, [])
 
   const visible = useMemo(() => {
+    // Filter rows by the active platform, then order newest-first so new
+    // alerts land at the top of the list
     const rows = filter === 'All' ? events : events.filter((event) => event.platform === filter)
     return [...rows].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
   }, [events, filter])

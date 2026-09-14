@@ -91,6 +91,18 @@ import type {
   YoutubeQuotaStatus,
 } from './types.js'
 
+/**
+ * Relay Chat Dock backend entry point.
+ *
+ * Owns: the Express + HTTP server, SSE fan-out to the docks, OAuth exchange and
+ * token refresh for all platforms, the platform adapters (Twitch EventSub / IRC,
+ * Kick chat + API, YouTube official Data API + InnerTube site chat), sending and
+ * moderation, StreamElements connection, and the single `state` object that the
+ * chat and activity docks render.
+ *
+ * The pure parsers it calls live in logic.ts; the readers for unofficial platform
+ * payloads (Kick Pusher, YouTube InnerTube) live in kick-chat.ts and youtube-chat.ts.
+ */
 process.removeAllListeners('warning')
 process.on('warning', (warning) => {
   if (warning.name === 'ExperimentalWarning' && /Fetch API|fetch/i.test(warning.message)) return
@@ -163,6 +175,7 @@ const YOUTUBE_HYDRATE_MS = 20_000
 let youtubeHydratingUntil = 0
 
 function beginYouTubeHydration() {
+  // InnerTube and the official history seed deliver the same messages; re-run duplicate collapse while we are ingesting
   const wasInactive = Date.now() >= youtubeHydratingUntil
   youtubeHydratingUntil = Math.max(youtubeHydratingUntil, Date.now() + YOUTUBE_HYDRATE_MS)
   if (wasInactive) collapseYouTubeHydrationDuplicates()
@@ -178,6 +191,7 @@ function collapseYouTubeHydrationDuplicates() {
 }
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
 
+/** Remember which YouTube messages we have seen so a restart re-seeds the history buffer without re-sending the same messages to the docks. */
 function rememberYouTubeFromChat(messages: ChatMessage[]) {
   for (const item of messages) {
     if (item.platform !== 'YouTube') continue
@@ -194,6 +208,7 @@ function loadChat(): ChatMessage[] {
 }
 
 const state: State = {
+  // Everything the docks render; each broadcast re-serializes a slice of it
   accounts: (['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => ({ platform, connected: Boolean(tokens[platform]), live: false, viewers: 0, handle: tokens[platform]?.user || '' })),
   streamInfo: {
     Twitch: { ...settings.streamInfo.Twitch },
@@ -493,10 +508,11 @@ httpServer.listen(port, bindHost, () => {
   } else {
     console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
   }
-  console.log(`  Chat history   last ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX)`)
+  console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — a crash buffer, not a VOD`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
-  console.log('  Use YouTube Data API v3 → Queries per day → Current usage (example 35), not the 1,247 quota-count card.')
+  console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
+  console.log('  Ignore the All quotas & system limits card (e.g. 1247) — that counts quota rows on the page, not units you used.')
   if (youtubeQuotaUsed) console.log(`  Estimated today ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (Pacific)`)
   console.log('  Optional: type 35 or 35/10000 and press Enter anytime. Logging will not wait.')
   console.log('')
@@ -738,6 +754,7 @@ function applyManualYouTubeQuota(line: string) {
     console.log('YouTube quota: type the Queries per day current usage (e.g. 35), or 35/10000 if your limit is not 10000.')
     return
   }
+  // The console number is the day's usage from the official quotas page (see below)
   if (parsed.kind === 'used') {
     setYouTubeQuotaUsed(parsed.used, 'console', parsed.limit)
     return
@@ -765,6 +782,7 @@ function listenForYouTubeQuotaInput() {
   process.stdin.on('error', () => undefined)
 }
 
+/** Read the daily quota straight from Google's response headers when they carry it; returns false if the headers are only per-minute rate limits. */
 function applyYouTubeQuotaHeaders(headers: Headers) {
   const parsed = quotaFromHeaders(headers)
   if (!parsed) return false
@@ -790,6 +808,7 @@ function applyYouTubeQuotaHeaders(headers: Headers) {
   return true
 }
 
+/** Add a call's known quota cost so the dock can warn before Google actually rejects us. */
 function noteYouTubeQuotaUse(endpoint: string, method = 'GET') {
   ensureYouTubeQuotaDay()
   const cost = youtubeQuotaCost(endpoint, method)
@@ -806,6 +825,7 @@ function noteYouTubeQuotaUse(endpoint: string, method = 'GET') {
   else broadcast()
 }
 
+/** Pause all official YouTube API calls until the next Pacific midnight; site chat (InnerTube) keeps running. */
 function markYouTubeQuotaExceeded() {
   ensureYouTubeQuotaDay()
   const until = nextPacificMidnight()
@@ -828,6 +848,7 @@ function noteYouTubeQuota(error: unknown) {
   return true
 }
 
+/** One official YouTube Data API call, gated on the daily quota, with token refresh and quota bookkeeping. */
 async function youtubeRequest(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<{ ok: boolean; status: number; text: string }> {
   ensureYouTubeQuotaDay()
   if (youtubeQuotaBlocked()) throw new Error('YouTube API quota exceeded')
@@ -849,6 +870,7 @@ async function youtubeRequest(endpoint: string, token: Token, options: RequestIn
   return { ok: response.ok, status: response.status, text }
 }
 
+/** Forget an ended YouTube live chat id so we stop polling a dead room. */
 function dropEndedYouTubeChat(chatId: string) {
   const token = tokens.YouTube
   if (token) {
@@ -975,7 +997,9 @@ function detachTwitchEventSub(socket?: WebSocket) {
   try { socket.close() } catch { /* already closed */ }
 }
 
+/** Connect Twitch EventSub over websocket; Twitch may ask us to reopen on a reconnect_url or we simply retry after a drop on a fresh session. */
 function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
+  // Reconnect generations: a stale socket's events are dropped once a newer session wins
   if (!tokens.Twitch?.userId || twitchEventSubUnsupported) return
   const plan = twitchEventSubConnectPlan(url, twitchEventSubGeneration)
   twitchEventSubGeneration = plan.generation
@@ -1004,6 +1028,7 @@ function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
     } else if (type === 'notification') {
       handleTwitchEventSub(payload)
     } else if (type === 'session_reconnect' && payload.payload?.session?.reconnect_url) {
+      // Resume on Twitch's inherited socket so subscriptions survive the transfer
       connectTwitchEventSub(payload.payload.session.reconnect_url)
     } else if (type === 'revocation') {
       console.error('Twitch EventSub revoked:', payload.payload?.subscription?.status)
@@ -1287,6 +1312,7 @@ async function flushTwitchAvatars() {
   if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
 }
 
+// Kick messages do not carry their author's picture, so profile pics are fetched in small batches and backfilled onto the matching rows
 function queueKickAvatar(slug?: string) {
   const key = String(slug || '').trim().toLowerCase()
   if (!key || kickAvatars.has(key) || kickAvatarPending.has(key)) return
@@ -1365,6 +1391,7 @@ function clearTranslateFailure() {
   state.translateError = ''
   broadcast()
 }
+/** Translate a chat snippet to English using the configured provider, with a per-session cache. Falls back silently to the original text on any failure. */
 async function translateToEnglish(text: string) {
   const key = text.trim()
   if (!key || !needsTranslation(key)) return
@@ -1387,6 +1414,7 @@ async function translateToEnglish(text: string) {
         body: JSON.stringify({ q: snippet, source: 'auto', target: 'en', format: 'text', ...(config.key ? { api_key: config.key } : {}) }),
       }, 6_000)
     } else {
+      // Free unofficial Google endpoint, no key required; can be rate-limited or blocked by Google
       response = await fetchTimed(`${config.url}?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(snippet)}`, { headers: { Accept: 'application/json' } }, 6_000)
     }
     if (!response.ok) { noteTranslateFailure(); return }
@@ -1677,6 +1705,7 @@ async function pollYouTube() {
   await refreshYouTubeViewers()
 }
 
+/** Poll the official liveBroadcasts API for our live chats, and fall back to the site reader when quota blocks the official status check. */
 async function pollYouTubeStatus(token: Token) {
   const account = state.accounts.find((item) => item.platform === 'YouTube')!
   let broadcasts: any
@@ -2006,6 +2035,7 @@ async function moderateTwitch(body: { action: string; messageId?: string; userId
     return { ok: true }
   }
   const data: { user_id: string; duration?: number; reason: string } = { user_id: body.userId, reason: 'Relayed from OBS dock' }
+  // Twitch timeouts are in seconds
   if (body.action === 'timeout') data.duration = Math.max(1, Number(body.duration || 60))
   await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}`, token, {
     method: 'POST',
@@ -2030,7 +2060,7 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
     user_id: Number(body.userId),
     reason: 'Relayed from OBS dock',
   }
-  if (body.action === 'timeout') payload.duration = Math.max(1, Math.round(Number(body.duration || 60) / 60) || 1)
+  if (body.action === 'timeout') payload.duration = Math.max(1, Math.round(Number(body.duration || 60) / 60) || 1) // Kick timeouts are in minutes, dock sends seconds
   const response = await kickApi('/moderation/bans', token, {
     method: body.action === 'unban' ? 'DELETE' : 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2040,8 +2070,10 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
   return { ok: true }
 }
 
+// Remember the ban ids YouTube handed back so the dock can unban what it banned (YouTube unban needs the original ban id)
 const youtubeBanIds = new Map<string, string[]>()
 
+/** Sending via the official YouTube Data API: delete a message, unban by the ban id we stored, or ban/timeout across every live chat we have. */
 async function moderateYouTube(body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
   if (youtubeQuotaBlocked()) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
   const token = await ensureToken('YouTube')
@@ -2183,6 +2215,7 @@ function pushSse(chunk: string) {
   for (const client of [...clients]) writeSse(client, chunk)
 }
 
+// Slice the sub-slices so each dock only receives and re-broadcasts what it renders
 function broadcast() {
   state.activity = activityStore.list()
   const next = {

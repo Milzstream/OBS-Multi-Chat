@@ -23,7 +23,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - Responsive OBS chat dock with platform filters and compact mode
 - OAuth callback server for Twitch, Kick, and YouTube
 - Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
-- Chat history persistence in `data/chat.json` (last 200 messages) so a backend restart does not empty the dock
+- Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default) so a backend restart does not empty the dock
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
@@ -62,7 +62,14 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 ### Automatic chat translation
 
-Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message remains visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings. When on, the message text is sent to a translation endpoint. By default that is Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`). To use an official API instead, set `TRANSLATE_API_KEY` (Google Cloud Translation) or `TRANSLATE_URL` (a LibreTranslate-compatible endpoint, with optional `TRANSLATE_API_KEY`) in `production.env` and restart. If translation fails, Connection Settings shows why and messages stay in the original language. This is an outbound third-party request — turn the setting off if that handling is not acceptable for your stream.
+Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings.
+
+By default the translated text comes from Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`), which needs no key. If you would rather not use the unofficial endpoint, set one of these in `production.env` and restart:
+
+- `TRANSLATE_API_KEY` — uses Google Cloud Translation (the official API).
+- `TRANSLATE_URL` — uses a LibreTranslate-compatible endpoint, with optional `TRANSLATE_API_KEY` for the service's key.
+
+If translation fails, Connection Settings shows why and messages stay in the original language. Translation is an outbound third-party request, so turn the setting off if that is not acceptable for your stream.
 
 ### Google / YouTube
 
@@ -78,11 +85,11 @@ The app requests YouTube read access and YouTube live metadata/chat access.
 
 YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
 
-The console prints the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). Use the **YouTube Data API v3 → Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the large “All quotas & system limits” count (for example `1,247`) — that is how many quota rows exist, not units used. Optionally type `35` or `35/10000` and press Enter at any time; logging does not wait. After that, the dock estimates forward from this app’s official API calls. A warning appears around 80% and when the daily cap is reached. InnerTube chat does not count against quota.
+The console prints a link to the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). To enter your current usage, open the **YouTube Data API v3** group and read the **Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the **All quotas & system limits** card near the top of the page (for example `1,247`) — that is a count of how many quota rows exist, not units you have used. Optionally type `35` or `35/10000` and press Enter at any time; logging does not block on your input. After that, the app estimates forward from its own official API calls and warns near 80% and when the daily cap is reached. InnerTube site chat does not count against the quota.
 
 Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection on a slow interval (about 3 minutes while offline, much less often while live), a one-shot history seed when a new live chat appears, sending and deleting messages, and a slow official chat fallback only if InnerTube fails. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
 
-If you are live on both a regular YouTube stream and a Shorts stream at the same time, put `#shortsfeed` in the **Shorts** stream title (not the horizontal one). Chat from that title is tagged **Shorts**; the other YouTube chat is tagged **Live**. The dock reads the title only and does not spend extra API quota to guess which chat is which. If `#shortsfeed` is not in any live title, the Live/Shorts tags stay hidden.
+If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
 
@@ -152,7 +159,7 @@ Click **Connect** for each platform in either dock's settings. Each button opens
 
 ### Moderation
 
-Right-click a chat row to delete, timeout, or ban on that platform. A ban or timeout lines out that chatter's messages in the Relay feed (same as Kick/YouTube strikethrough). Right-click a lined-out row to **Unban / untimeout**. The platforms keep their own logs. The same line-out/restore runs if Twitch, Kick, or YouTube report a delete, ban, timeout, or unban. YouTube unban from Relay only works for bans/timeouts that were issued from this dock (YouTube's API needs that ban id).
+Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id.
 
 ### Activity dock
 
@@ -176,7 +183,7 @@ Hiding or skipping an event in the StreamElements dashboard does **not** remove 
 
 Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json` (last 5000 messages by default). Set `RELAY_CHAT_MAX` in `production.env` to keep more or fewer (100–1,000,000). Memory and `chat.json` size scale with that number. Packaged runs keep that `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Messages that arrived while the backend was down are not backfilled: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. The number is the trade-off: memory and the size of `chat.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 

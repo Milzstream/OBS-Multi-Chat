@@ -1,6 +1,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * Reads YouTube live chat through the public site (InnerTube): the watch and
+ * live_chat HTML pages, the unofficial youtubei get_live_chat poll, and live
+ * detection from the channel page. Every payload shape here is YouTube's
+ * unofficial site JSON, which changes without notice.
+ *
+ * Sending, moderation, and quota accounting are official Data API calls that
+ * live in server.ts / logic.ts; this file only reads the site.
+ */
+
 export type YouTubeChatMessage = {
   id: string
   user: string
@@ -20,6 +30,7 @@ export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: 
 
 type Session = { videoId: string; apiKey: string; clientVersion: string; continuation: string; visitorData?: string }
 
+/** All HTML here is parsed from YouTube's public pages with browser-like headers so it renders like a site visitor. */
 const BROWSER_HEADERS = {
   Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
@@ -50,10 +61,15 @@ async function loadChromium() {
   }
 }
 
+/** Unescape the JSON-escaped HTML YouTube ships on its pages. */
 export function decodeHtml(value: string) {
   return value.replace(/\\u0026/g, '&').replace(/\\"/g, '"').replace(/\\\//g, '/')
 }
 
+/**
+ * Pull an InnerTube session (api key, client version, continuation token) out of a live page.
+ * Returns undefined on replays because a replay has no live continuation to poll.
+ */
 export function extractSession(html: string, videoId: string): Session | undefined {
   if (/"isReplay"\s*:\s*true/.test(html)) return
   const apiKey = html.match(/"INNERTUBE_API_KEY":"([^"]+)"/)?.[1]
@@ -68,6 +84,7 @@ export function extractSession(html: string, videoId: string): Session | undefin
   return { videoId: canonical || videoId, apiKey, clientVersion, continuation, visitorData }
 }
 
+/** Extract the video id, returning undefined when the page is a replay or the live has ended. */
 export function extractVideoId(html: string) {
   if (/"isReplay"\s*:\s*true/.test(html) || /LIVE_STREAM_OFFLINE|This live event has ended/i.test(html)) return
   return html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)"/)?.[1]
@@ -75,6 +92,7 @@ export function extractVideoId(html: string) {
     || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
 }
 
+/** Extract the current viewer count from YouTube's page HTML. YouTube puts this in several different places depending on the template. */
 export function parseYouTubeViewers(html: string) {
   const watching = html.match(/([\d,.]+)\s+watching now/i)?.[1]
   if (watching) return Number(watching.replace(/,/g, ''))
@@ -101,6 +119,7 @@ export function parseYouTubeTitle(html: string) {
 
 const TRAILING_TRUNCATED_URL = /https?:\/\/\S*(?:\.{2,}|…)\s*$/i
 
+/** Recover a real link URL from a chat run: YouTube truncates long URLs in chat and buries the target in a redirect endpoint. */
 export function runLinkUrl(run: any) {
   const endpoint = run?.navigationEndpoint || run?.command
   const raw = String(endpoint?.urlEndpoint?.url || endpoint?.commandMetadata?.webCommandMetadata?.url || '').trim()
@@ -114,6 +133,7 @@ export function runLinkUrl(run: any) {
   } catch { /* ignore malformed URLs */ }
 }
 
+/** Expand a truncated chat URL back to its full form when the text and the hidden link line up. */
 export function expandRunText(run: any) {
   const text = String(run?.text || '')
   const link = runLinkUrl(run)
@@ -155,8 +175,14 @@ export function authorBadges(renderer: any): YouTubeChatMessage['badges'] {
   return badges
 }
 
+/**
+ * Classify one InnerTube chat item into a renderer and, for paid/member rows, an activity kind.
+ * The renderer names are YouTube's unofficial site JSON.
+ */
 export function classifyChatItem(item: any): { renderer: any; activityKind?: YouTubeChatMessage['activityKind']; amount?: string } | undefined {
+  // Plain text line
   if (item?.liveChatTextMessageRenderer) return { renderer: item.liveChatTextMessageRenderer }
+  // Super Chat message or paid sticker
   if (item?.liveChatPaidMessageRenderer) {
     const renderer = item.liveChatPaidMessageRenderer
     return { renderer, activityKind: 'superchat', amount: renderer.purchaseAmountText?.simpleText }
@@ -165,7 +191,9 @@ export function classifyChatItem(item: any): { renderer: any; activityKind?: You
     const renderer = item.liveChatPaidStickerRenderer
     return { renderer, activityKind: 'superchat', amount: renderer.purchaseAmountText?.simpleText }
   }
+  // Membership join / milestone
   if (item?.liveChatMembershipItemRenderer) return { renderer: item.liveChatMembershipItemRenderer, activityKind: 'membership' }
+  // Memberships gifted to several people — flattens the header onto the item so it reads like a normal renderer
   const gift = item?.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
   if (gift) {
     const header = gift.header?.liveChatSponsorshipsHeaderRenderer || {}
@@ -211,6 +239,7 @@ export function parseModerationActions(payload: any): YouTubeModeration[] {
   return result
 }
 
+/** Parse chat actions out of an InnerTube payload; ignoreBefore skips messages older than a timestamp (first-poll history). */
 export function parseActions(payload: any, videoId: string, ignoreBefore = 0): YouTubeChatMessage[] {
   const messages: YouTubeChatMessage[] = []
   for (const action of liveChatActions(payload)) {
@@ -242,6 +271,7 @@ export function parseActions(payload: any, videoId: string, ignoreBefore = 0): Y
   return messages
 }
 
+/** Follow the continuation token to the next page of a live chat. `ended: true` means YouTube reported no active continuation. */
 export function nextContinuation(payload: any): { continuation?: string; timeoutMs: number; ended: boolean } {
   const items = payload?.continuationContents?.liveChatContinuation?.continuations || []
   for (const item of items) {
@@ -298,6 +328,7 @@ function extractInitialPayload(html: string) {
   }
 }
 
+/** Load one live page, prefer the lightweight popout when it works, then extract the session plus any bootstrap of recent messages. */
 async function loadLivePage(videoId: string) {
   for (const url of [
     `https://www.youtube.com/live_chat?is_popout=1&v=${encodeURIComponent(videoId)}`,
@@ -316,6 +347,7 @@ async function loadLivePage(videoId: string) {
   }
 }
 
+/** Poll the unofficial youtubei live-chat endpoint with the InnerTube session details extracted from the page. */
 async function pollLiveChat(session: Session) {
   const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?prettyPrint=false&key=${encodeURIComponent(session.apiKey)}`, {
     method: 'POST',
@@ -376,6 +408,7 @@ export class YouTubeLiveChat {
     this.clearLoops()
   }
 
+  /** Find the currently live broadcast by reading the channel's /live page. Used when the official status poll is quota-blocked or offline. */
   async discoverLive(input: { channelId?: string; handle?: string }) {
     const urls: string[] = []
     if (input.channelId) urls.push(`https://www.youtube.com/channel/${encodeURIComponent(input.channelId)}/live`)
@@ -422,6 +455,7 @@ export class YouTubeLiveChat {
         const { session } = loaded
         this.failures = 0
         this.lastOk = Date.now()
+        // Bootstrap and the first poll are history; mark them preload so the backend dedupes against the official history seed
         for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, loop.target)
         for (const event of loaded.moderation) this.onModeration?.(event)
         let firstPoll = true

@@ -2,12 +2,21 @@ import crypto from 'node:crypto'
 import WebSocket from 'ws'
 import { parseActivityTime, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './activity.js'
 
+/**
+ * StreamElements feed for the Activity dock: the source of truth for follows,
+ * subs, tips, merch, and the rest. It hydrates JWTs into channels, backfills
+ * recent history, and subscribes to StreamElements' Astro websocket for live
+ * events. Payload shapes here are StreamElements' unofficial websocket JSON.
+ */
+
 export type StreamElementsChannel = { channelId: string; handle: string; jwt: string; provider?: string }
 
 const ASTRO_URL = 'wss://astro.streamelements.com'
 const API_BASE = 'https://api.streamelements.com/kappa/v2'
+/** Event types that belong to StreamElements (donations/merch) rather than the platform the stream is linked to. */
 const SE_ONLY_TYPES = new Set(['tip', 'merch', 'purchase', 'redemption', 'charitycampaigndonation', 'giveaway', 'elixir', 'stars'])
 
+/** Decode a JWT's claims without verifying the signature — only used to recover the channel id when the API is unreachable. */
 function decodeJwt(jwt: string) {
   const parts = jwt.split('.')
   if (parts.length < 2) return
@@ -60,6 +69,7 @@ function pickUser(data: any) {
   return String(data?.displayName || data?.username || data?.name || data?.user?.username || data?.donation?.user?.username || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
 }
 
+/** Map a raw StreamElements event into an ActivityEvent, returning undefined for internal or crowd-sourced events the dock does not render. */
 export function activityFromStreamElements(payload: any): ActivityEvent | undefined {
   const root = payload?.topic || payload?.type === 'message' ? (payload.data || payload) : payload
   const inner = root?.data && typeof root.data === 'object' && !Array.isArray(root.data) ? root.data : root
