@@ -11,11 +11,10 @@ import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type 
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
+import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates } from './check-update.js'
 import {
-  CHAT_MAX,
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
   applyLiveStreamDetails,
@@ -38,6 +37,7 @@ import {
   oauthAuthorizeUrl,
   pacificDate,
   parseAppSettings,
+  parseChatMax,
   parseKickParts,
   parseTranslatedText,
   parseTwitchChatLine,
@@ -101,6 +101,7 @@ const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
 const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
 dotenv.config({ path: envPath })
+const chatMax = parseChatMax()
 
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
@@ -187,7 +188,7 @@ function rememberYouTubeFromChat(messages: ChatMessage[]) {
 
 function loadChat(): ChatMessage[] {
   const parsed = readJsonFile<unknown>(chatFile, [])
-  const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-CHAT_MAX)
+  const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-chatMax)
   rememberYouTubeFromChat(messages)
   return messages
 }
@@ -214,7 +215,7 @@ const state: State = {
 function persistChat() {
   try {
     pruneYouTubeSeenIds(youtubeSeen, state.messages)
-    const stored = state.messages.slice(-CHAT_MAX).map((message) => {
+    const stored = state.messages.slice(-chatMax).map((message) => {
       const rest = { ...message }
       delete rest.ingest
       return rest
@@ -246,9 +247,22 @@ const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: num
 app.use(cors({ origin: corsOriginDelegate(localApi) }))
 app.use(express.json())
 app.use(createControlGuard(localApi))
-  app.get('/api/state', (_request, response) => {
+app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
   response.json({ seq: sseSeq, ...state })
+})
+app.get('/api/media', async (request, response) => {
+  const raw = String(request.query.u || '')
+  if (!isSafeMediaUrl(raw)) return response.status(400).end()
+  try {
+    const upstream = await fetchTimed(raw, { headers: { Accept: 'image/*' } }, 8_000)
+    if (!upstream.ok) return response.status(upstream.status).end()
+    response.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/webp')
+    response.setHeader('Cache-Control', 'public, max-age=86400')
+    response.end(Buffer.from(await upstream.arrayBuffer()))
+  } catch {
+    response.status(502).end()
+  }
 })
 app.get('/events', (request, response) => {
   const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
@@ -479,6 +493,7 @@ httpServer.listen(port, bindHost, () => {
   } else {
     console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
   }
+  console.log(`  Chat history   last ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX)`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Use YouTube Data API v3 → Queries per day → Current usage (example 35), not the 1,247 quota-count card.')
@@ -1527,6 +1542,7 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     ownUserIds: ownUserIds(),
     recentOutgoing,
     targets: youtubeTargets,
+    max: chatMax,
   })
   for (const id of result.seenIds) youtubeSeen.add(id)
   if (!result.changed) return

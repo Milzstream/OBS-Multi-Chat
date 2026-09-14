@@ -39,6 +39,14 @@ export function chatroomIdFrom(payload: any): number | undefined {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined
 }
 
+const kickProfilePicCache = new Map<string, string>()
+
+export function rememberKickProfilePic(slug: string, payload: any) {
+  const key = slug.trim().toLowerCase()
+  const pic = kickProfilePicFromChannel(payload)
+  if (key && pic) kickProfilePicCache.set(key, pic)
+}
+
 export async function resolveKickChatroomId(slug: string, cached?: number): Promise<number> {
   if (cached && cached > 0) return cached
   for (const url of [
@@ -48,7 +56,9 @@ export async function resolveKickChatroomId(slug: string, cached?: number): Prom
     try {
       const response = await fetch(url, { headers: BROWSER_HEADERS })
       if (!response.ok) continue
-      const id = chatroomIdFrom(await response.json())
+      const payload = await response.json()
+      rememberKickProfilePic(slug, payload)
+      const id = chatroomIdFrom(payload)
       if (id) return id
     } catch { /* Cloudflare often blocks Node fetch; fall through */ }
   }
@@ -100,6 +110,11 @@ export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string
   for (const slug of slugs) {
     const key = slug.trim().toLowerCase()
     if (!key) continue
+    const cached = kickProfilePicCache.get(key)
+    if (cached) {
+      pics.set(key, cached)
+      continue
+    }
     try {
       const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
         headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` },
@@ -108,6 +123,7 @@ export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string
         const pic = kickProfilePicFromChannel(await response.json())
         if (pic) {
           pics.set(key, pic)
+          kickProfilePicCache.set(key, pic)
           continue
         }
       }
@@ -118,7 +134,10 @@ export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string
   const fromBrowser = await fetchKickChannelPayloadsWithBrowser(missing)
   for (const [slug, payload] of fromBrowser) {
     const pic = kickProfilePicFromChannel(payload)
-    if (pic) pics.set(slug.toLowerCase(), pic)
+    if (pic) {
+      pics.set(slug.toLowerCase(), pic)
+      rememberKickProfilePic(slug, payload)
+    }
   }
   return pics
 }
@@ -136,6 +155,7 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
       const response = await fetch(`/api/v2/channels/${encodeURIComponent(channelSlug)}`, { headers: { Accept: 'application/json' } })
       return response.ok ? await response.json() : null
     }, slug)
+    if (payload) rememberKickProfilePic(slug, payload)
     return chatroomIdFrom(payload)
   } catch (error) {
     console.error('Kick chatroom lookup:', error instanceof Error ? error.message : error)

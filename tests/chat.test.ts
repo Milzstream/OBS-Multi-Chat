@@ -7,6 +7,7 @@ import {
   looksLikePlaceholder,
   needsTranslation,
   normalizeAvatar,
+  parseChatMax,
   parseKickParts,
   parseTranslatedText,
   parseTwitchChatLine,
@@ -235,6 +236,16 @@ describe('SSE broadcast cache', () => {
     assert.equal(sseNamedEvent('chat', { seq: 2 }), 'event: chat\ndata: {"seq":2}\n\n')
     assert.deepEqual(sseChangedKeys({ chat: 'a', activity: 'b' }, { chat: 'a', activity: 'c' }), ['activity'])
     assert.deepEqual(sseChangedKeys({ chat: 'a' }, { chat: 'a' }), [])
+  })
+})
+
+describe('chat history cap', () => {
+  it('defaults to 5000 and clamps RELAY_CHAT_MAX', () => {
+    assert.equal(parseChatMax({}), 5000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '20000' }), 20_000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '1' }), 100)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '99999999' }), 1_000_000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: 'nope' }), 5000)
   })
 })
 

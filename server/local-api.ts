@@ -132,9 +132,20 @@ export function isSafeExternalUrl(raw: string) {
   const host = parsed.hostname.toLowerCase()
   const pathname = parsed.pathname
   if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
-  if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,25}\/?$/.test(pathname)
+  if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,50}\/?$/.test(pathname)
   if (PROFILE_HOSTS.youtube.has(host)) return /^\/channel\/UC[\w-]{20,}\/?$/.test(pathname) || /^\/@[A-Za-z0-9._-]{1,60}\/?$/.test(pathname)
   return false
+}
+
+const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt3.googleusercontent.com'])
+
+export function isSafeMediaUrl(raw: string) {
+  if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
+  let parsed: URL
+  try { parsed = new URL(raw) } catch { return false }
+  if (parsed.protocol !== 'https:') return false
+  if (parsed.username || parsed.password) return false
+  return MEDIA_HOSTS.has(parsed.hostname.toLowerCase())
 }
 
 export function parseOpenUrl(raw: unknown): { ok: true; url: string } | { ok: false; error: string } {

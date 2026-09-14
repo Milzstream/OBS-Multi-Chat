@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
+import { dockAvatarSrc, kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
 import { chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
+  it('proxies Kick CDN avatars through the local media route', () => {
+    assert.equal(dockAvatarSrc('https://files.kick.com/images/user/1/a.webp'), '/api/media?u=https%3A%2F%2Ffiles.kick.com%2Fimages%2Fuser%2F1%2Fa.webp')
+    assert.equal(dockAvatarSrc('https://static-cdn.jtvnw.net/jtv_user_pictures/x.png'), 'https://static-cdn.jtvnw.net/jtv_user_pictures/x.png')
+    assert.equal(dockAvatarSrc(undefined), undefined)
+  })
+
   it('uses a Kick slug when present and otherwise converts underscores', () => {
     assert.equal(kickProfileSlug('SuperIOgame_Tyle88', 'superiogame-tyle88'), 'superiogame-tyle88')
     assert.equal(kickProfileSlug('SuperIOgame_Tyle88'), 'superiogame-tyle88')
