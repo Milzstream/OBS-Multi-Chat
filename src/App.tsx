@@ -94,8 +94,8 @@ function App() {
 
   useEffect(() => {
     const applySnapshot = (remote: BackendState) => {
-      setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
-      setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
+      if (Array.isArray(remote.accounts)) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
+      if (Array.isArray(remote.messages)) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
       if (remote.health) {
         const health = remote.health
         setHealth((prev) => JSON.stringify(prev) !== JSON.stringify(health) ? health : prev)

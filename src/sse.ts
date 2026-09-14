@@ -51,6 +51,7 @@ export function subscribeDockSse(handlers: {
       const remote = await response.json() as Record<string, unknown>
       const seq = Number(remote.seq)
       if (Number.isFinite(seq)) lastSeq = seq
+      lastEventAt = Date.now()
       handlers.onSnapshot(remote)
       handlers.onStatus(true)
       failures = 0
