@@ -118,7 +118,7 @@ TWITCH_CLIENT_SECRET=your_twitch_client_secret
 
 KICK_CLIENT_ID=your_kick_client_id
 KICK_CLIENT_SECRET=your_kick_client_secret
-KICK_API_BASE=
+# KICK_API_BASE=
 # Optional if Edge/Chrome is installed in a non-standard location:
 # Shared by the Kick chatroom-ID lookup and the YouTube InnerTube fallback:
 # BROWSER_PATH=C:\\Path\\To\\msedge.exe
