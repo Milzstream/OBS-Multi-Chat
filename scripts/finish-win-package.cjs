@@ -112,6 +112,7 @@ fs.cpSync('dist', path.resolve('deploy', 'dist'), { recursive: true })
 const deployEnv = path.resolve('deploy', 'production.env')
 if (fs.existsSync('production.env')) mergeEnvFile('production.env', deployEnv)
 else if (!fs.existsSync(deployEnv) && fs.existsSync('.env.example')) fs.copyFileSync('.env.example', deployEnv)
+fs.writeFileSync(path.resolve('deploy', 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
 fs.rmSync(built, { force: true })
 
 Promise.resolve()

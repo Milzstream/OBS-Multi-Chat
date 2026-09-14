@@ -2,8 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
 
-export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
-export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; amount?: string; months?: number; viewers?: number; message?: string }
+export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; slug?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
+export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; slug?: string; amount?: string; months?: number; viewers?: number; message?: string }
+export type KickModeration = { action: 'delete' | 'ban' | 'unban'; messageId?: string; userId?: string; user?: string; slug?: string }
 
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
 const BROWSER_HEADERS = {
@@ -99,19 +100,48 @@ export function pickName(...values: unknown[]): string | undefined {
   }
 }
 
+function kickSlugFrom(data: any): string | undefined {
+  const slug = pickName(data?.slug, data?.channel_slug, data?.user?.slug, data?.sender?.slug)
+  return slug ? slug.toLowerCase() : undefined
+}
+
+export function kickEventToModeration(eventName: string, data: any): KickModeration | undefined {
+  const event = eventName.replace(/\\/g, '')
+  if (/ChatMessage/i.test(event)) return
+  if (/MessageDeleted|ChatMessageDeleted/i.test(event)) {
+    const messageId = data?.message?.id ?? data?.message_id ?? data?.id
+    if (messageId == null || messageId === '') return
+    return { action: 'delete', messageId: String(messageId) }
+  }
+  if (/UserUnbanned|BannedUserDeleted|UserUnbannedEvent/i.test(event)) {
+    const userId = data?.user?.id ?? data?.banned_user?.id ?? data?.user_id
+    const user = pickName(data?.user, data?.banned_user, data?.username)
+    const slug = kickSlugFrom(data)
+    if (userId == null && !user && !slug) return
+    return { action: 'unban', userId: userId != null ? String(userId) : undefined, user, slug }
+  }
+  if (/UserBanned|BannedUserAdded|UserTimeout/i.test(event)) {
+    const userId = data?.user?.id ?? data?.banned_user?.id ?? data?.user_id
+    const user = pickName(data?.user, data?.banned_user, data?.username)
+    const slug = kickSlugFrom(data)
+    if (userId == null && !user && !slug) return
+    return { action: 'ban', userId: userId != null ? String(userId) : undefined, user, slug }
+  }
+}
+
 export function kickEventToActivity(eventName: string, data: any): KickActivity | undefined {
   const event = eventName.replace(/\\/g, '')
   if (/FollowersUpdated/i.test(event) && !pickName(data?.username, data?.user, data?.follower)) return
   if (/FollowEvent|FollowersUpdated/i.test(event)) {
     const user = pickName(data?.username, data?.user, data?.follower, data?.follower_username)
     if (!user) return
-    return { id: data?.id ? String(data.id) : undefined, kind: 'follow', user }
+    return { id: data?.id ? String(data.id) : undefined, kind: 'follow', user, slug: kickSlugFrom(data) }
   }
   if (/SubscriptionEvent/i.test(event) && !/Gifted|LuckyUsers/i.test(event)) {
     const user = pickName(data?.username, data?.user, data?.subscriber)
     if (!user) return
     const months = Number(data?.months || data?.duration)
-    return { id: data?.id ? String(data.id) : undefined, kind: 'subscription', user, months: Number.isFinite(months) && months > 0 ? months : undefined }
+    return { id: data?.id ? String(data.id) : undefined, kind: 'subscription', user, slug: kickSlugFrom(data), months: Number.isFinite(months) && months > 0 ? months : undefined }
   }
   if (/GiftedSubscriptions/i.test(event)) {
     const user = pickName(data?.gifter_username, data?.gifter, data?.username, data?.user)
@@ -119,22 +149,23 @@ export function kickEventToActivity(eventName: string, data: any): KickActivity 
     const gifted = Array.isArray(data?.gifted_usernames) ? data.gifted_usernames.length : Number(data?.giftedCount || data?.gifted_count)
     return {
       id: data?.id ? String(data.id) : undefined,
-      kind: 'gift',
-      user,
-      amount: Number.isFinite(gifted) && gifted > 0 ? `${gifted} gift${gifted === 1 ? '' : 's'}` : undefined,
+        kind: 'gift',
+        user,
+        slug: kickSlugFrom(data),
+        amount: Number.isFinite(gifted) && gifted > 0 ? `${gifted} gift${gifted === 1 ? '' : 's'}` : undefined,
     }
   }
   if (/KicksGifted/i.test(event)) {
     const user = pickName(data?.username, data?.sender, data?.user, data?.gifter)
     if (!user) return
     const amount = data?.amount ?? data?.gifted_amount ?? data?.kicks
-    return { id: data?.id ? String(data.id) : undefined, kind: 'cheer', user, amount: amount != null ? `${amount} Kicks` : undefined, message: String(data?.message || '').trim() || undefined }
+    return { id: data?.id ? String(data.id) : undefined, kind: 'cheer', user, slug: kickSlugFrom(data), amount: amount != null ? `${amount} Kicks` : undefined, message: String(data?.message || '').trim() || undefined }
   }
   if (/StreamHost/i.test(event)) {
     const user = pickName(data?.user, data?.username, data?.host, data?.message?.user)
     if (!user) return
     const viewers = Number(data?.message?.numberOfViewers ?? data?.numberOfViewers ?? data?.viewers)
-    return { id: data?.id || data?.message?.id ? String(data?.id || data.message.id) : undefined, kind: 'raid', user, viewers: Number.isFinite(viewers) ? viewers : undefined }
+    return { id: data?.id || data?.message?.id ? String(data?.id || data.message.id) : undefined, kind: 'raid', user, slug: kickSlugFrom(data), viewers: Number.isFinite(viewers) ? viewers : undefined }
   }
 }
 
@@ -147,15 +178,17 @@ export class KickChat {
   private slug?: string
   private onMessage?: (message: KickChatMessage) => void
   private onActivity?: (event: KickActivity) => void
+  private onModeration?: (event: KickModeration) => void
   private closed = true
   private attempt = 0
 
   get currentChatroomId() { return this.chatroomId }
   get connected() { return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
 
-  async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number, onActivity?: (event: KickActivity) => void) {
+  async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number, onActivity?: (event: KickActivity) => void, onModeration?: (event: KickModeration) => void) {
     this.onMessage = onMessage
     this.onActivity = onActivity
+    this.onModeration = onModeration
     this.closed = false
     if (this.slug !== slug) {
       this.slug = slug
@@ -174,6 +207,7 @@ export class KickChat {
     this.chatroomId = undefined
     this.onMessage = undefined
     this.onActivity = undefined
+    this.onModeration = undefined
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = undefined
     await this.disconnectSocket()
@@ -231,6 +265,7 @@ export class KickChat {
         user,
         text: text || ' ',
         userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
+        slug: data?.sender?.slug || data?.sender?.channel_slug ? String(data.sender.slug || data.sender.channel_slug) : undefined,
         color: data?.sender?.identity?.color,
         avatar: data?.sender?.profile_picture || data?.sender?.profilepic || data?.sender?.avatar,
         badges: data?.sender?.identity?.badges,
@@ -238,6 +273,8 @@ export class KickChat {
       })
       return
     }
+    const moderation = kickEventToModeration(event, data)
+    if (moderation) this.onModeration?.(moderation)
     const activity = kickEventToActivity(event, data)
     if (activity) this.onActivity?.(activity)
   }

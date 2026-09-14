@@ -38,6 +38,7 @@ type BackendState = {
   ignoreMissingJwt?: boolean
   dropOldAlerts?: boolean
   translateChat?: boolean
+  translateError?: string
 }
 
 function relativeTime(iso: string, now: number) {
@@ -89,6 +90,7 @@ export default function ActivityApp() {
   const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
   const [dropOldAlerts, setDropOldAlerts] = useState(false)
   const [translateChat, setTranslateChat] = useState(true)
+  const [translateError, setTranslateError] = useState('')
   const [dismissedWarning, setDismissedWarning] = useState(false)
   const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
   const [now, setNow] = useState(Date.now())
@@ -123,6 +125,7 @@ export default function ActivityApp() {
       if (typeof remote.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(remote.ignoreMissingJwt)
       if (typeof remote.dropOldAlerts === 'boolean') setDropOldAlerts(remote.dropOldAlerts)
       if (typeof remote.translateChat === 'boolean') setTranslateChat(remote.translateChat)
+      if (typeof remote.translateError === 'string') setTranslateError(remote.translateError)
       setBackendOnline(true)
     }
     fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
@@ -211,6 +214,7 @@ export default function ActivityApp() {
         ignoreMissingJwt={ignoreMissingJwt}
         dropOldAlerts={dropOldAlerts}
         translateChat={translateChat}
+        translateError={translateError}
         showActivityOptions
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}

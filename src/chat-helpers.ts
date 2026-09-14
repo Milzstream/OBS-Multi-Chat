@@ -1,5 +1,11 @@
 export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
 
+export function kickProfileSlug(user: string, slug?: string) {
+  const fromSlug = String(slug || '').replace(/^@+/, '').trim().toLowerCase()
+  if (fromSlug) return fromSlug
+  return String(user || '').replace(/^@+/, '').trim().toLowerCase().replace(/_/g, '-')
+}
+
 export function preferredCategory(twitch: string, kick: string) {
   const twitchName = twitch.trim()
   const kickName = kick.trim()

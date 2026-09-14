@@ -1,23 +1,33 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+  applyChatModeration,
   kickBadges,
   kickEmoteUrl,
   looksLikePlaceholder,
   needsTranslation,
   normalizeAvatar,
   parseKickParts,
+  parseTranslatedText,
   parseTwitchChatLine,
   parseTwitchEmoteParts,
+  parseTwitchModerationLine,
   partsFromTwitchFragments,
   pruneYouTubeSeenIds,
+  resolveTranslateConfig,
   sanitizeIrcMessage,
+  sseBroadcastEvent,
   summarizeApiError,
+  translateFailureMessage,
   twitchBadgeLabel,
   twitchBadgesFromTag,
   twitchEmoteUrl,
+  twitchEventSubCloseAction,
+  twitchEventSubConnectPlan,
+  TWITCH_EVENTSUB_DEFAULT_URL,
 } from '../server/logic.js'
-import { chatroomIdFrom, kickEventToActivity, parseJson, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, kickEventToActivity, kickEventToModeration, parseJson, pickName } from '../server/kick-chat.js'
+import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
   it('parses PRIVMSG tags, badges, and emotes', () => {
@@ -115,6 +125,16 @@ describe('Kick chat and activity', () => {
     assert.equal(kickEventToActivity('KicksGifted', { username: 'Mel', amount: 100, message: 'yo' })?.amount, '100 Kicks')
     assert.equal(kickEventToActivity('StreamHost', { username: 'Host', viewers: 12 })?.kind, 'raid')
     assert.equal(kickEventToActivity('FollowersUpdated', {}), undefined)
+    assert.equal(kickEventToActivity('FollowEvent', { username: 'Ada', slug: 'ada-live' })?.slug, 'ada-live')
+  })
+
+  it('maps Kick delete, ban, and unban socket events', () => {
+    assert.deepEqual(kickEventToModeration('App\\Events\\MessageDeletedEvent', { id: 'm1' }), { action: 'delete', messageId: 'm1' })
+    assert.equal(kickEventToModeration('ChatMessageEvent', { id: 'm1', sender: { username: 'Ada' } }), undefined)
+    const banned = kickEventToModeration('UserBannedEvent', { user: { id: 9, username: 'Ada', slug: 'ada' } })
+    assert.equal(banned?.action, 'ban')
+    assert.equal(banned?.userId, '9')
+    assert.equal(kickEventToModeration('UserUnbannedEvent', { user: { id: 9, username: 'Ada' } })?.action, 'unban')
   })
 
   it('maps Kick badges and placeholder handles', () => {
@@ -130,5 +150,77 @@ describe('API errors', () => {
     assert.equal(summarizeApiError(504, '<html>Gateway Timeout</html>'), 'Gateway Timeout (Twitch CDN busy)')
     assert.equal(summarizeApiError(400, JSON.stringify({ message: 'missing scope' })), 'missing scope')
     assert.equal(summarizeApiError(500, '<p>nope</p>'), 'nope')
+  })
+})
+
+describe('chat moderation', () => {
+  it('lines out a single deleted message and a banned user, then restores on unban', () => {
+    const ada = chat({ id: '1', platform: 'Kick', user: 'Ada', userId: '9', text: 'hi' })
+    const ada2 = chat({ id: '2', platform: 'Kick', user: 'Ada', userId: '9', text: 'yo' })
+    const pat = chat({ id: '3', platform: 'Kick', user: 'Pat', userId: '8', text: 'ok' })
+    const deleted = applyChatModeration([ada, ada2, pat], { action: 'delete', platform: 'Kick', messageId: '1' })
+    assert.equal(deleted.messages[0].deleted, true)
+    assert.equal(deleted.messages[1].deleted, undefined)
+    const banned = applyChatModeration(deleted.messages, { action: 'ban', platform: 'Kick', userId: '9', user: 'Ada' })
+    assert.equal(banned.messages.length, 3)
+    assert.equal(banned.messages.filter((item) => item.deleted).length, 2)
+    const restored = applyChatModeration(banned.messages, { action: 'unban', platform: 'Kick', userId: '9' })
+    assert.equal(restored.messages.every((item) => !item.deleted), true)
+  })
+
+  it('does not line out the same chatter on another platform', () => {
+    const kick = chat({ id: '1', platform: 'Kick', user: 'Ada', userId: '9', text: 'hi' })
+    const twitch = chat({ id: '2', platform: 'Twitch', user: 'Ada', userId: '99', text: 'hi' })
+    const result = applyChatModeration([kick, twitch], { action: 'timeout', platform: 'Kick', userId: '9' })
+    assert.equal(result.messages[0].deleted, true)
+    assert.equal(result.messages[1].deleted, undefined)
+  })
+})
+
+describe('Twitch moderation lines', () => {
+  it('parses CLEARMSG, timed CLEARCHAT, and permanent CLEARCHAT', () => {
+    assert.deepEqual(parseTwitchModerationLine('@login=ada;target-msg-id=abc :tmi.twitch.tv CLEARMSG #host :nope'), { action: 'delete', platform: 'Twitch', messageId: 'abc', user: 'ada' })
+    assert.deepEqual(parseTwitchModerationLine('@ban-duration=600;target-user-id=9 :tmi.twitch.tv CLEARCHAT #host :ada'), { action: 'timeout', platform: 'Twitch', userId: '9', user: 'ada' })
+    assert.deepEqual(parseTwitchModerationLine('@target-user-id=9 :tmi.twitch.tv CLEARCHAT #host :ada'), { action: 'ban', platform: 'Twitch', userId: '9', user: 'ada' })
+    assert.equal(parseTwitchModerationLine('@room-id=1 :tmi.twitch.tv CLEARCHAT #host'), undefined)
+  })
+})
+
+describe('Twitch EventSub reconnect', () => {
+  it('keeps the old generation on resume and only reconnects the current socket', () => {
+    const resume = twitchEventSubConnectPlan('wss://eventsub.wss.twitch.tv/ws?session=abc', 4)
+    assert.equal(resume.resume, true)
+    assert.equal(resume.generation, 4)
+    assert.equal(resume.keepPreviousUntilWelcome, true)
+    const fresh = twitchEventSubConnectPlan(TWITCH_EVENTSUB_DEFAULT_URL, 4)
+    assert.equal(fresh.resume, false)
+    assert.equal(fresh.generation, 5)
+    assert.equal(twitchEventSubCloseAction(false, 5, 5), 'ignore')
+    assert.equal(twitchEventSubCloseAction(true, 4, 5), 'ignore')
+    assert.equal(twitchEventSubCloseAction(true, 5, 5), 'reconnect')
+  })
+})
+
+describe('SSE broadcast cache', () => {
+  it('skips an unchanged payload', () => {
+    const first = sseBroadcastEvent({ n: 1 })
+    assert.equal(first.unchanged, false)
+    assert.match(first.payload || '', /^data: /)
+    const second = sseBroadcastEvent({ n: 1 }, first.json)
+    assert.equal(second.unchanged, true)
+    assert.equal(second.payload, undefined)
+  })
+})
+
+describe('translation providers', () => {
+  it('prefers LibreTranslate URL, then Google v2, then unofficial gtx', () => {
+    assert.equal(resolveTranslateConfig({ TRANSLATE_URL: 'https://lt.example/translate' }).provider, 'libre')
+    assert.equal(resolveTranslateConfig({ TRANSLATE_API_KEY: 'k' }).provider, 'google-v2')
+    assert.equal(resolveTranslateConfig({}).provider, 'gtx')
+    assert.equal(parseTranslatedText('gtx', [[['Hello', 'hola']]], 'hola'), 'Hello')
+    assert.equal(parseTranslatedText('google-v2', { data: { translations: [{ translatedText: 'Hello' }] } }, 'hola'), 'Hello')
+    assert.equal(parseTranslatedText('libre', { translatedText: 'Hello' }, 'hola'), 'Hello')
+    assert.equal(parseTranslatedText('gtx', [[['hola', 'hola']]], 'hola'), undefined)
+    assert.match(translateFailureMessage('gtx'), /TRANSLATE_API_KEY/)
   })
 })

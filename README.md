@@ -12,8 +12,9 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env` with your API credentials and StreamElements JWTs
-3. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
-4. In OBS, add custom browser docks for chat and activity
+3. Keep `package.json` beside `relay-chat-dock.exe` (it is in the zip). The app reads its version from that file to check GitHub for updates
+4. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
+5. In OBS, add custom browser docks for chat and activity
 
 GitHub Actions builds that zip and attaches it to the GitHub Release when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
 
@@ -61,7 +62,7 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 ### Automatic chat translation
 
-Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message remains visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings. When on, the message text is sent to Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`). This is an outbound third-party request — turn the setting off if that handling is not acceptable for your stream.
+Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message remains visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings. When on, the message text is sent to a translation endpoint. By default that is Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`). To use an official API instead, set `TRANSLATE_API_KEY` (Google Cloud Translation) or `TRANSLATE_URL` (a LibreTranslate-compatible endpoint, with optional `TRANSLATE_API_KEY`) in `production.env` and restart. If translation fails, Connection Settings shows why and messages stay in the original language. This is an outbound third-party request — turn the setting off if that handling is not acceptable for your stream.
 
 ### Google / YouTube
 
@@ -148,6 +149,10 @@ npm start
 The backend serves the docks at `http://localhost:4173` and `http://localhost:4173/activity`. Keep `npm start` running while OBS is open. For frontend development, use `npm run dev` and run `npm run dev:backend` in a second terminal.
 
 Click **Connect** for each platform in either dock's settings. Each button opens a browser authorization window. After authorization, the callback stores the token and the backend begins polling or connecting to the platform.
+
+### Moderation
+
+Right-click a chat row to delete, timeout, or ban on that platform. A ban or timeout lines out that chatter's messages in the Relay feed (same as Kick/YouTube strikethrough). Right-click a lined-out row to **Unban / untimeout**. The platforms keep their own logs. The same line-out/restore runs if Twitch, Kick, or YouTube report a delete, ban, timeout, or unban. YouTube unban from Relay only works for bans/timeouts that were issued from this dock (YouTube's API needs that ban id).
 
 ### Activity dock
 

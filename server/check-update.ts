@@ -43,16 +43,24 @@ function compareVersions(version1: string, version2: string): number {
  * Gets the current version from package.json
  * Tries multiple paths to support both dev and packaged contexts
  */
-function getCurrentVersion(): string {
-  const pathsToTry = [
-    // Packaged: package.json beside the executable
-    path.join(process.cwd(), 'package.json'),
-    // Dev: package.json in project root
-    path.join(process.cwd(), '..', 'package.json'),
-    path.join(process.cwd(), '../..', 'package.json'),
-    // Fallback: look in common locations
-    path.join(path.dirname(process.execPath), 'package.json'),
+export function versionManifestPaths(input: { packaged: boolean; cwd: string; execPath: string }) {
+  if (input.packaged) {
+    return [
+      path.join(path.dirname(input.execPath), 'package.json'),
+      path.join(input.cwd, 'package.json'),
+    ]
+  }
+  return [
+    path.join(input.cwd, 'package.json'),
+    path.join(input.cwd, '..', 'package.json'),
+    path.join(input.cwd, '../..', 'package.json'),
+    path.join(path.dirname(input.execPath), 'package.json'),
   ]
+}
+
+function getCurrentVersion(): string {
+  const packaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
+  const pathsToTry = versionManifestPaths({ packaged, cwd: process.cwd(), execPath: process.execPath })
 
   for (const filePath of pathsToTry) {
     try {

@@ -4,11 +4,23 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createActivityStore } from '../server/activity.js'
+import { versionManifestPaths } from '../server/check-update.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'relay-persist-'))
 }
+
+describe('packaged version manifest', () => {
+  it('reads package.json beside the exe and does not walk into parent folders', () => {
+    const execPath = path.join(os.tmpdir(), 'relay-install', 'relay-chat-dock.exe')
+    const cwd = path.join(os.tmpdir(), 'relay-install')
+    assert.deepEqual(versionManifestPaths({ packaged: true, cwd, execPath }), [
+      path.join(os.tmpdir(), 'relay-install', 'package.json'),
+      path.join(os.tmpdir(), 'relay-install', 'package.json'),
+    ])
+  })
+})
 
 describe('packaged data directory', () => {
   it('stores packaged data beside the executable, not cwd', () => {

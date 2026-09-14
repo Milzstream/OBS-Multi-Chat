@@ -18,6 +18,7 @@ export function ConnectionSettings({
   ignoreMissingJwt,
   dropOldAlerts,
   translateChat,
+  translateError,
   showActivityOptions,
   platformIcon,
   onClose,
@@ -36,6 +37,7 @@ export function ConnectionSettings({
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
   translateChat: boolean
+  translateError?: string
   showActivityOptions: boolean
   platformIcon: (platform: Platform, size?: number) => ReactNode
   onClose: () => void
@@ -84,6 +86,7 @@ export function ConnectionSettings({
         <span>Translate non-English chat to English</span>
         <input type="checkbox" checked={translateChat} onChange={onToggleTranslateChat} />
       </label>
+      {translateChat && translateError ? <p className="settings-note">{translateError}</p> : null}
       {showActivityOptions ? (
         <>
           <div className="settings-divider" />
