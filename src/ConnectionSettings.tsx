@@ -11,6 +11,13 @@ const platformMeta: Record<Platform, { color: string }> = {
   YouTube: { color: '#ff5b62' },
 }
 
+/**
+ * The connection settings popover: per-platform connect/disconnect and live
+ * checks, the chat-translation toggle, and StreamElements alert preferences.
+ * Connect is the OAuth entry point — it hands off to the backend's `/oauth`
+ * route, which opens a browser window and stores the token server-side.
+ */
+
 export function ConnectionSettings({
   connections,
   streamelements,
@@ -53,6 +60,7 @@ export function ConnectionSettings({
   const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
   const checkLive = async (platform: Platform) => {
+    // Ignore clicks while a live check is already running for this platform
     if (checking[platform]) return
     setChecking((current) => ({ ...current, [platform]: true }))
     try { await onCheckLive(platform) } finally { setChecking((current) => ({ ...current, [platform]: false })) }
@@ -70,6 +78,8 @@ export function ConnectionSettings({
           </div>
           {connection.connected
             ? (
+              // Connected rows expose check/disconnect; the same button spot
+              // becomes the Connect (OAuth popup) trigger when disconnected
               <div className="connection-actions">
                 <button type="button" className="live-check" disabled={checking[connection.platform]} title="Run a live check now without waiting for the next automatic poll" onClick={() => void checkLive(connection.platform)}>
                   {checking[connection.platform] ? 'Checking…' : 'Check live'}

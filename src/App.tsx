@@ -6,6 +6,13 @@ import { dockAvatarSrc, kickProfileSlug, preferredCategory, selectedSendPlatform
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
+/**
+ * The chat dock UI: platform connections and live state, the message feed
+ * with filtering, moderator actions, composer, stream controls, and settings.
+ * Owns the SSE connection to Relay's backend via `subscribeDockSse` and keeps
+ * the feed glued to the live edge via `useAutoScroll`.
+ */
+
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
 type StreamPlatform = 'Twitch' | 'Kick'
@@ -73,6 +80,8 @@ function App() {
   const headerTip = [headerTitle, twitchGame && `Twitch: ${twitchGame}`, kickGame && `Kick: ${kickGame}`].filter(Boolean).join('\n')
   const visibleMessages = visibleChatMessages(messages, activeFilter)
   const chatListRef = useRef<HTMLDivElement>(null)
+  // Auto-scroll: keeps the feed pinned to the bottom while the user is not
+  // scrolling up, snapping again whenever a new tail message arrives
   const { paused: chatPaused, onScroll: onChatScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
   useEffect(() => {
     writeLocalPref(CHAT_FILTER_KEY, activeFilter)
@@ -93,6 +102,8 @@ function App() {
   }, [connections])
 
   useEffect(() => {
+    // Subscribe to Relay's SSE stream; every frame type funnels back into
+    // applySnapshot so the dock mirrors backend state (messages, health, ...)
     const applySnapshot = (remote: BackendState) => {
       const fields = chatDockFields(remote as unknown as Record<string, unknown>)
       if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)

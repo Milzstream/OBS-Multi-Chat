@@ -1,6 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * Durable JSON persistence for the server: resolves the data directory
+ * (`RELAY_DATA_DIR`, or `<cwd>/data`, or beside the packaged binary) and writes
+ * files atomically — tmp file + fsync + rename — with a `.bak` copy of the
+ * previous good file so a crash mid-write is recoverable.
+ */
+
+/** `RELAY_DATA_DIR` wins; otherwise packaged builds store next to the exe, dev builds under cwd. */
 export function resolveDataDir(input: {
   packaged?: boolean
   execPath?: string
@@ -16,6 +24,12 @@ export function resolveDataDir(input: {
   return path.resolve(packaged ? path.dirname(execPath) : cwd, 'data')
 }
 
+/**
+ * Write JSON atomically: write tmp, fsync, then rename over the target so
+ * readers never see a half-written file. The existing good file is renamed to
+ * `.bak` first (it is re-validated as parseable JSON) so the last-known-good
+ * copy survives a failed rename.
+ */
 export function writeJsonAtomic(filePath: string, value: unknown) {
   const dir = path.dirname(filePath)
   fs.mkdirSync(dir, { recursive: true })
@@ -40,6 +54,10 @@ export function writeJsonAtomic(filePath: string, value: unknown) {
   fs.renameSync(tmp, filePath)
 }
 
+/**
+ * Read back a JSON file, falling back to the `.bak` copy if the main file is
+ * missing or corrupted, and finally to the supplied `fallback` value.
+ */
 export function readJsonFile<T>(filePath: string, fallback: T, revive?: (value: unknown) => T): T {
   for (const candidate of [filePath, `${filePath}.bak`]) {
     try {

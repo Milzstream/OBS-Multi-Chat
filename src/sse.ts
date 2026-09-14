@@ -1,8 +1,19 @@
 export const SSE_STALL_MS = 20_000
 export const SSE_RELOAD_AFTER = 5
 
+/**
+ * The docks' SSE client: subscribes to Relay's `/events` stream, tracks the
+ * frame-sequence cursor to detect dropped frames, and reconnects with
+ * exponential backoff that hard-reloads the dock after repeated failures.
+ */
+
 export type SseFrameType = 'snapshot' | 'chat' | 'activity' | 'presence' | 'settings' | 'ping'
 
+/**
+ * A dropped frame means state was missed, so force a resync instead of
+ * applying a frame that follows a gap. Snapshots and pings are never
+ * sequence-gated.
+ */
 export function sseSeqIsGap(lastSeq: number | null, incoming: number, type: string) {
   if (type === 'snapshot' || type === 'ping') return false
   if (lastSeq == null) return true
@@ -38,6 +49,7 @@ export function subscribeDockSse(handlers: {
 
   const applyFrame = (type: SseFrameType, data: Record<string, unknown>) => {
     lastEventAt = Date.now()
+    // Ping frames only refresh the stall watchdog; they carry no state
     if (type === 'ping') return
     const seq = Number(data.seq)
     if (!Number.isFinite(seq)) return
@@ -77,6 +89,8 @@ export function subscribeDockSse(handlers: {
     source?.close()
     const next = new EventSource('/events')
     source = next
+    // Event taxonomy: snapshot = full state; chat/activity = incremental feeds;
+    // presence/settings = mirrors of backend settings; ping = keepalive
     const types: SseFrameType[] = ['snapshot', 'chat', 'activity', 'presence', 'settings', 'ping']
     for (const type of types) {
       next.addEventListener(type, (event) => {
@@ -100,6 +114,8 @@ export function subscribeDockSse(handlers: {
       window.location.reload()
       return
     }
+    // Exponential backoff capped at 8s; after enough failures the backend is
+    // presumed gone and reloading re-establishes the whole dock
     const delay = Math.min(8_000, 500 * 2 ** failures)
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = undefined

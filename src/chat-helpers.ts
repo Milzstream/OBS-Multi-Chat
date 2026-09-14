@@ -1,5 +1,11 @@
+/**
+ * Shared helpers for the chat and activity docks: avatar/media URL proxying,
+ * Kick handle normalization, category preference, and feed filtering.
+ */
+
 export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
 
+/** Rewrite Kick CDN avatar URLs through the local `/api/media` proxy so OBS's sandboxed renderer can load them. */
 export function dockAvatarSrc(url?: string) {
   if (!url) return
   try {
@@ -10,6 +16,11 @@ export function dockAvatarSrc(url?: string) {
   return url
 }
 
+/**
+ * Resolve a Kick profile slug: prefer the relay's recorded `slug`, otherwise
+ * fall back to the username with `@` stripped and underscores turned into
+ * dashes (Kick usernames allow underscores but profile URLs do not).
+ */
 export function kickProfileSlug(user: string, slug?: string) {
   const fromSlug = String(slug || '').replace(/^@+/, '').trim().toLowerCase()
   if (fromSlug) return fromSlug
@@ -29,6 +40,7 @@ export function visibleChatMessages<T extends { platform: ChatPlatform; platform
   return messages.filter((message) => (message.platforms || [message.platform]).includes(filter))
 }
 
+/** Send targets default to every connected platform minus any the user has opted out of this session. */
 export function selectedSendPlatforms(connected: ChatPlatform[], optOut: Iterable<ChatPlatform> = []) {
   const skip = new Set(optOut)
   return (['Twitch', 'Kick', 'YouTube'] as ChatPlatform[]).filter((platform) => connected.includes(platform) && !skip.has(platform))

@@ -20,6 +20,13 @@ import {
   type YoutubeQuota,
 } from './types.js'
 
+/**
+ * Pure helper functions for the Relay Chat Dock: parsing official and unofficial
+ * platform payloads, moderation mapping, history dedupe and merge, translation
+ * config, YouTube quota math, and OAuth URLs. This file owns no network calls,
+ * no in-memory state, and no side effects; state and I/O live in server.ts.
+ */
+
 export {
   CHAT_MAX,
   CHAT_MAX_HARD,
@@ -32,6 +39,7 @@ export {
 
 const NON_ENGLISH = /[\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0590-\u05FF]/
 
+/** Resolve the `RELAY_CHAT_MAX` chat-history cap from env, clamped to `CHAT_MAX_MIN..CHAT_MAX_HARD`. */
 export function parseChatMax(env: Record<string, string | undefined> = process.env) {
   const raw = String(env.RELAY_CHAT_MAX || '').trim()
   if (!raw) return CHAT_MAX
@@ -70,6 +78,11 @@ export function pacificDate(now = Date.now()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(now))
 }
 
+/**
+ * Cost in Data API quota units for an endpoint+verb. Reads (`.list`) cost 1;
+ * write and delete calls that change chat state cost 50. Anything unknown
+ * falls back to 1 so the daily budget is never over-charged.
+ */
 export function youtubeQuotaCost(endpoint: string, method = 'GET') {
   const path = endpoint.split('?')[0].replace(/^\//, '')
   const verb = method.toUpperCase()
@@ -131,6 +144,7 @@ export function youtubeQuotaHealthStatus(used: number, limit: number, blocked: b
   }
 }
 
+/** Parse a user-typed quota status line into used/remaining values, or `help` when it doesn't look like one of the accepted shapes. */
 export function parseYouTubeQuotaInput(line: string) {
   const pair = line.match(/^(?:used\s+)?(\d+)\s*\/\s*(\d+)\s*$/i)
   if (pair) return { kind: 'used' as const, used: Number(pair[1]), limit: Number(pair[2]) }
@@ -150,6 +164,12 @@ export function headerNumber(headers: Headers, names: string[]) {
   }
 }
 
+/**
+ * Extract quota numbers from response headers. Reads both header families:
+ * the per-minute rate limit headers (`ratelimit-*` / `x-ratelimit-*` /
+ * `x-rate-limit-*`) and the daily quota-style headers (`x-quota-*`). Each
+ * value takes the first non-empty candidate in that traversal order.
+ */
 export function quotaFromHeaders(headers: Headers): { used?: number; remaining?: number; limit?: number } | undefined {
   const remaining = headerNumber(headers, ['ratelimit-remaining', 'x-ratelimit-remaining', 'x-rate-limit-remaining', 'x-quota-remaining'])
   const limit = headerNumber(headers, ['ratelimit-limit', 'x-ratelimit-limit', 'x-rate-limit-limit', 'x-quota-limit'])
@@ -158,10 +178,17 @@ export function quotaFromHeaders(headers: Headers): { used?: number; remaining?:
   return { remaining, limit, used }
 }
 
+/**
+ * Tell "is this the daily quota header?" apart from the per-minute rate limit
+ * header: the daily budget is ~10,000 units, while per-minute limits are at
+ * most a few hundred, so a `limit` of `1000+` means daily. `used` is only
+ * trusted when it carries a matching daily `limit` (or no limit at all).
+ */
 export function isDailyQuotaHeader(parsed: { used?: number; remaining?: number; limit?: number }) {
   return (parsed.limit != null && parsed.limit >= 1000) || (parsed.used != null && parsed.used >= 0 && (parsed.limit == null || parsed.limit >= 1000))
 }
 
+/** Pull the machine-readable `reason` out of a Data API error body; falls back to flattened text for non-JSON responses. */
 export function youtubeApiErrorReason(text: string) {
   try {
     const payload = JSON.parse(text) as { error?: { message?: string; errors?: { reason?: string; message?: string }[] } }
@@ -255,6 +282,12 @@ export function isOwnChatMessage(
   return false
 }
 
+/**
+ * Fold a raw chat line into a stable key for dedupe/merge: drop zero-width and
+ * joiner characters, strip emojis and variation selectors, collapse and
+ * trim whitespace, lowercase. Two wordings that differ only in emoji or caps
+ * then compare equal.
+ */
 export function foldRawText(text: string) {
   return text.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F]/gu, '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
@@ -270,6 +303,11 @@ export function isTruncatedText(text: string) {
   return /(?:\.{2,}|…)\s*$/.test(text.trim())
 }
 
+/**
+ * When one side was cut off mid-message ("..." or unicode ellipsis), treat it
+ * as a match if the other side starts with that truncated prefix. Guards on a
+ * 12-char prefix so short messages that merely end with a period never collide.
+ */
 export function truncatedFoldMatches(left: string, right: string) {
   if (!left || !right) return false
   if (left === right) return true
@@ -279,6 +317,11 @@ export function truncatedFoldMatches(left: string, right: string) {
   return prefix.length >= 12 && long.startsWith(prefix)
 }
 
+/**
+ * Compare two messages (or raw strings) for dedupe: exact text first, then
+ * folded text, then truncated-prefix matching. Folds parts-based messages from
+ * their text parts and plain strings as-is.
+ */
 export function chatTextMatches(left: ChatMessage | string, right: ChatMessage | string) {
   const leftText = typeof left === 'string' ? left : left.text
   const rightText = typeof right === 'string' ? right : right.text
@@ -346,6 +389,11 @@ export function messageOnPlatform(message: ChatMessage, platform: Platform) {
   return (message.platforms || [message.platform]).includes(platform)
 }
 
+/**
+ * Apply one moderation change to the stored history: `delete` flags a single
+ * message id; `ban`, `timeout`, and `unban` flag every stored message from
+ * that user so the whole thread disappears (or reappears on unban).
+ */
 export function applyChatModeration(messages: ChatMessage[], change: ChatModeration): { messages: ChatMessage[]; changed: boolean } {
   if (change.action === 'delete') {
     if (!change.messageId) return { messages, changed: false }
@@ -370,6 +418,12 @@ export function applyChatModeration(messages: ChatMessage[], change: ChatModerat
   return { messages: changed ? next : messages, changed }
 }
 
+/**
+ * Collapse duplicate YouTube messages that come from both data sources: the
+ * official Data API and the unofficial site poll both deliver the same chat,
+ * and this folds pick-ups into their originals. Distant duplicates 20s apart
+ * are only merged when they are the streamer's own posts.
+ */
 export function collapseYouTubeDuplicates(
   messages: ChatMessage[],
   targets: YouTubeChatTarget[] = [],
@@ -423,6 +477,12 @@ export function collapseYouTubeDuplicates(
   return { messages: changed ? kept : messages, changed, seenIds }
 }
 
+/**
+ * Merge one incoming message into the chat history: either appends it, or
+ * folds it into an existing entry when it looks like the same message observed
+ * on another platform or ingest source. Returns `seenIds` for the YouTube
+ * dedupe map, plus `added` when a brand-new message was appended.
+ */
 export function mergeIncomingChat(
   messages: ChatMessage[],
   message: ChatMessage,
@@ -522,6 +582,7 @@ export function mergeIncomingChat(
   return { messages: [...messages, stored].slice(-(ctx.max ?? CHAT_MAX)), changed: true, added: stored, seenIds }
 }
 
+/** Map a Twitch badge set name to a short dock label (`broadcaster`→`HOST`, `moderator`→`MOD`, etc.). */
 export function twitchBadgeLabel(set: string) {
   const name = set.toLowerCase()
   if (name === 'broadcaster') return 'HOST'
@@ -573,6 +634,11 @@ export function kickBadges(badges?: { type?: string; text?: string }[]): ChatBad
   }).filter((badge) => badge.label).slice(0, 4)
 }
 
+/**
+ * Normalize an avatar URL for the dock: force HTTPS (Kick avatars arrive
+ * URL-escaped and protocol-relative), reject placeholder avatars, and cap the
+ * size query param so hotlinked images stay small.
+ */
 export function normalizeAvatar(url?: string) {
   if (!url) return
   let next = String(url).trim()
@@ -591,6 +657,7 @@ export function kickEmoteUrl(id: string) {
   return `https://files.kick.com/emotes/${encodeURIComponent(id)}/fullsize`
 }
 
+/** Convert a Twitch IRC `emotes` tag (id:start-end,start-end/...) into emote/text parts with CDN URLs. */
 export function parseTwitchEmoteParts(text: string, emotesTag?: string): MessagePart[] {
   if (!emotesTag) return [{ type: 'text', text }]
   const ranges: { start: number; end: number; id: string }[] = []
@@ -626,6 +693,11 @@ export function partsFromTwitchFragments(fragments: any[] | undefined, fallback:
   return parts.length ? parts : [{ type: 'text', text: fallback }]
 }
 
+/**
+ * Parse Kick's unofficial emote format. The text carries inline
+ * `[emote:ID:name]` tokens — this extracts them and builds `MessagePart[]`.
+ * Falls back to the `emotes` positional array when no inline tokens exist.
+ */
 export function parseKickParts(text: string, emotes?: any[]): MessagePart[] {
   const token = /\[emote:(\d+):([^\]]+)\]/g
   const parts: MessagePart[] = []
@@ -663,6 +735,11 @@ export function parseKickParts(text: string, emotes?: any[]): MessagePart[] {
   return [{ type: 'text', text }]
 }
 
+/**
+ * Parse one line of Twitch IRC chat. Returns `'ping'` for keepalives, a
+ * `ChatMessage` for `PRIVMSG`, otherwise `undefined`. The `urls` map resolves
+ * badge set/version keys like `subscriber/1` to their image URLs.
+ */
 export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: Map<string, string> } = {}): ChatMessage | 'ping' | undefined {
   if (line.startsWith('PING')) return 'ping'
   const match = line.match(/^(?:@([^ ]+) )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/)
@@ -683,6 +760,11 @@ export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: 
   }
 }
 
+/**
+ * Parse Twitch IRC moderation lines: `CLEARMSG` deletes one message;
+ * `CLEARCHAT` clears a whole user and becomes a `timeout` when the
+ * `ban-duration` tag is present (seconds) or a `ban` otherwise.
+ */
 export function parseTwitchModerationLine(line: string): ChatModeration | undefined {
   const clearmsg = line.match(/^(?:@([^ ]+) )?:tmi\.twitch\.tv CLEARMSG #/)
   if (clearmsg) {
@@ -713,12 +795,14 @@ export function pruneYouTubeSeenIds(seenIds: Set<string>, messages: ChatMessage[
   for (const id of seenIds) if (!retained.has(id)) seenIds.delete(id)
 }
 
+/** Map a Twitch EventSub subscription payload type to an Activity dock event. Unknown types yield nothing. */
 export function twitchEventToActivity(type: string, event: any, now = new Date().toISOString()): ActivityEvent | undefined {
   const time = now
   if (type === 'channel.follow') {
     return { id: `twitch-follow-${event?.user_id}-${event?.followed_at || time}`, platform: 'Twitch', kind: 'follow', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time: event?.followed_at || time }
   }
   if (type === 'channel.subscribe') {
+    // Gifted subs arrive via `channel.subscription.gift` instead; skip so they aren't double-counted.
     if (event?.is_gift) return
     return { id: `twitch-sub-${event?.user_id}-${time}`, platform: 'Twitch', kind: 'subscription', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time }
   }
@@ -751,6 +835,7 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
   }
 }
 
+/** Map one official Data API `liveChatMessages.list` item (superchat/membership/gift) to an Activity dock event. */
 export function youtubeOfficialToActivity(item: any): ActivityEvent | undefined {
   const type = String(item.snippet?.type || '')
   const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
@@ -773,6 +858,7 @@ export function youtubeOfficialToActivity(item: any): ActivityEvent | undefined 
   }
 }
 
+/** Map an official Data API moderation event item (`messageDeletedEvent`/`userBannedEvent`) to a moderation change. */
 export function youtubeOfficialModeration(item: any): ChatModeration | undefined {
   const type = String(item?.snippet?.type || '')
   if (type === 'messageDeletedEvent') {
@@ -865,6 +951,7 @@ export function defaultAppSettings(): AppSettings {
   return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, translateChat: true, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
 }
 
+/** Coerce the persisted settings JSON into a known-good shape, filling missing keys with app defaults. */
 export function parseAppSettings(value: unknown): AppSettings {
   if (!value || typeof value !== 'object') return defaultAppSettings()
   const parsed = value as Partial<AppSettings>
@@ -878,6 +965,7 @@ export function parseAppSettings(value: unknown): AppSettings {
   }
 }
 
+/** Build the provider's OAuth authorize URL. Kick needs PKCE, YouTube needs offline access, Twitch forces re-consent. */
 export function oauthAuthorizeUrl(platform: Platform, options: { clientId: string; redirectUri: string; state: string; codeChallenge?: string }) {
   const params = new URLSearchParams({ client_id: options.clientId, redirect_uri: options.redirectUri, response_type: 'code', state: options.state })
   if (platform === 'Twitch') {
@@ -923,6 +1011,11 @@ export function isPermanentTokenRefreshError(error: unknown) {
 
 export type TranslateProvider = 'gtx' | 'google-v2' | 'libre'
 
+/**
+ * Choose the translation backend from env: `TRANSLATE_URL` → LibreTranslate,
+ * a Google API key → official `google-v2`, and the default is the unofficial
+ * `gtx` Google endpoint which needs no key at all.
+ */
 export function resolveTranslateConfig(env: Record<string, string | undefined> = process.env): { provider: TranslateProvider; url: string; key?: string } {
   const key = String(env.TRANSLATE_API_KEY || env.GOOGLE_TRANSLATE_API_KEY || '').trim() || undefined
   const url = String(env.TRANSLATE_URL || '').trim()
@@ -931,6 +1024,12 @@ export function resolveTranslateConfig(env: Record<string, string | undefined> =
   return { provider: 'gtx', url: 'https://translate.googleapis.com/translate_a/single' }
 }
 
+/**
+ * Pull the translated text from each provider's response shape: `gtx` returns
+ * sentence rows, `google-v2` nests under `data.translations`, LibreTranslate
+ * uses a flat `translatedText`. Returns `undefined` when translation didn't
+ * change the text.
+ */
 export function parseTranslatedText(provider: TranslateProvider, data: any, original: string) {
   let translated = ''
   if (provider === 'gtx') translated = Array.isArray(data?.[0]) ? data[0].map((row: any) => String(row?.[0] || '')).join('').trim() : ''
@@ -962,6 +1061,12 @@ export function sseChangedKeys(previous: Record<string, string>, next: Record<st
 
 export const TWITCH_EVENTSUB_DEFAULT_URL = 'wss://eventsub.wss.twitch.tv/ws'
 
+/**
+ * Decide how to (re)connect the EventSub websocket. A session URL other than
+ * the default welcome endpoint means we can `resume` the same session and keep
+ * generation/state as-is; a fresh connect bumps the generation so stale socket
+ * events from the old session can be ignored.
+ */
 export function twitchEventSubConnectPlan(url: string, currentGeneration: number) {
   const resume = url !== TWITCH_EVENTSUB_DEFAULT_URL
   return { resume, generation: resume ? currentGeneration : currentGeneration + 1, keepPreviousUntilWelcome: resume }

@@ -1,6 +1,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+/**
+ * Startup update check: compares the local `package.json` version against the
+ * latest GitHub release and logs a one-off "update available" banner. Read-only;
+ * it never downloads anything and silently no-ops when GitHub is unreachable.
+ */
+
 interface GitHubRelease {
   tag_name: string
   html_url: string
@@ -40,8 +46,9 @@ function compareVersions(version1: string, version2: string): number {
 }
 
 /**
- * Gets the current version from package.json
- * Tries multiple paths to support both dev and packaged contexts
+ * Candidate `package.json` locations to read the current version from.
+ * Packaged builds look next to the exe first; dev runs walk up from cwd before
+ * falling back to the exe dir (e.g. an Electron wrapper).
  */
 export function versionManifestPaths(input: { packaged: boolean; cwd: string; execPath: string }) {
   if (input.packaged) {
