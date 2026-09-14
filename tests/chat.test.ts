@@ -7,6 +7,7 @@ import {
   looksLikePlaceholder,
   needsTranslation,
   normalizeAvatar,
+  parseChatMax,
   parseKickParts,
   parseTranslatedText,
   parseTwitchChatLine,
@@ -17,6 +18,8 @@ import {
   resolveTranslateConfig,
   sanitizeIrcMessage,
   sseBroadcastEvent,
+  sseChangedKeys,
+  sseNamedEvent,
   summarizeApiError,
   translateFailureMessage,
   twitchBadgeLabel,
@@ -26,7 +29,7 @@ import {
   twitchEventSubConnectPlan,
   TWITCH_EVENTSUB_DEFAULT_URL,
 } from '../server/logic.js'
-import { chatroomIdFrom, kickEventToActivity, kickEventToModeration, parseJson, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -92,6 +95,7 @@ describe('Emotes and avatars', () => {
     assert.equal(normalizeAvatar('http://cdn.example/a.png'), 'https://cdn.example/a.png')
     assert.equal(normalizeAvatar('https://yt.example/default-user.png'), undefined)
     assert.equal(normalizeAvatar('https://yt.example/photo.jpg'), undefined)
+    assert.equal(normalizeAvatar('https://files.kick.com/images/user/1/profile_image/conversion/abc-fullsize.webp'), 'https://files.kick.com/images/user/1/profile_image/conversion/abc-fullsize.webp')
   })
 
   it('detects non-English text for translation', () => {
@@ -135,6 +139,27 @@ describe('Kick chat and activity', () => {
     assert.equal(banned?.action, 'ban')
     assert.equal(banned?.userId, '9')
     assert.equal(kickEventToModeration('UserUnbannedEvent', { user: { id: 9, username: 'Ada' } })?.action, 'unban')
+  })
+
+  it('reads Kick avatars from string, nested url, or channel payloads, and leaves typical chat events without one', () => {
+    assert.equal(kickAvatarFromSender({ profile_picture: 'https://files.kick.com/a.webp' }), 'https://files.kick.com/a.webp')
+    assert.equal(kickAvatarFromSender({ identity: { color: '#fff', profile_pic: { url: 'https://files.kick.com/b.webp' } } }), 'https://files.kick.com/b.webp')
+    assert.equal(kickAvatarFromSender({ identity: { color: '#fff', badges: [] } }), undefined)
+    assert.equal(kickProfilePicFromChannel({ user: { profilepic: 'https://files.kick.com/c.webp' } }), 'https://files.kick.com/c.webp')
+    assert.equal(kickProfilePicFromChannel({ user: { profile_pic: 'https://files.kick.com/images/user/1/profile_image/conversion/x-fullsize.webp' } }), 'https://files.kick.com/images/user/1/profile_image/conversion/x-fullsize.webp')
+    const parsed = parseKickChatMessage({
+      id: 'm1',
+      content: 'hello',
+      sender: { id: 9, username: 'Ada', slug: 'ada', identity: { color: '#0f0', badges: [] } },
+    })
+    assert.equal(parsed?.user, 'Ada')
+    assert.equal(parsed?.slug, 'ada')
+    assert.equal(parsed?.avatar, undefined)
+    assert.equal(parseKickChatMessage({ sender: { username: 'Ada' } }), undefined)
+    assert.equal(isKickSlug('milzstream'), true)
+    assert.equal(isKickSlug("x'; calc"), false)
+    assert.ok(kickChannelPowershell('milzstream')?.args.some((arg) => arg.includes('https://kick.com/api/v2/channels/milzstream')))
+    assert.equal(kickChannelPowershell("bad slug"), undefined)
   })
 
   it('maps Kick badges and placeholder handles', () => {
@@ -209,6 +234,22 @@ describe('SSE broadcast cache', () => {
     const second = sseBroadcastEvent({ n: 1 }, first.json)
     assert.equal(second.unchanged, true)
     assert.equal(second.payload, undefined)
+  })
+
+  it('emits named events and lists changed slices', () => {
+    assert.equal(sseNamedEvent('chat', { seq: 2 }), 'event: chat\ndata: {"seq":2}\n\n')
+    assert.deepEqual(sseChangedKeys({ chat: 'a', activity: 'b' }, { chat: 'a', activity: 'c' }), ['activity'])
+    assert.deepEqual(sseChangedKeys({ chat: 'a' }, { chat: 'a' }), [])
+  })
+})
+
+describe('chat history cap', () => {
+  it('defaults to 5000 and clamps RELAY_CHAT_MAX', () => {
+    assert.equal(parseChatMax({}), 5000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '20000' }), 20_000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '1' }), 100)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: '99999999' }), 1_000_000)
+    assert.equal(parseChatMax({ RELAY_CHAT_MAX: 'nope' }), 5000)
   })
 })
 

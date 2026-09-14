@@ -7,7 +7,7 @@ export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gif
 export type KickModeration = { action: 'delete' | 'ban' | 'unban'; messageId?: string; userId?: string; user?: string; slug?: string }
 
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
-const BROWSER_HEADERS = {
+export const BROWSER_HEADERS = {
   Accept: 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
@@ -39,6 +39,28 @@ export function chatroomIdFrom(payload: any): number | undefined {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : undefined
 }
 
+const kickProfilePicCache = new Map<string, string>()
+
+export function isKickSlug(slug: string) {
+  return /^[a-z0-9_-]{1,50}$/i.test(slug.trim())
+}
+
+export function kickChannelPowershell(slug: string) {
+  const key = slug.trim().toLowerCase()
+  if (!isKickSlug(key)) return
+  const url = `https://kick.com/api/v2/channels/${encodeURIComponent(key)}`
+  return {
+    command: 'powershell.exe',
+    args: ['-NoProfile', '-NonInteractive', '-Command', `Invoke-WebRequest -Uri '${url}' -Headers @{Accept='application/json'; 'User-Agent'='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'; Referer='https://kick.com/${key}'} -UseBasicParsing | Select-Object -ExpandProperty Content`],
+  }
+}
+
+export function rememberKickProfilePic(slug: string, payload: any) {
+  const key = slug.trim().toLowerCase()
+  const pic = kickProfilePicFromChannel(payload)
+  if (key && pic) kickProfilePicCache.set(key, pic)
+}
+
 export async function resolveKickChatroomId(slug: string, cached?: number): Promise<number> {
   if (cached && cached > 0) return cached
   for (const url of [
@@ -48,13 +70,29 @@ export async function resolveKickChatroomId(slug: string, cached?: number): Prom
     try {
       const response = await fetch(url, { headers: BROWSER_HEADERS })
       if (!response.ok) continue
-      const id = chatroomIdFrom(await response.json())
+      const payload = await response.json()
+      rememberKickProfilePic(slug, payload)
+      const id = chatroomIdFrom(payload)
       if (id) return id
     } catch { /* Cloudflare often blocks Node fetch; fall through */ }
   }
   const fromBrowser = await resolveChatroomIdWithBrowser(slug)
   if (fromBrowser) return fromBrowser
   throw new Error(`Could not resolve Kick chatroom id for ${slug}`)
+}
+
+async function fetchKickChannelPayloadWindows(slug: string) {
+  if (process.platform !== 'win32') return
+  const plan = kickChannelPowershell(slug)
+  if (!plan) return
+  const { execFile } = await import('node:child_process')
+  const text = await new Promise<string>((resolve, reject) => {
+    execFile(plan.command, plan.args, { timeout: 20_000, windowsHide: true }, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(String(stdout || ''))
+    })
+  })
+  return parseJson(text.trim())
 }
 
 async function loadChromium() {
@@ -65,6 +103,80 @@ async function loadChromium() {
   } catch {
     return undefined
   }
+}
+
+async function fetchKickChannelPayloadsWithBrowser(slugs: string[]): Promise<Map<string, any>> {
+  const found = new Map<string, any>()
+  const executablePath = browserPath()
+  const chromium = await loadChromium()
+  if (!executablePath || !chromium || !slugs.length) return found
+  let browser: any
+  try {
+    browser = await chromium.launch({ headless: true, executablePath })
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, userAgent: BROWSER_HEADERS['User-Agent'] })
+    await page.goto(`https://kick.com/${encodeURIComponent(slugs[0])}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    const payloads = await page.evaluate(async (channelSlugs: string[]) => {
+      const out: Record<string, unknown> = {}
+      for (const channelSlug of channelSlugs) {
+        const response = await fetch(`/api/v2/channels/${encodeURIComponent(channelSlug)}`, { headers: { Accept: 'application/json' } })
+        if (response.ok) out[channelSlug] = await response.json()
+      }
+      return out
+    }, slugs)
+    for (const [slug, payload] of Object.entries(payloads || {})) found.set(slug, payload)
+  } catch (error) {
+    console.error('Kick profile lookup:', error instanceof Error ? error.message : error)
+  } finally {
+    await browser?.close()
+  }
+  return found
+}
+
+export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string, string>> {
+  const pics = new Map<string, string>()
+  const missing: string[] = []
+  for (const slug of slugs) {
+    const key = slug.trim().toLowerCase()
+    if (!key) continue
+    const cached = kickProfilePicCache.get(key)
+    if (cached) {
+      pics.set(key, cached)
+      continue
+    }
+    try {
+      const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
+        headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` },
+      })
+      if (response.ok) {
+        const pic = kickProfilePicFromChannel(await response.json())
+        if (pic) {
+          pics.set(key, pic)
+          kickProfilePicCache.set(key, pic)
+          continue
+        }
+      }
+    } catch { /* Cloudflare often blocks Node fetch */ }
+    try {
+      const payload = await fetchKickChannelPayloadWindows(key)
+      const pic = kickProfilePicFromChannel(payload)
+      if (pic) {
+        pics.set(key, pic)
+        kickProfilePicCache.set(key, pic)
+        continue
+      }
+    } catch { /* powershell missing or blocked */ }
+    missing.push(key)
+  }
+  if (!missing.length) return pics
+  const fromBrowser = await fetchKickChannelPayloadsWithBrowser(missing)
+  for (const [slug, payload] of fromBrowser) {
+    const pic = kickProfilePicFromChannel(payload)
+    if (pic) {
+      pics.set(slug.toLowerCase(), pic)
+      rememberKickProfilePic(slug, payload)
+    }
+  }
+  return pics
 }
 
 async function resolveChatroomIdWithBrowser(slug: string): Promise<number | undefined> {
@@ -80,12 +192,62 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
       const response = await fetch(`/api/v2/channels/${encodeURIComponent(channelSlug)}`, { headers: { Accept: 'application/json' } })
       return response.ok ? await response.json() : null
     }, slug)
+    if (payload) rememberKickProfilePic(slug, payload)
     return chatroomIdFrom(payload)
   } catch (error) {
     console.error('Kick chatroom lookup:', error instanceof Error ? error.message : error)
     return undefined
   } finally {
     await browser?.close()
+  }
+}
+
+function firstHttpUrl(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (/^https?:\/\//i.test(text) || text.startsWith('//')) return text
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      const nested = firstHttpUrl(record.url, record.src, record.profile_picture, record.profile_pic, record.profilepic, record.profilePicture, record.avatar, record.profile_thumb)
+      if (nested) return nested
+    }
+  }
+}
+
+export function kickAvatarFromSender(sender: any): string | undefined {
+  if (!sender) return
+  return firstHttpUrl(
+    sender.profile_picture,
+    sender.profile_pic,
+    sender.profilepic,
+    sender.profilePicture,
+    sender.avatar,
+    sender.profile_thumb,
+    sender.identity,
+    sender.user,
+  )
+}
+
+export function kickProfilePicFromChannel(payload: any): string | undefined {
+  return kickAvatarFromSender(payload?.user || payload?.channel?.user || payload)
+}
+
+export function parseKickChatMessage(data: any): KickChatMessage | undefined {
+  const text = String(data?.content || '').trim()
+  const emotes = data?.emotes || data?.metadata?.emotes
+  if (!text && !emotes?.length) return
+  return {
+    id: data?.id ? String(data.id) : undefined,
+    user: String(data?.sender?.username || data?.sender?.slug || 'Kick user'),
+    text: text || ' ',
+    userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
+    slug: data?.sender?.slug || data?.sender?.channel_slug ? String(data.sender.slug || data.sender.channel_slug) : undefined,
+    color: data?.sender?.identity?.color,
+    avatar: kickAvatarFromSender(data?.sender),
+    badges: data?.sender?.identity?.badges,
+    emotes,
   }
 }
 
@@ -256,21 +418,8 @@ export class KickChat {
     }
     const data = parseJson(payload.data)
     if (/ChatMessage/i.test(event)) {
-      const text = String(data?.content || '').trim()
-      const user = String(data?.sender?.username || data?.sender?.slug || 'Kick user')
-      const emotes = data?.emotes || data?.metadata?.emotes
-      if (!text && !emotes?.length) return
-      this.onMessage?.({
-        id: data?.id ? String(data.id) : undefined,
-        user,
-        text: text || ' ',
-        userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
-        slug: data?.sender?.slug || data?.sender?.channel_slug ? String(data.sender.slug || data.sender.channel_slug) : undefined,
-        color: data?.sender?.identity?.color,
-        avatar: data?.sender?.profile_picture || data?.sender?.profilepic || data?.sender?.avatar,
-        badges: data?.sender?.identity?.badges,
-        emotes,
-      })
+      const message = parseKickChatMessage(data)
+      if (message) this.onMessage?.(message)
       return
     }
     const moderation = kickEventToModeration(event, data)

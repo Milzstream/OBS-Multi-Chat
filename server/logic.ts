@@ -3,6 +3,8 @@ import type { ActivityEvent } from './activity.js'
 import type { YouTubeChatTarget } from './youtube-chat.js'
 import {
   CHAT_MAX,
+  CHAT_MAX_HARD,
+  CHAT_MAX_MIN,
   KICK_OAUTH_SCOPES,
   TWITCH_OAUTH_SCOPES,
   YOUTUBE_OAUTH_SCOPES,
@@ -20,6 +22,8 @@ import {
 
 export {
   CHAT_MAX,
+  CHAT_MAX_HARD,
+  CHAT_MAX_MIN,
   KICK_OAUTH_SCOPES,
   TWITCH_OAUTH_SCOPES,
   YOUTUBE_OAUTH_SCOPES,
@@ -27,6 +31,14 @@ export {
 } from './types.js'
 
 const NON_ENGLISH = /[\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0590-\u05FF]/
+
+export function parseChatMax(env: Record<string, string | undefined> = process.env) {
+  const raw = String(env.RELAY_CHAT_MAX || '').trim()
+  if (!raw) return CHAT_MAX
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n)) return CHAT_MAX
+  return Math.min(CHAT_MAX_HARD, Math.max(CHAT_MAX_MIN, n))
+}
 
 export function looksLikePlaceholder(handle: string) {
   return !handle || handle === 'Kick account' || handle.includes(' ')
@@ -938,6 +950,14 @@ export function sseBroadcastEvent(data: unknown, previous?: string) {
   const json = JSON.stringify(data)
   if (json === previous) return { json, payload: undefined, unchanged: true as const }
   return { json, payload: `data: ${json}\n\n`, unchanged: false as const }
+}
+
+export function sseNamedEvent(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+export function sseChangedKeys(previous: Record<string, string>, next: Record<string, string>) {
+  return Object.keys(next).filter((key) => previous[key] !== next[key])
 }
 
 export const TWITCH_EVENTSUB_DEFAULT_URL = 'wss://eventsub.wss.twitch.tv/ws'

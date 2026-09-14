@@ -118,7 +118,7 @@ TWITCH_CLIENT_SECRET=your_twitch_client_secret
 
 KICK_CLIENT_ID=your_kick_client_id
 KICK_CLIENT_SECRET=your_kick_client_secret
-KICK_API_BASE=
+# KICK_API_BASE=
 # Optional if Edge/Chrome is installed in a non-standard location:
 # Shared by the Kick chatroom-ID lookup and the YouTube InnerTube fallback:
 # BROWSER_PATH=C:\\Path\\To\\msedge.exe
@@ -176,7 +176,7 @@ Hiding or skipping an event in the StreamElements dashboard does **not** remove 
 
 Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json` (last 200 messages). Packaged runs keep that `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Messages that arrived while the backend was down are not backfilled: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json` (last 5000 messages by default). Set `RELAY_CHAT_MAX` in `production.env` to keep more or fewer (100–1,000,000). Memory and `chat.json` size scale with that number. Packaged runs keep that `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Messages that arrived while the backend was down are not backfilled: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 

@@ -9,6 +9,7 @@ import {
   createControlGuard,
   createOpenHandler,
   isSafeExternalUrl,
+  isSafeMediaUrl,
   isTrustedOrigin,
   parseOpenUrl,
   resolveBindHost,
@@ -81,6 +82,7 @@ describe('profile URL allowlist and Windows open args', () => {
   it('accepts platform profile URLs and rejects everything else', () => {
     assert.equal(isSafeExternalUrl('https://www.twitch.tv/Ada'), true)
     assert.equal(isSafeExternalUrl('https://kick.com/ada'), true)
+    assert.equal(isSafeExternalUrl('https://kick.com/superiogame-tyle88'), true)
     assert.equal(isSafeExternalUrl('https://www.youtube.com/@Ada'), true)
     assert.equal(isSafeExternalUrl('https://www.youtube.com/channel/UC1234567890123456789012'), true)
     assert.equal(isSafeExternalUrl('http://www.twitch.tv/Ada'), false)
@@ -89,6 +91,9 @@ describe('profile URL allowlist and Windows open args', () => {
     assert.equal(isSafeExternalUrl('https://www.twitch.tv.evil.example/Ada'), false)
     assert.equal(isSafeExternalUrl('javascript:alert(1)'), false)
     assert.equal(parseOpenUrl('https://example.com').ok, false)
+    assert.equal(isSafeMediaUrl('https://files.kick.com/images/user/1/x.webp'), true)
+    assert.equal(isSafeMediaUrl('https://evil.example/x.webp'), false)
+    assert.equal(isSafeMediaUrl('http://files.kick.com/x.webp'), false)
   })
 
   it('opens Windows URLs through rundll32 without a cmd shell string', () => {

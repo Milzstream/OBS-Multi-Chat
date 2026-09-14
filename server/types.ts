@@ -14,7 +14,9 @@ export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
 export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
 
-export const CHAT_MAX = 200
+export const CHAT_MAX = 5000
+export const CHAT_MAX_MIN = 100
+export const CHAT_MAX_HARD = 1_000_000
 export const YOUTUBE_QUOTA_LIMIT = 10_000
 export const YOUTUBE_OAUTH_SCOPES = 'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl'
 export const TWITCH_OAUTH_SCOPES = 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read'

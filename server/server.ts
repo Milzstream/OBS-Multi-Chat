@@ -6,16 +6,15 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat, type KickActivity, type KickModeration } from './kick-chat.js'
+import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
-import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
+import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
+import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates } from './check-update.js'
 import {
-  CHAT_MAX,
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
   applyLiveStreamDetails,
@@ -38,6 +37,7 @@ import {
   oauthAuthorizeUrl,
   pacificDate,
   parseAppSettings,
+  parseChatMax,
   parseKickParts,
   parseTranslatedText,
   parseTwitchChatLine,
@@ -50,7 +50,8 @@ import {
   resolveTranslateConfig,
   resolveYouTubeLiveChatIds,
   sanitizeIrcMessage,
-  sseBroadcastEvent,
+  sseChangedKeys,
+  sseNamedEvent,
   shouldKeepTokenRefreshBanner,
   summarizeApiError,
   syncYouTubeTokenChatIds,
@@ -100,6 +101,7 @@ const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
 const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
 dotenv.config({ path: envPath })
+const chatMax = parseChatMax()
 
 type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
@@ -135,6 +137,9 @@ const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
 let twitchBadgesLoaded = false
 let twitchAvatarTimer: NodeJS.Timeout | undefined
+const kickAvatars = new Map<string, string>()
+const kickAvatarPending = new Set<string>()
+let kickAvatarTimer: NodeJS.Timeout | undefined
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const youtubeChat = new YouTubeLiveChat()
@@ -183,7 +188,7 @@ function rememberYouTubeFromChat(messages: ChatMessage[]) {
 
 function loadChat(): ChatMessage[] {
   const parsed = readJsonFile<unknown>(chatFile, [])
-  const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-CHAT_MAX)
+  const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-chatMax)
   rememberYouTubeFromChat(messages)
   return messages
 }
@@ -210,7 +215,7 @@ const state: State = {
 function persistChat() {
   try {
     pruneYouTubeSeenIds(youtubeSeen, state.messages)
-    const stored = state.messages.slice(-CHAT_MAX).map((message) => {
+    const stored = state.messages.slice(-chatMax).map((message) => {
       const rest = { ...message }
       delete rest.ingest
       return rest
@@ -244,16 +249,33 @@ app.use(express.json())
 app.use(createControlGuard(localApi))
 app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
-  response.json(state)
+  response.json({ seq: sseSeq, ...state })
+})
+app.get('/api/media', async (request, response) => {
+  const raw = String(request.query.u || '')
+  if (!isSafeMediaUrl(raw)) return response.status(400).end()
+  try {
+    const upstream = await fetchTimed(raw, { headers: { Accept: 'image/*' } }, 8_000)
+    if (!upstream.ok) return response.status(upstream.status).end()
+    response.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/webp')
+    response.setHeader('Cache-Control', 'public, max-age=86400')
+    response.end(Buffer.from(await upstream.arrayBuffer()))
+  } catch {
+    response.status(502).end()
+  }
 })
 app.get('/events', (request, response) => {
   const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
   const origin = request.get('origin')
   if (origin && isTrustedOrigin(origin, localApi, request.get('host'))) headers['Access-Control-Allow-Origin'] = origin
   response.writeHead(200, headers)
-  response.write(`data: ${JSON.stringify(state)}\n\n`)
+  state.activity = activityStore.list()
+  writeSse(response, sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
   clients.add(response)
-  request.on('close', () => clients.delete(response))
+  request.on('close', () => {
+    clients.delete(response)
+    console.log(`SSE client dropped (${clients.size} left)`)
+  })
 })
 app.post('/api/messages', async (request, response) => {
   const { platforms, text } = request.body as { platforms?: Platform[]; text?: string }
@@ -471,6 +493,7 @@ httpServer.listen(port, bindHost, () => {
   } else {
     console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
   }
+  console.log(`  Chat history   last ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX)`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Use YouTube Data API v3 → Queries per day → Current usage (example 35), not the 1,247 quota-count card.')
@@ -886,19 +909,25 @@ async function checkLiveNow(platform: Platform) {
 }
 
 function startKickChat(slug: string) {
-  void kickChat.start(slug, (message) => addMessage({
+  queueKickAvatar(slug)
+  void kickChat.start(slug, (message) => {
+    const avatar = normalizeAvatar(message.avatar) || (message.slug ? kickAvatars.get(message.slug.toLowerCase()) : undefined)
+    addMessage({
     id: message.id || crypto.randomUUID(),
     platform: 'Kick',
     user: message.user,
     userId: message.userId,
     handle: message.slug,
     color: message.color,
-    avatar: normalizeAvatar(message.avatar),
+    avatar,
     badges: kickBadges(message.badges),
     text: message.text,
     time: new Date().toISOString(),
     parts: parseKickParts(message.text, message.emotes),
-  }), tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
+    })
+    if (avatar && message.slug) kickAvatars.set(message.slug.toLowerCase(), avatar)
+    else queueKickAvatar(message.slug || kickProfileSlug(message.user))
+  }, tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
     id: event.id || '',
     platform: 'Kick',
     kind: event.kind,
@@ -1258,6 +1287,38 @@ async function flushTwitchAvatars() {
   if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
 }
 
+function queueKickAvatar(slug?: string) {
+  const key = String(slug || '').trim().toLowerCase()
+  if (!key || kickAvatars.has(key) || kickAvatarPending.has(key)) return
+  kickAvatarPending.add(key)
+  if (kickAvatarTimer) clearTimeout(kickAvatarTimer)
+  kickAvatarTimer = setTimeout(() => { void flushKickAvatars() }, 400)
+}
+
+async function flushKickAvatars() {
+  const slugs = [...kickAvatarPending].slice(0, 5)
+  slugs.forEach((slug) => kickAvatarPending.delete(slug))
+  if (!slugs.length) return
+  const pics = await lookupKickProfilePics(slugs)
+  for (const [slug, url] of pics) {
+    const avatar = normalizeAvatar(url)
+    if (avatar) kickAvatars.set(slug, avatar)
+  }
+  let changed = false
+  state.messages = state.messages.map((item) => {
+    if (item.platform !== 'Kick') return item
+    const avatar = kickAvatars.get((item.handle || kickProfileSlug(item.user)).toLowerCase())
+    if (!avatar || item.avatar === avatar) return item
+    changed = true
+    return { ...item, avatar }
+  })
+  if (changed) {
+    persistChat()
+    broadcast()
+  }
+  if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
+}
+
 function rememberOutgoing(entry: { id: string; text: string; platforms: Platform[]; at: number }) {
   const cutoff = Date.now() - 20_000
   for (let index = recentOutgoing.length - 1; index >= 0; index--) if (recentOutgoing[index].at < cutoff) recentOutgoing.splice(index, 1)
@@ -1482,6 +1543,7 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     ownUserIds: ownUserIds(),
     recentOutgoing,
     targets: youtubeTargets,
+    max: chatMax,
   })
   for (const id of result.seenIds) youtubeSeen.add(id)
   if (!result.changed) return
@@ -2094,18 +2156,66 @@ function writeSse(client: express.Response, chunk: string) {
   }
 }
 
-let lastSseJson = ''
+let sseSeq = 0
+let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+
+function ssePresence() {
+  return {
+    accounts: state.accounts,
+    streamInfo: state.streamInfo,
+    health: state.health,
+    youtubeQuota: state.youtubeQuota,
+    streamelements: state.streamelements,
+  }
+}
+
+function sseSettings() {
+  return {
+    activityFallback: state.activityFallback,
+    ignoreMissingJwt: state.ignoreMissingJwt,
+    dropOldAlerts: state.dropOldAlerts,
+    translateChat: state.translateChat,
+    translateError: state.translateError,
+  }
+}
+
+function pushSse(chunk: string) {
+  for (const client of [...clients]) writeSse(client, chunk)
+}
+
 function broadcast() {
   state.activity = activityStore.list()
-  const event = sseBroadcastEvent(state, lastSseJson)
-  lastSseJson = event.json
-  if (!event.payload) return
-  for (const client of [...clients]) writeSse(client, event.payload)
+  const next = {
+    chat: JSON.stringify(state.messages),
+    activity: JSON.stringify({ activity: state.activity, activityWarnings: state.activityWarnings }),
+    presence: JSON.stringify(ssePresence()),
+    settings: JSON.stringify(sseSettings()),
+  }
+  const changed = sseChangedKeys(lastSseSlices, next)
+  if (!changed.length) return
+  lastSseSlices = next
+  if (changed.length >= 4) {
+    sseSeq += 1
+    pushSse(sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
+    return
+  }
+  for (const key of changed) {
+    sseSeq += 1
+    if (key === 'chat') pushSse(sseNamedEvent('chat', { seq: sseSeq, messages: state.messages }))
+    else if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, activity: state.activity, activityWarnings: state.activityWarnings }))
+    else if (key === 'presence') pushSse(sseNamedEvent('presence', { seq: sseSeq, ...ssePresence() }))
+    else pushSse(sseNamedEvent('settings', { seq: sseSeq, ...sseSettings() }))
+  }
 }
 
 setInterval(() => {
-  for (const client of [...clients]) writeSse(client, ': keepalive\n\n')
+  pushSse(sseNamedEvent('ping', { seq: sseSeq }))
 }, 15_000).unref()
+setInterval(() => {
+  if (!clients.size) return
+  state.activity = activityStore.list()
+  pushSse(sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
+}, 60_000).unref()
 function loadTokens(): Partial<Record<TokenPlatform, Token>> {
   const parsed = readJsonFile<unknown>(tokenFile, {})
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}

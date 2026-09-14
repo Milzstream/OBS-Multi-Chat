@@ -4,6 +4,7 @@ import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type
 import { ConnectionSettings } from '../ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
 import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, parseStoredFilter, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
+import { subscribeDockSse } from '../sse'
 
 type Filter = ActivityFilter
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -114,9 +115,9 @@ export default function ActivityApp() {
   }, [])
 
   useEffect(() => {
-    const apply = (remote: BackendState) => {
-      setEvents(remote.activity || [])
-      setActivityWarnings(remote.activityWarnings || [])
+    const applySnapshot = (remote: BackendState) => {
+      if (remote.activity) setEvents(remote.activity)
+      if (remote.activityWarnings) setActivityWarnings(remote.activityWarnings)
       setMissingJwts(remote.streamelements?.missing || [])
       setSeConnected(Boolean(remote.streamelements?.connected))
       if (remote.streamelements) setStreamelements({ connected: remote.streamelements.connected, handle: remote.streamelements.handle, missing: remote.streamelements.missing || [] })
@@ -128,11 +129,14 @@ export default function ActivityApp() {
       if (typeof remote.translateError === 'string') setTranslateError(remote.translateError)
       setBackendOnline(true)
     }
-    fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
-    const source = new EventSource('/events')
-    source.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
-    source.onerror = () => { if (source.readyState === EventSource.CLOSED) setBackendOnline(false) }
-    return () => source.close()
+    const asState = (data: Record<string, unknown>) => data as unknown as BackendState
+    return subscribeDockSse({
+      onSnapshot: (data) => applySnapshot(asState(data)),
+      onActivity: (data) => applySnapshot(asState(data)),
+      onPresence: (data) => applySnapshot(asState(data)),
+      onSettings: (data) => applySnapshot(asState(data)),
+      onStatus: setBackendOnline,
+    })
   }, [])
 
   const visible = useMemo(() => {

@@ -2,7 +2,8 @@ import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
-import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
+import { dockAvatarSrc, kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
+import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -92,20 +93,20 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    const apply = (remote: BackendState) => {
-      // Only update if values actually changed to reduce flicker
-      setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
-      setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
-      if (remote.health) {
-        const health = remote.health
+    const applySnapshot = (remote: BackendState) => {
+      const fields = chatDockFields(remote as unknown as Record<string, unknown>)
+      if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)
+      if (fields.messages) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(fields.messages) ? fields.messages as ChatMessage[] : prev)
+      if (fields.health) {
+        const health = fields.health as Record<Platform, Health>
         setHealth((prev) => JSON.stringify(prev) !== JSON.stringify(health) ? health : prev)
       }
-      if (remote.youtubeQuota) {
-        const youtubeQuota = remote.youtubeQuota
+      if (fields.youtubeQuota) {
+        const youtubeQuota = fields.youtubeQuota as YoutubeQuotaStatus
         setYoutubeQuota((prev) => JSON.stringify(prev) !== JSON.stringify(youtubeQuota) ? youtubeQuota : prev)
       }
-      if (remote.streamelements) {
-        const streamelements = remote.streamelements
+      if (fields.streamelements) {
+        const streamelements = fields.streamelements as StreamElementsStatus
         setStreamelements((prev) => JSON.stringify(prev) !== JSON.stringify(streamelements) ? streamelements : prev)
       }
       if (typeof remote.activityFallback === 'boolean') {
@@ -129,17 +130,26 @@ function App() {
         setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
       setBackendOnline(true)
-      setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(remote.streamInfo) ? remote.streamInfo : prev)
-      setStreamTitle((prev) => {
-        const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
-        return prev !== newTitle ? newTitle : prev
-      })
+      if (fields.streamInfo) {
+        const streamInfo = fields.streamInfo as StreamDetailsByPlatform
+        setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(streamInfo) ? streamInfo : prev)
+        setStreamTitle((prev) => {
+          const newTitle = streamInfo.Twitch.title || streamInfo.Kick.title
+          return prev !== newTitle ? newTitle : prev
+        })
+      }
     }
-    fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
-    const events = new EventSource('/events')
-    events.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
-    events.onerror = () => { if (events.readyState === EventSource.CLOSED) setBackendOnline(false) }
-    return () => events.close()
+    const asState = (data: Record<string, unknown>) => data as unknown as BackendState
+    return subscribeDockSse({
+      onSnapshot: (data) => applySnapshot(asState(data)),
+      onChat: (data) => {
+        const messages = data.messages as ChatMessage[] | undefined
+        if (Array.isArray(messages)) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(messages) ? messages : prev)
+      },
+      onPresence: (data) => applySnapshot(asState(data)),
+      onSettings: (data) => applySnapshot(asState(data)),
+      onStatus: setBackendOnline,
+    })
   }, [])
 
   const connectPlatform = (platform: Platform) => {
@@ -285,7 +295,7 @@ function MessageItem({ message, showTranslationMark, onModerate }: { message: Ch
     event.stopPropagation()
     void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: profileUrl }) }).catch(err => console.error('Failed to open profile:', err))
   }
-  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={message.avatar} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
+  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {
