@@ -6,7 +6,7 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { BROWSER_HEADERS, KickChat, kickProfilePicFromChannel, type KickActivity, type KickModeration } from './kick-chat.js'
+import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
@@ -1283,13 +1283,10 @@ async function flushKickAvatars() {
   const slugs = [...kickAvatarPending].slice(0, 5)
   slugs.forEach((slug) => kickAvatarPending.delete(slug))
   if (!slugs.length) return
-  for (const slug of slugs) {
-    try {
-      const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`, { headers: BROWSER_HEADERS })
-      if (!response.ok) continue
-      const avatar = normalizeAvatar(kickProfilePicFromChannel(await response.json()))
-      if (avatar) kickAvatars.set(slug, avatar)
-    } catch { /* Cloudflare often blocks Node fetch */ }
+  const pics = await lookupKickProfilePics(slugs)
+  for (const [slug, url] of pics) {
+    const avatar = normalizeAvatar(url)
+    if (avatar) kickAvatars.set(slug, avatar)
   }
   let changed = false
   state.messages = state.messages.map((item) => {

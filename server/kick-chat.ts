@@ -67,6 +67,62 @@ async function loadChromium() {
   }
 }
 
+async function fetchKickChannelPayloadsWithBrowser(slugs: string[]): Promise<Map<string, any>> {
+  const found = new Map<string, any>()
+  const executablePath = browserPath()
+  const chromium = await loadChromium()
+  if (!executablePath || !chromium || !slugs.length) return found
+  let browser: any
+  try {
+    browser = await chromium.launch({ headless: true, executablePath })
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, userAgent: BROWSER_HEADERS['User-Agent'] })
+    await page.goto(`https://kick.com/${encodeURIComponent(slugs[0])}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+    const payloads = await page.evaluate(async (channelSlugs: string[]) => {
+      const out: Record<string, unknown> = {}
+      for (const channelSlug of channelSlugs) {
+        const response = await fetch(`/api/v2/channels/${encodeURIComponent(channelSlug)}`, { headers: { Accept: 'application/json' } })
+        if (response.ok) out[channelSlug] = await response.json()
+      }
+      return out
+    }, slugs)
+    for (const [slug, payload] of Object.entries(payloads || {})) found.set(slug, payload)
+  } catch (error) {
+    console.error('Kick profile lookup:', error instanceof Error ? error.message : error)
+  } finally {
+    await browser?.close()
+  }
+  return found
+}
+
+export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string, string>> {
+  const pics = new Map<string, string>()
+  const missing: string[] = []
+  for (const slug of slugs) {
+    const key = slug.trim().toLowerCase()
+    if (!key) continue
+    try {
+      const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
+        headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` },
+      })
+      if (response.ok) {
+        const pic = kickProfilePicFromChannel(await response.json())
+        if (pic) {
+          pics.set(key, pic)
+          continue
+        }
+      }
+    } catch { /* Cloudflare often blocks Node fetch */ }
+    missing.push(key)
+  }
+  if (!missing.length) return pics
+  const fromBrowser = await fetchKickChannelPayloadsWithBrowser(missing)
+  for (const [slug, payload] of fromBrowser) {
+    const pic = kickProfilePicFromChannel(payload)
+    if (pic) pics.set(slug.toLowerCase(), pic)
+  }
+  return pics
+}
+
 async function resolveChatroomIdWithBrowser(slug: string): Promise<number | undefined> {
   const executablePath = browserPath()
   const chromium = await loadChromium()

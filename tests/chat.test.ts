@@ -145,6 +145,7 @@ describe('Kick chat and activity', () => {
     assert.equal(kickAvatarFromSender({ identity: { color: '#fff', profile_pic: { url: 'https://files.kick.com/b.webp' } } }), 'https://files.kick.com/b.webp')
     assert.equal(kickAvatarFromSender({ identity: { color: '#fff', badges: [] } }), undefined)
     assert.equal(kickProfilePicFromChannel({ user: { profilepic: 'https://files.kick.com/c.webp' } }), 'https://files.kick.com/c.webp')
+    assert.equal(kickProfilePicFromChannel({ user: { profile_pic: 'https://files.kick.com/images/user/1/profile_image/conversion/x-fullsize.webp' } }), 'https://files.kick.com/images/user/1/profile_image/conversion/x-fullsize.webp')
     const parsed = parseKickChatMessage({
       id: 'm1',
       content: 'hello',
