@@ -508,7 +508,7 @@ httpServer.listen(port, bindHost, () => {
   } else {
     console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
   }
-  console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — a crash buffer, not a VOD`)
+  console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
