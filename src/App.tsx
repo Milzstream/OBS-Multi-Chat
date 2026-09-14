@@ -3,6 +3,7 @@ import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
+import { subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -92,8 +93,7 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    const apply = (remote: BackendState) => {
-      // Only update if values actually changed to reduce flicker
+    const applySnapshot = (remote: BackendState) => {
       setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
       setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
       if (remote.health) {
@@ -129,17 +129,25 @@ function App() {
         setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
       setBackendOnline(true)
-      setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(remote.streamInfo) ? remote.streamInfo : prev)
-      setStreamTitle((prev) => {
-        const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
-        return prev !== newTitle ? newTitle : prev
-      })
+      if (remote.streamInfo) {
+        setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(remote.streamInfo) ? remote.streamInfo : prev)
+        setStreamTitle((prev) => {
+          const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
+          return prev !== newTitle ? newTitle : prev
+        })
+      }
     }
-    fetch('/api/state').then((response) => response.ok ? response.json() as Promise<BackendState> : Promise.reject()).then(apply).catch(() => setBackendOnline(false))
-    const events = new EventSource('/events')
-    events.onmessage = (event) => apply(JSON.parse(event.data) as BackendState)
-    events.onerror = () => { if (events.readyState === EventSource.CLOSED) setBackendOnline(false) }
-    return () => events.close()
+    const asState = (data: Record<string, unknown>) => data as unknown as BackendState
+    return subscribeDockSse({
+      onSnapshot: (data) => applySnapshot(asState(data)),
+      onChat: (data) => {
+        const messages = data.messages as ChatMessage[] | undefined
+        if (Array.isArray(messages)) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(messages) ? messages : prev)
+      },
+      onPresence: (data) => applySnapshot(asState(data)),
+      onSettings: (data) => applySnapshot(asState(data)),
+      onStatus: setBackendOnline,
+    })
   }, [])
 
   const connectPlatform = (platform: Platform) => {

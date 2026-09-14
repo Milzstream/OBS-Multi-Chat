@@ -940,6 +940,14 @@ export function sseBroadcastEvent(data: unknown, previous?: string) {
   return { json, payload: `data: ${json}\n\n`, unchanged: false as const }
 }
 
+export function sseNamedEvent(event: string, data: unknown) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+export function sseChangedKeys(previous: Record<string, string>, next: Record<string, string>) {
+  return Object.keys(next).filter((key) => previous[key] !== next[key])
+}
+
 export const TWITCH_EVENTSUB_DEFAULT_URL = 'wss://eventsub.wss.twitch.tv/ws'
 
 export function twitchEventSubConnectPlan(url: string, currentGeneration: number) {

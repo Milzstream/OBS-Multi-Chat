@@ -17,6 +17,8 @@ import {
   resolveTranslateConfig,
   sanitizeIrcMessage,
   sseBroadcastEvent,
+  sseChangedKeys,
+  sseNamedEvent,
   summarizeApiError,
   translateFailureMessage,
   twitchBadgeLabel,
@@ -209,6 +211,12 @@ describe('SSE broadcast cache', () => {
     const second = sseBroadcastEvent({ n: 1 }, first.json)
     assert.equal(second.unchanged, true)
     assert.equal(second.payload, undefined)
+  })
+
+  it('emits named events and lists changed slices', () => {
+    assert.equal(sseNamedEvent('chat', { seq: 2 }), 'event: chat\ndata: {"seq":2}\n\n')
+    assert.deepEqual(sseChangedKeys({ chat: 'a', activity: 'b' }, { chat: 'a', activity: 'c' }), ['activity'])
+    assert.deepEqual(sseChangedKeys({ chat: 'a' }, { chat: 'a' }), [])
   })
 })
 

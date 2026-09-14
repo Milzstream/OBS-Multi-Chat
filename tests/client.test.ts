@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
+import { sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
@@ -30,6 +31,16 @@ describe('chat dock helpers', () => {
     assert.deepEqual(selectedSendPlatforms(['Twitch', 'YouTube']), ['Twitch', 'YouTube'])
     assert.deepEqual(selectedSendPlatforms(['Twitch', 'Kick', 'YouTube'], ['YouTube']), ['Twitch', 'Kick'])
     assert.deepEqual(selectedSendPlatforms([]), [])
+  })
+})
+
+describe('SSE seq gaps', () => {
+  it('treats snapshots and pings as resync-safe, and flags skipped deltas', () => {
+    assert.equal(sseSeqIsGap(3, 3, 'snapshot'), false)
+    assert.equal(sseSeqIsGap(3, 3, 'ping'), false)
+    assert.equal(sseSeqIsGap(null, 1, 'chat'), true)
+    assert.equal(sseSeqIsGap(3, 4, 'chat'), false)
+    assert.equal(sseSeqIsGap(3, 5, 'chat'), true)
   })
 })
 

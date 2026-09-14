@@ -50,7 +50,8 @@ import {
   resolveTranslateConfig,
   resolveYouTubeLiveChatIds,
   sanitizeIrcMessage,
-  sseBroadcastEvent,
+  sseChangedKeys,
+  sseNamedEvent,
   shouldKeepTokenRefreshBanner,
   summarizeApiError,
   syncYouTubeTokenChatIds,
@@ -242,18 +243,22 @@ const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: num
 app.use(cors({ origin: corsOriginDelegate(localApi) }))
 app.use(express.json())
 app.use(createControlGuard(localApi))
-app.get('/api/state', (_request, response) => {
+  app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
-  response.json(state)
+  response.json({ seq: sseSeq, ...state })
 })
 app.get('/events', (request, response) => {
   const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
   const origin = request.get('origin')
   if (origin && isTrustedOrigin(origin, localApi, request.get('host'))) headers['Access-Control-Allow-Origin'] = origin
   response.writeHead(200, headers)
-  response.write(`data: ${JSON.stringify(state)}\n\n`)
+  state.activity = activityStore.list()
+  writeSse(response, sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
   clients.add(response)
-  request.on('close', () => clients.delete(response))
+  request.on('close', () => {
+    clients.delete(response)
+    console.log(`SSE client dropped (${clients.size} left)`)
+  })
 })
 app.post('/api/messages', async (request, response) => {
   const { platforms, text } = request.body as { platforms?: Platform[]; text?: string }
@@ -2094,18 +2099,66 @@ function writeSse(client: express.Response, chunk: string) {
   }
 }
 
-let lastSseJson = ''
+let sseSeq = 0
+let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+
+function ssePresence() {
+  return {
+    accounts: state.accounts,
+    streamInfo: state.streamInfo,
+    health: state.health,
+    youtubeQuota: state.youtubeQuota,
+    streamelements: state.streamelements,
+  }
+}
+
+function sseSettings() {
+  return {
+    activityFallback: state.activityFallback,
+    ignoreMissingJwt: state.ignoreMissingJwt,
+    dropOldAlerts: state.dropOldAlerts,
+    translateChat: state.translateChat,
+    translateError: state.translateError,
+  }
+}
+
+function pushSse(chunk: string) {
+  for (const client of [...clients]) writeSse(client, chunk)
+}
+
 function broadcast() {
   state.activity = activityStore.list()
-  const event = sseBroadcastEvent(state, lastSseJson)
-  lastSseJson = event.json
-  if (!event.payload) return
-  for (const client of [...clients]) writeSse(client, event.payload)
+  const next = {
+    chat: JSON.stringify(state.messages),
+    activity: JSON.stringify({ activity: state.activity, activityWarnings: state.activityWarnings }),
+    presence: JSON.stringify(ssePresence()),
+    settings: JSON.stringify(sseSettings()),
+  }
+  const changed = sseChangedKeys(lastSseSlices, next)
+  if (!changed.length) return
+  lastSseSlices = next
+  if (changed.length >= 4) {
+    sseSeq += 1
+    pushSse(sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
+    return
+  }
+  for (const key of changed) {
+    sseSeq += 1
+    if (key === 'chat') pushSse(sseNamedEvent('chat', { seq: sseSeq, messages: state.messages }))
+    else if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, activity: state.activity, activityWarnings: state.activityWarnings }))
+    else if (key === 'presence') pushSse(sseNamedEvent('presence', { seq: sseSeq, ...ssePresence() }))
+    else pushSse(sseNamedEvent('settings', { seq: sseSeq, ...sseSettings() }))
+  }
 }
 
 setInterval(() => {
-  for (const client of [...clients]) writeSse(client, ': keepalive\n\n')
+  pushSse(sseNamedEvent('ping', { seq: sseSeq }))
 }, 15_000).unref()
+setInterval(() => {
+  if (!clients.size) return
+  state.activity = activityStore.list()
+  pushSse(sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
+}, 60_000).unref()
 function loadTokens(): Partial<Record<TokenPlatform, Token>> {
   const parsed = readJsonFile<unknown>(tokenFile, {})
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
