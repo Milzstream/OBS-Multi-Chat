@@ -6,9 +6,9 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat, type KickActivity, type KickModeration } from './kick-chat.js'
+import { BROWSER_HEADERS, KickChat, kickProfilePicFromChannel, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
-import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
+import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -136,6 +136,9 @@ const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
 let twitchBadgesLoaded = false
 let twitchAvatarTimer: NodeJS.Timeout | undefined
+const kickAvatars = new Map<string, string>()
+const kickAvatarPending = new Set<string>()
+let kickAvatarTimer: NodeJS.Timeout | undefined
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const youtubeChat = new YouTubeLiveChat()
@@ -891,19 +894,24 @@ async function checkLiveNow(platform: Platform) {
 }
 
 function startKickChat(slug: string) {
-  void kickChat.start(slug, (message) => addMessage({
+  void kickChat.start(slug, (message) => {
+    const avatar = normalizeAvatar(message.avatar) || (message.slug ? kickAvatars.get(message.slug.toLowerCase()) : undefined)
+    addMessage({
     id: message.id || crypto.randomUUID(),
     platform: 'Kick',
     user: message.user,
     userId: message.userId,
     handle: message.slug,
     color: message.color,
-    avatar: normalizeAvatar(message.avatar),
+    avatar,
     badges: kickBadges(message.badges),
     text: message.text,
     time: new Date().toISOString(),
     parts: parseKickParts(message.text, message.emotes),
-  }), tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
+    })
+    if (avatar && message.slug) kickAvatars.set(message.slug.toLowerCase(), avatar)
+    else queueKickAvatar(message.slug || kickProfileSlug(message.user))
+  }, tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
     id: event.id || '',
     platform: 'Kick',
     kind: event.kind,
@@ -1261,6 +1269,41 @@ async function flushTwitchAvatars() {
     console.error('Twitch avatars:', error instanceof Error ? error.message : error)
   }
   if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
+}
+
+function queueKickAvatar(slug?: string) {
+  const key = String(slug || '').trim().toLowerCase()
+  if (!key || kickAvatars.has(key) || kickAvatarPending.has(key)) return
+  kickAvatarPending.add(key)
+  if (kickAvatarTimer) clearTimeout(kickAvatarTimer)
+  kickAvatarTimer = setTimeout(() => { void flushKickAvatars() }, 400)
+}
+
+async function flushKickAvatars() {
+  const slugs = [...kickAvatarPending].slice(0, 5)
+  slugs.forEach((slug) => kickAvatarPending.delete(slug))
+  if (!slugs.length) return
+  for (const slug of slugs) {
+    try {
+      const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`, { headers: BROWSER_HEADERS })
+      if (!response.ok) continue
+      const avatar = normalizeAvatar(kickProfilePicFromChannel(await response.json()))
+      if (avatar) kickAvatars.set(slug, avatar)
+    } catch { /* Cloudflare often blocks Node fetch */ }
+  }
+  let changed = false
+  state.messages = state.messages.map((item) => {
+    if (item.platform !== 'Kick') return item
+    const avatar = kickAvatars.get((item.handle || kickProfileSlug(item.user)).toLowerCase())
+    if (!avatar || item.avatar === avatar) return item
+    changed = true
+    return { ...item, avatar }
+  })
+  if (changed) {
+    persistChat()
+    broadcast()
+  }
+  if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
 }
 
 function rememberOutgoing(entry: { id: string; text: string; platforms: Platform[]; at: number }) {

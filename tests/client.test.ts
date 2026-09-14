@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
-import { sseSeqIsGap } from '../src/sse.ts'
+import { chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
@@ -41,6 +41,23 @@ describe('SSE seq gaps', () => {
     assert.equal(sseSeqIsGap(null, 1, 'chat'), true)
     assert.equal(sseSeqIsGap(3, 4, 'chat'), false)
     assert.equal(sseSeqIsGap(3, 5, 'chat'), true)
+  })
+
+  it('does not treat a presence slice as a chat replacement', () => {
+    const presence = chatDockFields({
+      seq: 4,
+      accounts: [{ platform: 'Twitch', viewers: 3 }],
+      health: { Twitch: { status: 'ok', message: '' } },
+    })
+    assert.equal(presence.messages, undefined)
+    assert.equal(presence.accounts?.length, 1)
+    const snapshot = chatDockFields({
+      seq: 4,
+      messages: [{ id: '1', text: 'hi' }],
+      accounts: [{ platform: 'Kick', viewers: 1 }],
+    })
+    assert.equal(snapshot.messages?.length, 1)
+    assert.equal(snapshot.accounts?.length, 1)
   })
 })
 

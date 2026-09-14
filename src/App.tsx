@@ -3,7 +3,7 @@ import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
-import { subscribeDockSse } from './sse'
+import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -94,18 +94,19 @@ function App() {
 
   useEffect(() => {
     const applySnapshot = (remote: BackendState) => {
-      if (Array.isArray(remote.accounts)) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(remote.accounts) ? remote.accounts : prev)
-      if (Array.isArray(remote.messages)) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(remote.messages) ? remote.messages : prev)
-      if (remote.health) {
-        const health = remote.health
+      const fields = chatDockFields(remote as unknown as Record<string, unknown>)
+      if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)
+      if (fields.messages) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(fields.messages) ? fields.messages as ChatMessage[] : prev)
+      if (fields.health) {
+        const health = fields.health as Record<Platform, Health>
         setHealth((prev) => JSON.stringify(prev) !== JSON.stringify(health) ? health : prev)
       }
-      if (remote.youtubeQuota) {
-        const youtubeQuota = remote.youtubeQuota
+      if (fields.youtubeQuota) {
+        const youtubeQuota = fields.youtubeQuota as YoutubeQuotaStatus
         setYoutubeQuota((prev) => JSON.stringify(prev) !== JSON.stringify(youtubeQuota) ? youtubeQuota : prev)
       }
-      if (remote.streamelements) {
-        const streamelements = remote.streamelements
+      if (fields.streamelements) {
+        const streamelements = fields.streamelements as StreamElementsStatus
         setStreamelements((prev) => JSON.stringify(prev) !== JSON.stringify(streamelements) ? streamelements : prev)
       }
       if (typeof remote.activityFallback === 'boolean') {
@@ -129,10 +130,11 @@ function App() {
         setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
       setBackendOnline(true)
-      if (remote.streamInfo) {
-        setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(remote.streamInfo) ? remote.streamInfo : prev)
+      if (fields.streamInfo) {
+        const streamInfo = fields.streamInfo as StreamDetailsByPlatform
+        setStreamDetails((prev) => JSON.stringify(prev) !== JSON.stringify(streamInfo) ? streamInfo : prev)
         setStreamTitle((prev) => {
-          const newTitle = remote.streamInfo.Twitch.title || remote.streamInfo.Kick.title
+          const newTitle = streamInfo.Twitch.title || streamInfo.Kick.title
           return prev !== newTitle ? newTitle : prev
         })
       }

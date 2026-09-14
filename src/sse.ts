@@ -9,6 +9,17 @@ export function sseSeqIsGap(lastSeq: number | null, incoming: number, type: stri
   return incoming !== lastSeq + 1
 }
 
+export function chatDockFields(remote: Record<string, unknown>) {
+  return {
+    messages: Array.isArray(remote.messages) ? remote.messages : undefined,
+    accounts: Array.isArray(remote.accounts) ? remote.accounts : undefined,
+    health: remote.health && typeof remote.health === 'object' ? remote.health : undefined,
+    youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : undefined,
+    streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
+    streamInfo: remote.streamInfo && typeof remote.streamInfo === 'object' ? remote.streamInfo : undefined,
+  }
+}
+
 export function subscribeDockSse(handlers: {
   onSnapshot: (data: Record<string, unknown>) => void
   onChat?: (data: Record<string, unknown>) => void

@@ -7,7 +7,7 @@ export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gif
 export type KickModeration = { action: 'delete' | 'ban' | 'unban'; messageId?: string; userId?: string; user?: string; slug?: string }
 
 const PUSHER_URL = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
-const BROWSER_HEADERS = {
+export const BROWSER_HEADERS = {
   Accept: 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
 }
@@ -86,6 +86,55 @@ async function resolveChatroomIdWithBrowser(slug: string): Promise<number | unde
     return undefined
   } finally {
     await browser?.close()
+  }
+}
+
+function firstHttpUrl(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string') {
+      const text = value.trim()
+      if (/^https?:\/\//i.test(text) || text.startsWith('//')) return text
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      const nested = firstHttpUrl(record.url, record.src, record.profile_picture, record.profile_pic, record.profilepic, record.profilePicture, record.avatar, record.profile_thumb)
+      if (nested) return nested
+    }
+  }
+}
+
+export function kickAvatarFromSender(sender: any): string | undefined {
+  if (!sender) return
+  return firstHttpUrl(
+    sender.profile_picture,
+    sender.profile_pic,
+    sender.profilepic,
+    sender.profilePicture,
+    sender.avatar,
+    sender.profile_thumb,
+    sender.identity,
+    sender.user,
+  )
+}
+
+export function kickProfilePicFromChannel(payload: any): string | undefined {
+  return kickAvatarFromSender(payload?.user || payload?.channel?.user || payload)
+}
+
+export function parseKickChatMessage(data: any): KickChatMessage | undefined {
+  const text = String(data?.content || '').trim()
+  const emotes = data?.emotes || data?.metadata?.emotes
+  if (!text && !emotes?.length) return
+  return {
+    id: data?.id ? String(data.id) : undefined,
+    user: String(data?.sender?.username || data?.sender?.slug || 'Kick user'),
+    text: text || ' ',
+    userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
+    slug: data?.sender?.slug || data?.sender?.channel_slug ? String(data.sender.slug || data.sender.channel_slug) : undefined,
+    color: data?.sender?.identity?.color,
+    avatar: kickAvatarFromSender(data?.sender),
+    badges: data?.sender?.identity?.badges,
+    emotes,
   }
 }
 
@@ -256,21 +305,8 @@ export class KickChat {
     }
     const data = parseJson(payload.data)
     if (/ChatMessage/i.test(event)) {
-      const text = String(data?.content || '').trim()
-      const user = String(data?.sender?.username || data?.sender?.slug || 'Kick user')
-      const emotes = data?.emotes || data?.metadata?.emotes
-      if (!text && !emotes?.length) return
-      this.onMessage?.({
-        id: data?.id ? String(data.id) : undefined,
-        user,
-        text: text || ' ',
-        userId: data?.sender?.id != null ? String(data.sender.id) : undefined,
-        slug: data?.sender?.slug || data?.sender?.channel_slug ? String(data.sender.slug || data.sender.channel_slug) : undefined,
-        color: data?.sender?.identity?.color,
-        avatar: data?.sender?.profile_picture || data?.sender?.profilepic || data?.sender?.avatar,
-        badges: data?.sender?.identity?.badges,
-        emotes,
-      })
+      const message = parseKickChatMessage(data)
+      if (message) this.onMessage?.(message)
       return
     }
     const moderation = kickEventToModeration(event, data)

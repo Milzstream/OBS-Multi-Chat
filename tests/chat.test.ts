@@ -28,7 +28,7 @@ import {
   twitchEventSubConnectPlan,
   TWITCH_EVENTSUB_DEFAULT_URL,
 } from '../server/logic.js'
-import { chatroomIdFrom, kickEventToActivity, kickEventToModeration, parseJson, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, kickAvatarFromSender, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -94,6 +94,7 @@ describe('Emotes and avatars', () => {
     assert.equal(normalizeAvatar('http://cdn.example/a.png'), 'https://cdn.example/a.png')
     assert.equal(normalizeAvatar('https://yt.example/default-user.png'), undefined)
     assert.equal(normalizeAvatar('https://yt.example/photo.jpg'), undefined)
+    assert.equal(normalizeAvatar('https://files.kick.com/images/user/1/profile_image/conversion/abc-fullsize.webp'), 'https://files.kick.com/images/user/1/profile_image/conversion/abc-fullsize.webp')
   })
 
   it('detects non-English text for translation', () => {
@@ -137,6 +138,22 @@ describe('Kick chat and activity', () => {
     assert.equal(banned?.action, 'ban')
     assert.equal(banned?.userId, '9')
     assert.equal(kickEventToModeration('UserUnbannedEvent', { user: { id: 9, username: 'Ada' } })?.action, 'unban')
+  })
+
+  it('reads Kick avatars from string, nested url, or channel payloads, and leaves typical chat events without one', () => {
+    assert.equal(kickAvatarFromSender({ profile_picture: 'https://files.kick.com/a.webp' }), 'https://files.kick.com/a.webp')
+    assert.equal(kickAvatarFromSender({ identity: { color: '#fff', profile_pic: { url: 'https://files.kick.com/b.webp' } } }), 'https://files.kick.com/b.webp')
+    assert.equal(kickAvatarFromSender({ identity: { color: '#fff', badges: [] } }), undefined)
+    assert.equal(kickProfilePicFromChannel({ user: { profilepic: 'https://files.kick.com/c.webp' } }), 'https://files.kick.com/c.webp')
+    const parsed = parseKickChatMessage({
+      id: 'm1',
+      content: 'hello',
+      sender: { id: 9, username: 'Ada', slug: 'ada', identity: { color: '#0f0', badges: [] } },
+    })
+    assert.equal(parsed?.user, 'Ada')
+    assert.equal(parsed?.slug, 'ada')
+    assert.equal(parsed?.avatar, undefined)
+    assert.equal(parseKickChatMessage({ sender: { username: 'Ada' } }), undefined)
   })
 
   it('maps Kick badges and placeholder handles', () => {
