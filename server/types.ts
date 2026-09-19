@@ -38,5 +38,5 @@ export const TWITCH_TAG_MAX_LENGTH = 25
 export const YOUTUBE_QUOTA_LIMIT = 10_000
 // Kick is the stricter set: read/write chat and moderation only — no billing permissions.
 export const YOUTUBE_OAUTH_SCOPES = 'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl'
-export const TWITCH_OAUTH_SCOPES = 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read'
+export const TWITCH_OAUTH_SCOPES = 'user:read:email chat:read chat:edit user:read:chat user:write:chat channel:manage:broadcast channel:moderate moderator:manage:banned_users moderator:manage:chat_messages moderator:read:followers channel:read:subscriptions bits:read'
 export const KICK_OAUTH_SCOPES = 'user:read channel:read channel:write chat:write events:subscribe moderation:ban moderation:chat_message:manage'

@@ -119,7 +119,7 @@ const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runti
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -141,6 +141,7 @@ if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `http://localhost:${port}/oauth/callback`
 const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
 const activityWarnings = new Map<string, string>()
+const chatWarnings = new Map<string, string>()
 const streamElements = new StreamElementsClient()
 let twitchEventSubSessionId = ''
 const oauthStates = createOAuthStateStore()
@@ -223,6 +224,7 @@ const state: State = {
   health: { Twitch: emptyHealth(), Kick: emptyHealth(), YouTube: emptyHealth() },
   activity: activityStore.list(),
   activityWarnings: [],
+  chatWarnings: [],
   streamelements: { connected: false, handle: '', missing: [] },
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
@@ -442,7 +444,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   saveTokens()
   const account = state.accounts.find((item) => item.platform === platform)
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
-  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes') }
+  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes'); setChatWarning('twitch-moderate') }
   if (platform === 'Kick') void kickChat.stop()
   if (platform === 'YouTube') { setYouTubeTargets([]); void youtubeChat.stop() }
   setHealth(platform, 'ok')
@@ -1074,6 +1076,7 @@ async function subscribeTwitchEvents(sessionId: string) {
   const transport = { method: 'websocket', session_id: sessionId }
   let chatOk = false
   let activityFailed = false
+  let moderationFailed = false
   for (const spec of twitchEventSubs) {
     if (spec.activity && !settings.activityFallback) continue
     try {
@@ -1096,6 +1099,7 @@ async function subscribeTwitchEvents(sessionId: string) {
           twitchEventSubUnsupported = true
           console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
         }
+        if (spec.type === 'channel.unban' && (message.includes('403') || message.includes('401') || message.includes('scope'))) moderationFailed = true
       }
     }
   }
@@ -1109,6 +1113,10 @@ async function subscribeTwitchEvents(sessionId: string) {
     console.log('Twitch native alert backup needs a reconnect in settings (follow, sub, bits scopes).')
     setActivityWarning('twitch-scopes', 'Reconnect Twitch to enable native follow/sub/bits backup')
   } else setActivityWarning('twitch-scopes')
+  if (moderationFailed) {
+    console.log('Twitch EventSub unban needs the channel:moderate scope. Reconnect Twitch in settings to restore struck-through messages on unban.')
+    setChatWarning('twitch-moderate', 'Reconnect Twitch to grant channel:moderate so unbans restore struck-through messages')
+  } else setChatWarning('twitch-moderate')
 }
 
 function handleTwitchEventSub(payload: any) {
@@ -1535,6 +1543,15 @@ function setActivityWarning(key: string, message?: string) {
   const next = [...activityWarnings.values()]
   if (next.length === state.activityWarnings.length && next.every((item, index) => item === state.activityWarnings[index])) return
   state.activityWarnings = next
+  broadcast()
+}
+
+function setChatWarning(key: string, message?: string) {
+  if (message) chatWarnings.set(key, message)
+  else chatWarnings.delete(key)
+  const next = [...chatWarnings.values()]
+  if (next.length === state.chatWarnings.length && next.every((item, index) => item === state.chatWarnings[index])) return
+  state.chatWarnings = next
   broadcast()
 }
 
@@ -2210,6 +2227,7 @@ function ssePresence() {
     accounts: state.accounts,
     streamInfo: state.streamInfo,
     health: state.health,
+    chatWarnings: state.chatWarnings,
     youtubeQuota: state.youtubeQuota,
     streamelements: state.streamelements,
   }
