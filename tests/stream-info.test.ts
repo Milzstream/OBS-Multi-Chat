@@ -16,6 +16,7 @@ import {
   streamDetailsUnchanged,
   tagsEqual,
   twitchTagsForApi,
+  youtubeTagWriteNeeded,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
   parseAppSettings,
@@ -103,6 +104,10 @@ describe('stream tags', () => {
     assert.equal(descriptionWithTagLine('Hello chat', ['English', 'IRL']), 'Hello chat\n#English #IRL')
     assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', ['English']), 'Hello chat\n#English')
     assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', []), 'Hello chat')
+    assert.equal(youtubeTagWriteNeeded([{ description: 'Hello chat\n#English #IRL' }], ['English'], ['English', 'IRL']), false)
+    assert.equal(youtubeTagWriteNeeded([{ description: 'Hello chat\n#English' }], ['English'], ['English', 'IRL']), true)
+    assert.equal(youtubeTagWriteNeeded([], ['English'], ['English']), false)
+    assert.equal(youtubeTagWriteNeeded([], ['English'], ['IRL']), true)
   })
 })
 

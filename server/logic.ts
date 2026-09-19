@@ -944,6 +944,18 @@ export function streamDetailsUnchanged(current: StreamDetails, next: StreamDetai
     && tagsEqual(current.tags, next.tags)
 }
 
+/**
+ * Whether a YouTube description PUT would change anything. Uses the snippet we
+ * already cached from liveBroadcasts.list — never an extra read (list is 1 unit,
+ * update is 50).
+ */
+export function youtubeTagWriteNeeded(targets: { description?: string }[], persistedTags: string[] | undefined, nextTags: string[]) {
+  if (targets.length) {
+    return targets.some((target) => descriptionWithTagLine(target.description || '', nextTags) !== (target.description || ''))
+  }
+  return !tagsEqual(persistedTags, nextTags)
+}
+
 export function looksLikeTagLine(line: string) {
   const text = line.trim()
   if (!text || /[.!?]/.test(text)) return false

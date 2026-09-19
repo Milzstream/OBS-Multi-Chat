@@ -31,8 +31,8 @@ import {
   descriptionWithTagLine,
   normalizeTags,
   parseTagsFromDescription,
-  tagsEqual,
   twitchTagsForApi,
+  youtubeTagWriteNeeded,
   looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
@@ -2202,18 +2202,20 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
 }
 
 async function updateYouTubeTags(tags: string[]): Promise<{ platform: 'YouTube'; ok: boolean; error?: string; warning?: string; skipped?: boolean }> {
-  if (tagsEqual(state.streamInfo.YouTube.tags, tags) && youtubeTargets.every((target) => descriptionWithTagLine(target.description || '', tags) === (target.description || ''))) {
+  // Compare against the liveBroadcasts.list snippet already in youtubeTargets / settings. No extra GET.
+  if (!youtubeTagWriteNeeded(youtubeTargets, state.streamInfo.YouTube.tags, tags)) {
     return { platform: 'YouTube', ok: true, skipped: true }
   }
   if (!tokens.YouTube) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
   if (!youtubeTargets.length) return { platform: 'YouTube', ok: true, warning: 'YouTube is not live — tags saved for when you go live' }
+  const ready = youtubeTargets.filter((target) => target.title && target.scheduledStartTime && target.description != null)
+  if (!ready.length) return { platform: 'YouTube', ok: true, warning: 'YouTube live snippet not cached yet — tags saved locally' }
   const token = await ensureToken('YouTube')
   if (!token) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
   if (youtubeQuotaBlocked()) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
   try {
     let wrote = false
-    for (const target of youtubeTargets) {
-      if (!target.title || !target.scheduledStartTime) return { platform: 'YouTube', ok: false, error: 'YouTube live is missing title or schedule for a description update' }
+    for (const target of ready) {
       const description = descriptionWithTagLine(target.description || '', tags)
       if (description === (target.description || '')) continue
       await youtubeApi('/liveBroadcasts?part=snippet', token, {
