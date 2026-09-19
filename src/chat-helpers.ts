@@ -142,8 +142,8 @@ export function youtubeStudioUrl(channelId?: string) {
 export function streamDashboardUrl(platform: ChatPlatform, account: { handle?: string; channelId?: string }) {
   if (platform === 'Twitch') {
     const login = String(account.handle || '').replace(/^@+/, '').trim().toLowerCase()
-    if (/^[a-z0-9_]{1,25}$/.test(login) && login !== 'twitch') return `https://dashboard.twitch.tv/u/${encodeURIComponent(login)}/stream`
-    return 'https://dashboard.twitch.tv/stream'
+    if (/^[a-z0-9_]{1,25}$/.test(login) && login !== 'twitch') return `https://dashboard.twitch.tv/u/${encodeURIComponent(login)}/stream-manager`
+    return 'https://dashboard.twitch.tv/stream-manager'
   }
   if (platform === 'Kick') return 'https://kick.com/dashboard/stream'
   return youtubeStudioUrl(account.channelId)

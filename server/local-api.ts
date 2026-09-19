@@ -162,7 +162,7 @@ export function isSafeExternalUrl(raw: string) {
   const host = parsed.hostname.toLowerCase()
   const pathname = parsed.pathname
   if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
-  if (PROFILE_HOSTS.twitchDashboard.has(host)) return pathname === '/stream' || pathname === '/stream/' || /^\/u\/[A-Za-z0-9_]{1,25}\/stream\/?$/.test(pathname)
+  if (PROFILE_HOSTS.twitchDashboard.has(host)) return pathname === '/stream-manager' || pathname === '/stream-manager/' || pathname === '/stream' || pathname === '/stream/' || /^\/u\/[A-Za-z0-9_]{1,25}\/(stream-manager|stream)\/?$/.test(pathname)
   if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,50}\/?$/.test(pathname) || /^\/dashboard(\/stream)?\/?$/.test(pathname)
   if (PROFILE_HOSTS.youtube.has(host)) return /^\/channel\/UC[\w-]{20,}\/?$/.test(pathname) || /^\/@[A-Za-z0-9._-]{1,60}\/?$/.test(pathname)
   // Studio home or a channel livestreaming page — no query/hash (checked above).
