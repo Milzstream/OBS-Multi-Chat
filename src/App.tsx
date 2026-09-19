@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
-import { dockAvatarSrc, kickProfileSlug, nextOptionIndex, preferredCategory, selectedSendPlatforms, visibleChatMessages, youtubeStudioUrl } from './chat-helpers'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, visibleChatMessages, youtubeStudioUrl, type MergedCategory } from './chat-helpers'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
@@ -353,7 +353,88 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
       setOpen(false)
     }
   }
-  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}<TagEditor tags={details.tags || []} disabled={disabled} strictTwitch={platform === 'Twitch'} onChange={(tags) => onChange({ ...details, tags })} /></div>
+  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+}
+
+/** Combined Twitch+Kick category search. Shared names are one row; platform-only hits keep their icon. */
+function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChange }: { twitch: StreamDetails; kick: StreamDetails; twitchEnabled: boolean; kickEnabled: boolean; onChange: (next: { Twitch: StreamDetails; Kick: StreamDetails }) => void }) {
+  const [query, setQuery] = useState(preferredCategory(twitch.category, kick.category))
+  const [options, setOptions] = useState<MergedCategory[]>([])
+  const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
+  const typingRef = useRef(false)
+  const pickedRef = useRef(false)
+  const visible = options.slice(0, 8)
+  useEffect(() => {
+    if (!typingRef.current) setQuery(preferredCategory(twitch.category, kick.category))
+  }, [twitch.category, kick.category])
+  useEffect(() => {
+    if ((!twitchEnabled && !kickEnabled) || query.trim().length < 2) { setOptions([]); setOpen(false); return }
+    if (pickedRef.current) { pickedRef.current = false; setOpen(false); return }
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      const load = async (platform: StreamPlatform) => {
+        const response = await fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(query.trim())}`, { signal: controller.signal })
+        if (!response.ok) return [] as CategoryOption[]
+        return response.json() as Promise<CategoryOption[]>
+      }
+      void Promise.all([
+        twitchEnabled ? load('Twitch') : Promise.resolve([] as CategoryOption[]),
+        kickEnabled ? load('Kick') : Promise.resolve([] as CategoryOption[]),
+      ]).then(([twitchHits, kickHits]) => {
+        const merged = mergeCategoryResults(twitchHits, kickHits)
+        setOptions(merged)
+        setOpen(typingRef.current && merged.length > 0)
+      }).catch((error: { name?: string }) => { if (error.name !== 'AbortError') { setOptions([]); setOpen(false) } })
+    }, 200)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [query, twitchEnabled, kickEnabled])
+  useEffect(() => { setHighlight(0) }, [query, open])
+  const pick = (option: MergedCategory) => {
+    pickedRef.current = true
+    typingRef.current = false
+    setOpen(false)
+    setOptions([])
+    setQuery(option.name)
+    onChange({
+      Twitch: option.twitchId ? { ...twitch, category: option.name, categoryId: option.twitchId } : twitch,
+      Kick: option.kickId ? { ...kick, category: option.name, categoryId: option.kickId } : kick,
+    })
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!open || visible.length === 0) return
+    if (event.key === 'ArrowDown') { event.preventDefault(); setHighlight((current) => nextOptionIndex(current, visible.length, 1)); return }
+    if (event.key === 'ArrowUp') { event.preventDefault(); setHighlight((current) => nextOptionIndex(current, visible.length, -1)); return }
+    if (event.key === 'Enter') {
+      const option = visible[highlight]
+      if (!option) return
+      event.preventDefault()
+      pick(option)
+      return
+    }
+    if (event.key === 'Escape') { event.preventDefault(); setOpen(false) }
+  }
+  return (
+    <div className="stream-fields">
+      <div className="stream-fields-heading"><strong>Category</strong><small>Twitch + Kick</small></div>
+      <input disabled={!twitchEnabled && !kickEnabled} autoComplete="off" value={query} onChange={(event) => { pickedRef.current = false; typingRef.current = true; setQuery(event.target.value) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder="Category / game" aria-expanded={open} aria-autocomplete="list" />
+      {open && visible.length > 0 && (
+        <ul className="category-options" role="listbox">
+          {visible.map((option, index) => (
+            <li key={`${option.twitchId || ''}-${option.kickId || ''}-${option.name}`}>
+              <button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>
+                <span>{option.name}</span>
+                <span className="category-option-platforms">
+                  {option.twitchId ? <span style={{ color: platformMeta.Twitch.color }}>{platformIcon('Twitch', 12)}</span> : null}
+                  {option.kickId ? <span style={{ color: platformMeta.Kick.color }}>{platformIcon('Kick', 12)}</span> : null}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 /** Chip input for stream tags. Twitch chips must be letters/numbers; Kick/YouTube are looser. Enter or comma commits. */
@@ -434,6 +515,11 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   const [draftDetails, setDraftDetails] = useState(details)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
+  const [splitCategories, setSplitCategories] = useState(() => {
+    const twitch = details.Twitch.category.trim().toLowerCase()
+    const kick = details.Kick.category.trim().toLowerCase()
+    return Boolean(twitch && kick && twitch !== kick)
+  })
   const editedRef = useRef(false)
   useEffect(() => {
     if (!status) return
@@ -467,10 +553,39 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
     setSaving(false)
   }
   const youtubeConnected = Boolean(connections.find((connection) => connection.platform === 'YouTube')?.connected)
+  const twitchConnected = Boolean(connections.find((connection) => connection.platform === 'Twitch')?.connected)
+  const kickConnected = Boolean(connections.find((connection) => connection.platform === 'Kick')?.connected)
+  const tagsDisabled = !twitchConnected && !kickConnected && !youtubeConnected
   const openYouTubeStudio = () => {
     void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: youtubeStudioUrl() }) }).catch((error) => console.error('Failed to open YouTube Studio:', error))
   }
-  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories and tags. YouTube tags go on the last line of the live description.</p><input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)}<div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta.YouTube.color }}>{platformIcon('YouTube', 13)}</span><strong>YouTube tags</strong><small>{youtubeConnected ? 'Last description line' : 'Connect YouTube'}</small></div><TagEditor tags={draftDetails.YouTube.tags || []} disabled={!youtubeConnected} onChange={(tags) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, YouTube: { ...current.YouTube, tags } })) }} /></div><button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button><button type="button" className="studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
+  const setTags = (tags: string[]) => {
+    editedRef.current = true
+    setDraftDetails((current) => ({
+      Twitch: { ...current.Twitch, tags },
+      Kick: { ...current.Kick, tags },
+      YouTube: { ...current.YouTube, tags },
+    }))
+  }
+  return (
+    <aside className="controls-popover">
+      <div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div>
+      <div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div>
+      <p className="settings-note">One title, one category search, one tag list. Expand categories if Twitch and Kick need different games. YouTube tags are the last line of the live description.</p>
+      <input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />
+      {splitCategories
+        ? (['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)
+        : <UnifiedCategoryField twitch={draftDetails.Twitch} kick={draftDetails.Kick} twitchEnabled={twitchConnected} kickEnabled={kickConnected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, ...next })) }} />}
+      <button type="button" className="category-split" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
+      <div className="stream-fields">
+        <div className="stream-fields-heading"><strong>Tags</strong><small>Shared · max 10</small></div>
+        <TagEditor tags={sharedStreamTags(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} strictTwitch onChange={setTags} />
+      </div>
+      <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
+      <button type="button" className="studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>
+      {status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}
+    </aside>
+  )
 }
 
 export default App

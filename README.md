@@ -43,7 +43,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets the shared Twitch + Kick title, categories, and tags. Type a category and use **Down** / **Up** / **Enter** to pick from the list. Tags are per platform (Twitch allows letters/numbers only, max 10). YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected. YouTube tags are written as the **last line of the live description** and leave the rest of the blurb alone.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags are shared (letters/numbers, max 10) and YouTube gets the same chips as the **last line of the live description**. YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected.
 
 ## API setup
 

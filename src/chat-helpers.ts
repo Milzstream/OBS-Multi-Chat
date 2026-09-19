@@ -53,6 +53,52 @@ export function nextOptionIndex(current: number, length: number, delta: number) 
   return Math.max(0, Math.min(length - 1, current + delta))
 }
 
+export type CategoryHit = { id: string; name: string }
+export type MergedCategory = { name: string; twitchId?: string; kickId?: string }
+
+/** Fold Twitch and Kick category hits by case-insensitive name. Shared rows first. */
+export function mergeCategoryResults(twitch: CategoryHit[], kick: CategoryHit[]): MergedCategory[] {
+  const byName = new Map<string, MergedCategory>()
+  const key = (name: string) => name.trim().toLowerCase()
+  for (const item of twitch) {
+    const id = key(item.name)
+    if (!id) continue
+    const current = byName.get(id)
+    if (current) current.twitchId = item.id
+    else byName.set(id, { name: item.name, twitchId: item.id })
+  }
+  for (const item of kick) {
+    const id = key(item.name)
+    if (!id) continue
+    const current = byName.get(id)
+    if (current) {
+      current.kickId = item.id
+      if (item.name.length > current.name.length) current.name = item.name
+    } else byName.set(id, { name: item.name, kickId: item.id })
+  }
+  return [...byName.values()].sort((left, right) => {
+    const leftBoth = Number(Boolean(left.twitchId && left.kickId))
+    const rightBoth = Number(Boolean(right.twitchId && right.kickId))
+    if (leftBoth !== rightBoth) return rightBoth - leftBoth
+    return left.name.localeCompare(right.name)
+  })
+}
+
+export function sharedStreamTags(...lists: Array<string[] | undefined>) {
+  const seen = new Set<string>()
+  const tags: string[] = []
+  for (const list of lists) {
+    for (const tag of list || []) {
+      const key = tag.trim().toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      tags.push(tag.trim())
+      if (tags.length >= 10) return tags
+    }
+  }
+  return tags
+}
+
 /** YouTube Studio live page when we have a channel id; otherwise the Studio home. */
 export function youtubeStudioUrl(channelId?: string) {
   const id = String(channelId || '').trim()
