@@ -69,6 +69,10 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .tag-chip-platforms i { width: 5px; height: 5px; border-radius: 50%; }
 .tag-chip:disabled { opacity: .5; }
 .tag-editor input { min-width: 90px; flex: 1; border: 0; outline: 0; background: transparent; color: #ecf2ef; font-size: 11px; }
+.tag-dest { display: inline-flex; gap: 2px; margin-left: auto; }
+.tag-dest button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; background: transparent; opacity: .35; }
+.tag-dest button.active { opacity: 1; background: #293331; }
+.tag-dest button:disabled { opacity: .2; }
 .studio-link { display: block; margin-top: 8px; }
 .stream-fields-heading small { display: none; }
 .stream-fields-heading .tag-note { display: inline; margin-left: auto; color: #7e8a8c; font: 10px 'DM Sans', sans-serif; letter-spacing: 0; }

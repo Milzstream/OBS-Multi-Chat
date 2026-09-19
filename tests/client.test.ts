@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
@@ -76,6 +76,14 @@ describe('chat dock helpers', () => {
     assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick', 'YouTube'])
     assert.deepEqual(tagPlatforms('first-play'), ['Kick', 'YouTube'])
     assert.deepEqual(tagPlatforms('こんにちは'), ['YouTube'])
+  })
+
+  it('builds per-tag platform assignments from the three lists', () => {
+    const assigned = tagAssignments(['English'], ['English', 'first-play'], ['English', 'こんにちは'])
+    const english = assigned.find((item) => item.tag === 'English')
+    assert.deepEqual(english?.platforms, ['Twitch', 'Kick', 'YouTube'])
+    assert.deepEqual(assigned.find((item) => item.tag === 'first-play')?.platforms, ['Kick'])
+    assert.deepEqual(assigned.find((item) => item.tag === 'こんにちは')?.platforms, ['YouTube'])
   })
 })
 

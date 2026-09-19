@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory } from './chat-helpers'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory, type TagAssignment, type TagPlatform } from './chat-helpers'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
@@ -445,30 +445,39 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
   )
 }
 
-/** Chip input for stream tags. Dots show Twitch / Kick / YouTube; YouTube-only chips are red. */
-function TagEditor({ tags, disabled, onChange }: { tags: string[]; disabled: boolean; onChange: (tags: string[]) => void }) {
+/** Chip input for stream tags. Destination toggles pick Twitch / Kick / YouTube for the next chip. */
+function TagEditor({ tags, disabled, connected, onChange }: { tags: TagAssignment[]; disabled: boolean; connected: Record<TagPlatform, boolean>; onChange: (tags: TagAssignment[]) => void }) {
   const [draft, setDraft] = useState('')
+  const [dest, setDest] = useState<Record<TagPlatform, boolean>>({ Twitch: true, Kick: true, YouTube: true })
+  const selected = (['Twitch', 'Kick', 'YouTube'] as TagPlatform[]).filter((platform) => dest[platform] && connected[platform])
   const commit = (raw: string) => {
     const pieces = raw.split(/[\s,]+/).map((item) => item.trim().replace(/^#+/, '')).filter(Boolean)
     if (!pieces.length) return
-    const next = [...tags]
+    const next = tags.map((item) => ({ tag: item.tag, platforms: [...item.platforms] }))
     for (const piece of pieces) {
-      if (next.some((tag) => tag.toLowerCase() === piece.toLowerCase())) continue
+      const allowed = tagPlatforms(piece)
+      const platforms = (selected.length ? allowed.filter((platform) => selected.includes(platform)) : allowed)
+      const use = platforms.length ? platforms : allowed
+      if (!use.length) continue
+      const existing = next.find((item) => item.tag.toLowerCase() === piece.toLowerCase())
+      if (existing) {
+        existing.platforms = [...new Set([...existing.platforms, ...use])]
+        continue
+      }
       if (next.length >= 10) break
-      next.push(piece)
+      next.push({ tag: piece, platforms: use })
     }
     setDraft('')
     onChange(next)
   }
   return (
     <div className="tag-editor">
-      {tags.map((tag) => {
-        const platforms = tagPlatforms(tag)
-        const youtubeOnly = platforms.length === 1 && platforms[0] === 'YouTube'
+      {tags.map((item) => {
+        const youtubeOnly = item.platforms.length === 1 && item.platforms[0] === 'YouTube'
         return (
-          <button type="button" key={tag} className={youtubeOnly ? 'tag-chip youtube-only' : 'tag-chip'} disabled={disabled} onClick={() => onChange(tags.filter((item) => item !== tag))} title={platforms.join(' + ')}>
-            <span className="tag-chip-platforms">{platforms.map((platform) => <i key={platform} style={{ background: platformMeta[platform].color }} />)}</span>
-            {tag} ×
+          <button type="button" key={item.tag} className={youtubeOnly ? 'tag-chip youtube-only' : 'tag-chip'} disabled={disabled} onClick={() => onChange(tags.filter((entry) => entry.tag !== item.tag))} title={item.platforms.join(' + ')}>
+            <span className="tag-chip-platforms">{item.platforms.map((platform) => <i key={platform} style={{ background: platformMeta[platform].color }} />)}</span>
+            {item.tag} ×
           </button>
         )
       })}
@@ -478,6 +487,13 @@ function TagEditor({ tags, disabled, onChange }: { tags: string[]; disabled: boo
           if (event.key === 'Backspace' && !draft && tags.length) onChange(tags.slice(0, -1))
         }} onBlur={() => { if (draft.trim()) commit(draft) }} placeholder="Tags" />
       ) : null}
+      <div className="tag-dest">
+        {(['Twitch', 'Kick', 'YouTube'] as TagPlatform[]).map((platform) => (
+          <button type="button" key={platform} className={dest[platform] ? 'active' : undefined} disabled={disabled || !connected[platform]} style={{ color: platformMeta[platform].color }} aria-pressed={dest[platform]} aria-label={`${platform} tags`} title={platform} onClick={() => setDest((current) => ({ ...current, [platform]: !current[platform] }))}>
+            {platformIcon(platform, 12)}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -573,12 +589,12 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   const openYouTubeStudio = () => {
     void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: youtubeStudioUrl() }) }).catch((error) => console.error('Failed to open YouTube Studio:', error))
   }
-  const setTags = (tags: string[]) => {
+  const setTags = (tags: TagAssignment[]) => {
     editedRef.current = true
     setDraftDetails((current) => ({
-      Twitch: { ...current.Twitch, tags },
-      Kick: { ...current.Kick, tags },
-      YouTube: { ...current.YouTube, tags },
+      Twitch: { ...current.Twitch, tags: tags.filter((item) => item.platforms.includes('Twitch')).map((item) => item.tag) },
+      Kick: { ...current.Kick, tags: tags.filter((item) => item.platforms.includes('Kick')).map((item) => item.tag) },
+      YouTube: { ...current.YouTube, tags: tags.filter((item) => item.platforms.includes('YouTube')).map((item) => item.tag) },
     }))
   }
   return (
@@ -595,7 +611,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       <button type="button" className="controls-link" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
       <div className="stream-fields">
         <div className="stream-fields-heading"><strong>Tags</strong><small className="tag-note">YouTube adds #</small></div>
-        <TagEditor tags={sharedStreamTags(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} onChange={setTags} />
+        <TagEditor tags={tagAssignments(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} connected={{ Twitch: twitchConnected, Kick: kickConnected, YouTube: youtubeConnected }} onChange={setTags} />
       </div>
       <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
       <button type="button" className="controls-link studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>

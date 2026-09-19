@@ -95,6 +95,27 @@ export function tagPlatforms(tag: string): TagPlatform[] {
   return ['YouTube']
 }
 
+export type TagAssignment = { tag: string; platforms: TagPlatform[] }
+
+export function tagAssignments(twitch?: string[], kick?: string[], youtube?: string[]): TagAssignment[] {
+  const map = new Map<string, TagAssignment>()
+  const add = (list: string[] | undefined, platform: TagPlatform) => {
+    for (const raw of list || []) {
+      const tag = raw.trim().replace(/^#+/, '')
+      if (!tag) continue
+      const key = tag.toLowerCase()
+      const current = map.get(key)
+      if (current) {
+        if (!current.platforms.includes(platform)) current.platforms.push(platform)
+      } else map.set(key, { tag, platforms: [platform] })
+    }
+  }
+  add(twitch, 'Twitch')
+  add(kick, 'Kick')
+  add(youtube, 'YouTube')
+  return [...map.values()]
+}
+
 export function sharedStreamTags(...lists: Array<string[] | undefined>) {
   const seen = new Set<string>()
   const tags: string[] = []
