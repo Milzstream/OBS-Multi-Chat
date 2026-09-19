@@ -47,9 +47,9 @@ describe('chat dock helpers', () => {
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {
-    assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com')
+    assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com/livestreaming')
     assert.equal(youtubeStudioUrl('UC1234567890123456789012'), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
-    assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com')
+    assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com/livestreaming')
   })
 
   it('merges Twitch and Kick category hits by name and keeps platform ids', () => {
@@ -73,17 +73,16 @@ describe('chat dock helpers', () => {
   })
 
   it('marks which platforms can take a tag', () => {
-    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick', 'YouTube'])
-    assert.deepEqual(tagPlatforms('first-play'), ['Kick', 'YouTube'])
-    assert.deepEqual(tagPlatforms('こんにちは'), ['YouTube'])
+    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick'])
+    assert.deepEqual(tagPlatforms('first-play'), ['Kick'])
+    assert.deepEqual(tagPlatforms('こんにちは'), [])
   })
 
   it('builds per-tag platform assignments from the three lists', () => {
-    const assigned = tagAssignments(['English'], ['English', 'first-play'], ['English', 'こんにちは'])
+    const assigned = tagAssignments(['English'], ['English', 'first-play'])
     const english = assigned.find((item) => item.tag === 'English')
-    assert.deepEqual(english?.platforms, ['Twitch', 'Kick', 'YouTube'])
+    assert.deepEqual(english?.platforms, ['Twitch', 'Kick'])
     assert.deepEqual(assigned.find((item) => item.tag === 'first-play')?.platforms, ['Kick'])
-    assert.deepEqual(assigned.find((item) => item.tag === 'こんにちは')?.platforms, ['YouTube'])
   })
 })
 

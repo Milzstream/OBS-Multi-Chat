@@ -28,12 +28,9 @@ import {
   normalizeChatHandle,
   kickBadges,
   kickStreamDetails,
-  descriptionWithTagLine,
   normalizeTags,
-  parseTagsFromDescription,
   twitchTagsForApi,
   kickTagsForApi,
-  youtubeTagWriteNeeded,
   looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
@@ -364,22 +361,17 @@ app.post('/api/stream-info/:platform', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results: [result] })
 })
 app.post('/api/stream-info', async (request, response) => {
-  const { title, Twitch, Kick, YouTube } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails; YouTube?: StreamDetails }
+  const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
   const sharedTitle = String(title || '').trim()
   const detailsByPlatform = {
     Twitch: { category: '', ...Twitch, title: sharedTitle, tags: normalizeTags(Twitch?.tags) || [] },
     Kick: { category: '', ...Kick, title: sharedTitle, tags: normalizeTags(Kick?.tags) || [] },
   }
-  const youtubeTags = normalizeTags(YouTube?.tags) || []
-  const results = await Promise.all([
-    ...(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])),
-    updateYouTubeTags(youtubeTags),
-  ])
+  const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
   let changed = false
   for (const result of results) {
     if (!result.ok || ('skipped' in result && result.skipped)) continue
-    if (result.platform === 'YouTube') state.streamInfo.YouTube = { title: '', category: '', tags: youtubeTags }
-    else state.streamInfo[result.platform] = detailsByPlatform[result.platform]
+    state.streamInfo[result.platform] = detailsByPlatform[result.platform]
     changed = true
   }
   if (changed) persistStreamInfo()
@@ -1751,12 +1743,8 @@ async function pollYouTubeStatus(token: Token) {
     }
   }).filter((item: YouTubeChatTarget) => item.videoId)
   setYouTubeTargets(next)
-  const youtubeTagSource = next.find((target: YouTubeChatTarget) => parseTagsFromDescription(target.description || '').length)?.description
-  if (youtubeTagSource != null) {
-    state.streamInfo.YouTube = applyLiveStreamDetails(state.streamInfo.YouTube, { title: '', category: '', tags: parseTagsFromDescription(youtubeTagSource) })
-  }
   restorePlatformConnection('YouTube')
-  Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
+  Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, channelId: token.channelId, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) {
     const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
     console.log(`YouTube lives: ${liveItems.length} chat(s)${labels.length ? ` (${labels.join(', ')})` : ''}`)
@@ -2200,38 +2188,6 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     return { platform, ok: response.ok, error: response.ok ? undefined : await response.text() }
   }
   return { platform, ok: false, error: 'Unsupported stream platform' }
-}
-
-async function updateYouTubeTags(tags: string[]): Promise<{ platform: 'YouTube'; ok: boolean; error?: string; warning?: string; skipped?: boolean }> {
-  // Compare against the liveBroadcasts.list snippet already in youtubeTargets / settings. No extra GET.
-  if (!youtubeTagWriteNeeded(youtubeTargets, state.streamInfo.YouTube.tags, tags)) {
-    return { platform: 'YouTube', ok: true, skipped: true }
-  }
-  if (!tokens.YouTube) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
-  if (!youtubeTargets.length) return { platform: 'YouTube', ok: true, warning: 'YouTube is not live — tags saved for when you go live' }
-  const ready = youtubeTargets.filter((target) => target.title && target.scheduledStartTime && target.description != null)
-  if (!ready.length) return { platform: 'YouTube', ok: true, warning: 'YouTube live snippet not cached yet — tags saved locally' }
-  const token = await ensureToken('YouTube')
-  if (!token) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
-  if (youtubeQuotaBlocked()) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
-  try {
-    let wrote = false
-    for (const target of ready) {
-      const description = descriptionWithTagLine(target.description || '', tags)
-      if (description === (target.description || '')) continue
-      await youtubeApi('/liveBroadcasts?part=snippet', token, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: target.videoId, snippet: { title: target.title, scheduledStartTime: target.scheduledStartTime, description } }),
-      })
-      target.description = description
-      wrote = true
-    }
-    return wrote ? { platform: 'YouTube', ok: true } : { platform: 'YouTube', ok: true, skipped: true }
-  } catch (error) {
-    if (noteYouTubeQuota(error)) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
-    return { platform: 'YouTube', ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
 }
 
 function writeSse(client: express.Response, chunk: string) {

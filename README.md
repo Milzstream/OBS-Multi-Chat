@@ -43,7 +43,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick / YouTube next to the field before adding a chip to send it to some or all of them. Dots on each chip show who gets it; YouTube-only chips are red. Invalid Twitch chips (hyphens, etc.) skip Twitch even if it is selected. YouTube writes them as `#tag` on the **last line of the live description**. YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling.
 
 ## API setup
 
@@ -221,7 +221,7 @@ The executable serves the docks at `http://localhost:4173` and binds to loopback
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category/tags to one platform
-- `POST /api/stream-info` - apply shared title plus per-platform category and tags (YouTube tags update the live description last line)
+- `POST /api/stream-info` - apply shared title plus per-platform Twitch/Kick category and tags
 - `POST /api/disconnect/:platform` - remove a saved platform connection
 - `POST /api/live-check/:platform` - run that platform's live check immediately (does not change the slower automatic YouTube interval)
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
