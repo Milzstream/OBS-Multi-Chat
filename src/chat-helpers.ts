@@ -84,6 +84,17 @@ export function mergeCategoryResults(twitch: CategoryHit[], kick: CategoryHit[])
   })
 }
 
+export type TagPlatform = 'Twitch' | 'Kick' | 'YouTube'
+
+/** Twitch: letters/numbers 1–25. Kick: those plus - _. YouTube: any leftover hashtag. No catalog/autocomplete APIs. */
+export function tagPlatforms(tag: string): TagPlatform[] {
+  const value = tag.trim().replace(/^#+/, '')
+  if (!value) return []
+  if (/^[A-Za-z0-9]{1,25}$/.test(value)) return ['Twitch', 'Kick', 'YouTube']
+  if (/^[A-Za-z0-9_-]{1,40}$/.test(value)) return ['Kick', 'YouTube']
+  return ['YouTube']
+}
+
 export function sharedStreamTags(...lists: Array<string[] | undefined>) {
   const seen = new Set<string>()
   const tags: string[] = []

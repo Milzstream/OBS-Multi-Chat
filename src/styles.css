@@ -63,11 +63,15 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .controls-link:disabled { opacity: .35; text-decoration: none; cursor: not-allowed; }
 .controls-link:not(:disabled):hover { color: #7ae0c7; }
 .tag-editor { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 28px; padding: 4px; border: 1px solid #3b4749; border-radius: 4px; background: #151a1c; }
-.tag-chip { padding: 2px 6px; border-radius: 3px; background: #293331; color: #dce6e2; font-size: 10px; }
+.tag-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 3px; background: #293331; color: #dce6e2; font-size: 10px; }
+.tag-chip.youtube-only { border: 1px solid #ff5b62; color: #ff8b7a; background: rgba(255,91,98,.12); }
+.tag-chip-platforms { display: inline-flex; gap: 2px; }
+.tag-chip-platforms i { width: 5px; height: 5px; border-radius: 50%; }
 .tag-chip:disabled { opacity: .5; }
 .tag-editor input { min-width: 90px; flex: 1; border: 0; outline: 0; background: transparent; color: #ecf2ef; font-size: 11px; }
 .studio-link { display: block; margin-top: 8px; }
 .stream-fields-heading small { display: none; }
+.stream-fields-heading .tag-note { display: inline; margin-left: auto; color: #7e8a8c; font: 10px 'DM Sans', sans-serif; letter-spacing: 0; }
 .update-stream { width: 100%; margin-top: 12px; }
 .update-stream:disabled { opacity: .55; cursor: not-allowed; }
 .stream-status { margin-top: 8px; padding: 7px 8px; border-radius: 4px; font-size: 11px; line-height: 1.35; text-align: center; }

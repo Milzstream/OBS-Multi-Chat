@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
@@ -70,6 +70,12 @@ describe('chat dock helpers', () => {
 
   it('unions tag lists without duplicates', () => {
     assert.deepEqual(sharedStreamTags(['English'], ['english', 'IRL'], ['IRL']), ['English', 'IRL'])
+  })
+
+  it('marks which platforms can take a tag', () => {
+    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick', 'YouTube'])
+    assert.deepEqual(tagPlatforms('first-play'), ['Kick', 'YouTube'])
+    assert.deepEqual(tagPlatforms('こんにちは'), ['YouTube'])
   })
 })
 

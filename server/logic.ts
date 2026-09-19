@@ -927,7 +927,17 @@ export function isTwitchTag(value: string) {
 /** Twitch rejects spaces and specials; empty array clears channel tags. */
 export function twitchTagsForApi(tags?: string[]) {
   if (!tags) return
-  return tags.map((tag) => tag.trim()).filter(isTwitchTag).slice(0, STREAM_TAG_MAX)
+  return tags.map((tag) => tag.trim().replace(/^#+/, '')).filter(isTwitchTag).slice(0, STREAM_TAG_MAX)
+}
+
+export function isKickTag(value: string) {
+  return /^[A-Za-z0-9_-]{1,40}$/.test(value)
+}
+
+/** Kick is freeform strings with no catalog; keep chips Kick can actually store. */
+export function kickTagsForApi(tags?: string[]) {
+  if (!tags) return
+  return (normalizeTags(tags) || []).filter(isKickTag)
 }
 
 export function tagsEqual(left?: string[], right?: string[]) {

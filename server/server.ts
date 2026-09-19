@@ -32,6 +32,7 @@ import {
   normalizeTags,
   parseTagsFromDescription,
   twitchTagsForApi,
+  kickTagsForApi,
   youtubeTagWriteNeeded,
   looksLikePlaceholder,
   mergeIncomingChat,
@@ -2194,7 +2195,7 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     }
   }
   if (platform === 'Kick') {
-    const tags = normalizeTags(info.tags)
+    const tags = kickTagsForApi(info.tags)
     const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}), ...(tags ? { custom_tags: tags } : {}) }) })
     return { platform, ok: response.ok, error: response.ok ? undefined : await response.text() }
   }

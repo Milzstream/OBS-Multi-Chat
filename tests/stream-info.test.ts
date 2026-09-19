@@ -7,7 +7,9 @@ import {
   isMoreSpecificCategory,
   isPermanentTokenRefreshError,
   isTokenRefreshHealthMessage,
+  isKickTag,
   isTwitchTag,
+  kickTagsForApi,
   kickStreamDetails,
   loadStreamInfo,
   looksLikeTagLine,
@@ -85,6 +87,8 @@ describe('stream tags', () => {
     assert.equal(isTwitchTag('First Play'), false)
     assert.deepEqual(twitchTagsForApi(['English', 'nope!', 'FirstPlaythrough']), ['English', 'FirstPlaythrough'])
     assert.deepEqual(twitchTagsForApi([]), [])
+    assert.equal(isKickTag('first-play'), true)
+    assert.deepEqual(kickTagsForApi(['English', 'first-play', 'こんにちは']), ['English', 'first-play'])
     assert.equal(tagsEqual(['English', 'IRL'], ['english', 'IRL']), true)
     assert.equal(streamDetailsUnchanged(
       { title: 'A', category: 'IRL', categoryId: '1', tags: ['English'] },

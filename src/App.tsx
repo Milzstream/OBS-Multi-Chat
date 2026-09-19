@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, visibleChatMessages, youtubeStudioUrl, type MergedCategory } from './chat-helpers'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory } from './chat-helpers'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
@@ -445,15 +445,14 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
   )
 }
 
-/** Chip input for stream tags. Twitch chips must be letters/numbers; Kick/YouTube are looser. Enter or comma commits. */
-function TagEditor({ tags, disabled, strictTwitch, onChange }: { tags: string[]; disabled: boolean; strictTwitch?: boolean; onChange: (tags: string[]) => void }) {
+/** Chip input for stream tags. Dots show Twitch / Kick / YouTube; YouTube-only chips are red. */
+function TagEditor({ tags, disabled, onChange }: { tags: string[]; disabled: boolean; onChange: (tags: string[]) => void }) {
   const [draft, setDraft] = useState('')
   const commit = (raw: string) => {
     const pieces = raw.split(/[\s,]+/).map((item) => item.trim().replace(/^#+/, '')).filter(Boolean)
     if (!pieces.length) return
     const next = [...tags]
     for (const piece of pieces) {
-      if (strictTwitch && !/^[A-Za-z0-9]{1,25}$/.test(piece)) continue
       if (next.some((tag) => tag.toLowerCase() === piece.toLowerCase())) continue
       if (next.length >= 10) break
       next.push(piece)
@@ -463,14 +462,21 @@ function TagEditor({ tags, disabled, strictTwitch, onChange }: { tags: string[];
   }
   return (
     <div className="tag-editor">
-      {tags.map((tag) => (
-        <button type="button" key={tag} className="tag-chip" disabled={disabled} onClick={() => onChange(tags.filter((item) => item !== tag))}>{tag} ×</button>
-      ))}
+      {tags.map((tag) => {
+        const platforms = tagPlatforms(tag)
+        const youtubeOnly = platforms.length === 1 && platforms[0] === 'YouTube'
+        return (
+          <button type="button" key={tag} className={youtubeOnly ? 'tag-chip youtube-only' : 'tag-chip'} disabled={disabled} onClick={() => onChange(tags.filter((item) => item !== tag))} title={platforms.join(' + ')}>
+            <span className="tag-chip-platforms">{platforms.map((platform) => <i key={platform} style={{ background: platformMeta[platform].color }} />)}</span>
+            {tag} ×
+          </button>
+        )
+      })}
       {tags.length < 10 ? (
         <input disabled={disabled} value={draft} autoComplete="off" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
           if (event.key === 'Enter' || event.key === ',') { event.preventDefault(); commit(draft) }
           if (event.key === 'Backspace' && !draft && tags.length) onChange(tags.slice(0, -1))
-        }} onBlur={() => { if (draft.trim()) commit(draft) }} placeholder={strictTwitch ? 'Tags · letters/numbers' : 'Tags'} />
+        }} onBlur={() => { if (draft.trim()) commit(draft) }} placeholder="Tags" />
       ) : null}
     </div>
   )
@@ -588,8 +594,8 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
         : <UnifiedCategoryField twitch={draftDetails.Twitch} kick={draftDetails.Kick} twitchEnabled={twitchConnected} kickEnabled={kickConnected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, ...next })) }} />}
       <button type="button" className="controls-link" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
       <div className="stream-fields">
-        <div className="stream-fields-heading"><strong>Tags</strong></div>
-        <TagEditor tags={sharedStreamTags(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} strictTwitch onChange={setTags} />
+        <div className="stream-fields-heading"><strong>Tags</strong><small className="tag-note">YouTube adds #</small></div>
+        <TagEditor tags={sharedStreamTags(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} onChange={setTags} />
       </div>
       <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
       <button type="button" className="controls-link studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>
