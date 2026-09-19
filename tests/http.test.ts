@@ -87,6 +87,8 @@ describe('profile URL allowlist and Windows open args', () => {
     assert.equal(isSafeExternalUrl('https://www.youtube.com/channel/UC1234567890123456789012'), true)
     assert.equal(isSafeExternalUrl('https://studio.youtube.com/'), true)
     assert.equal(isSafeExternalUrl('https://studio.youtube.com/livestreaming'), true)
+    assert.equal(isSafeExternalUrl('https://dashboard.twitch.tv/u/ada/stream'), true)
+    assert.equal(isSafeExternalUrl('https://kick.com/dashboard/stream'), true)
     assert.equal(isSafeExternalUrl('https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming'), true)
     assert.equal(isSafeExternalUrl('https://studio.youtube.com/video/dQw4w9wgGcQ/edit'), false)
     assert.equal(isSafeExternalUrl('http://www.twitch.tv/Ada'), false)

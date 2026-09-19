@@ -131,9 +131,20 @@ export function sharedStreamTags(...lists: Array<string[] | undefined>) {
   return tags
 }
 
-/** YouTube Studio live page when we have a channel id; otherwise the Studio home. */
+/** YouTube Studio livestreaming dashboard when we have a channel id. */
 export function youtubeStudioUrl(channelId?: string) {
   const id = String(channelId || '').trim()
   if (/^UC[\w-]{20,}$/i.test(id)) return `https://studio.youtube.com/channel/${encodeURIComponent(id)}/livestreaming`
   return 'https://studio.youtube.com/livestreaming'
+}
+
+/** Creator live dashboards opened from the chat title. */
+export function streamDashboardUrl(platform: ChatPlatform, account: { handle?: string; channelId?: string }) {
+  if (platform === 'Twitch') {
+    const login = String(account.handle || '').replace(/^@+/, '').trim().toLowerCase()
+    if (/^[a-z0-9_]{1,25}$/.test(login) && login !== 'twitch') return `https://dashboard.twitch.tv/u/${encodeURIComponent(login)}/stream`
+    return 'https://dashboard.twitch.tv/stream'
+  }
+  if (platform === 'Kick') return 'https://kick.com/dashboard/stream'
+  return youtubeStudioUrl(account.channelId)
 }

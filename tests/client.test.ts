@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
@@ -50,6 +50,9 @@ describe('chat dock helpers', () => {
     assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com/livestreaming')
     assert.equal(youtubeStudioUrl('UC1234567890123456789012'), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
     assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com/livestreaming')
+    assert.equal(streamDashboardUrl('Twitch', { handle: 'Ada' }), 'https://dashboard.twitch.tv/u/ada/stream')
+    assert.equal(streamDashboardUrl('Kick', { handle: 'ada' }), 'https://kick.com/dashboard/stream')
+    assert.equal(streamDashboardUrl('YouTube', { channelId: 'UC1234567890123456789012' }), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
   })
 
   it('merges Twitch and Kick category hits by name and keeps platform ids', () => {
