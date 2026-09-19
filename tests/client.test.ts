@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from '../src/chat-helpers.ts'
-import { chatDockFields, sseSeqIsGap } from '../src/sse.ts'
+import { dockAvatarSrc, kickProfileSlug, nextOptionIndex, preferredCategory, selectedSendPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
 describe('chat dock helpers', () => {
@@ -38,6 +38,19 @@ describe('chat dock helpers', () => {
     assert.deepEqual(selectedSendPlatforms(['Twitch', 'Kick', 'YouTube'], ['YouTube']), ['Twitch', 'Kick'])
     assert.deepEqual(selectedSendPlatforms([]), [])
   })
+
+  it('clamps category-list highlight and does not wrap', () => {
+    assert.equal(nextOptionIndex(0, 8, 1), 1)
+    assert.equal(nextOptionIndex(7, 8, 1), 7)
+    assert.equal(nextOptionIndex(0, 8, -1), 0)
+    assert.equal(nextOptionIndex(3, 0, 1), 0)
+  })
+
+  it('builds YouTube Studio URLs without inventing a channel path', () => {
+    assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com')
+    assert.equal(youtubeStudioUrl('UC1234567890123456789012'), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
+    assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com')
+  })
 })
 
 describe('SSE seq gaps', () => {
@@ -64,6 +77,22 @@ describe('SSE seq gaps', () => {
     })
     assert.equal(snapshot.messages?.length, 1)
     assert.equal(snapshot.accounts?.length, 1)
+  })
+
+  it('does not treat an activity slice as StreamElements disconnecting', () => {
+    const slice = activityDockFields({
+      seq: 9,
+      activity: [{ id: 'a1' }],
+      activityWarnings: ['Reconnect Twitch'],
+    })
+    assert.equal(slice.activity?.length, 1)
+    assert.deepEqual(slice.activityWarnings, ['Reconnect Twitch'])
+    assert.equal(slice.streamelements, undefined)
+    const snapshot = activityDockFields({
+      seq: 1,
+      streamelements: { connected: true, handle: 'Ada', missing: [] },
+    })
+    assert.equal(snapshot.streamelements && (snapshot.streamelements as { connected: boolean }).connected, true)
   })
 })
 

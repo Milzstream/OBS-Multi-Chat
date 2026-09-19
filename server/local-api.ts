@@ -33,6 +33,7 @@ const PROFILE_HOSTS = {
   twitch: new Set(['www.twitch.tv', 'twitch.tv']),
   kick: new Set(['kick.com', 'www.kick.com']),
   youtube: new Set(['www.youtube.com', 'youtube.com']),
+  studio: new Set(['studio.youtube.com']),
 }
 
 /** True for the loopback aliases a local process would resolve to. */
@@ -147,7 +148,7 @@ export function corsOriginDelegate(options: Pick<LocalApiOptions, 'port' | 'lanE
   }
 }
 
-/** Allowlist external profile links: https-only, no auth/port/query, and a path shape per known profile host. */
+/** Allowlist external links the docks may open: https-only, no auth/port/query, and a path shape per known host (profiles + YouTube Studio). */
 export function isSafeExternalUrl(raw: string) {
   if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
   if (/[\u0000-\u0020\u007f<>"'\\|`]/.test(raw)) return false
@@ -162,6 +163,8 @@ export function isSafeExternalUrl(raw: string) {
   if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
   if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,50}\/?$/.test(pathname)
   if (PROFILE_HOSTS.youtube.has(host)) return /^\/channel\/UC[\w-]{20,}\/?$/.test(pathname) || /^\/@[A-Za-z0-9._-]{1,60}\/?$/.test(pathname)
+  // Studio home or a channel livestreaming page — no query/hash (checked above).
+  if (PROFILE_HOSTS.studio.has(host)) return pathname === '/' || /^\/channel\/UC[\w-]{20,}(\/livestreaming)?\/?$/.test(pathname)
   return false
 }
 
@@ -180,7 +183,7 @@ export function isSafeMediaUrl(raw: string) {
 export function parseOpenUrl(raw: unknown): { ok: true; url: string } | { ok: false; error: string } {
   const url = String(raw || '').trim()
   if (!url) return { ok: false, error: 'url is required' }
-  if (!isSafeExternalUrl(url)) return { ok: false, error: 'url is not an allowed profile link' }
+  if (!isSafeExternalUrl(url)) return { ok: false, error: 'url is not an allowed link' }
   return { ok: true, url }
 }
 

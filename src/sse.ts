@@ -31,6 +31,25 @@ export function chatDockFields(remote: Record<string, unknown>) {
   }
 }
 
+/**
+ * Pull only keys the activity dock understands. Omitted fields stay
+ * `undefined` so a chat/activity/settings slice cannot look like
+ * “StreamElements disconnected” (#55).
+ */
+export function activityDockFields(remote: Record<string, unknown>) {
+  return {
+    activity: Array.isArray(remote.activity) ? remote.activity : undefined,
+    activityWarnings: Array.isArray(remote.activityWarnings) ? remote.activityWarnings : undefined,
+    streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
+    accounts: Array.isArray(remote.accounts) ? remote.accounts : undefined,
+    activityFallback: typeof remote.activityFallback === 'boolean' ? remote.activityFallback : undefined,
+    ignoreMissingJwt: typeof remote.ignoreMissingJwt === 'boolean' ? remote.ignoreMissingJwt : undefined,
+    dropOldAlerts: typeof remote.dropOldAlerts === 'boolean' ? remote.dropOldAlerts : undefined,
+    translateChat: typeof remote.translateChat === 'boolean' ? remote.translateChat : undefined,
+    translateError: typeof remote.translateError === 'string' ? remote.translateError : undefined,
+  }
+}
+
 export function subscribeDockSse(handlers: {
   onSnapshot: (data: Record<string, unknown>) => void
   onChat?: (data: Record<string, unknown>) => void
