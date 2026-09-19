@@ -930,6 +930,20 @@ export function twitchTagsForApi(tags?: string[]) {
   return tags.map((tag) => tag.trim()).filter(isTwitchTag).slice(0, STREAM_TAG_MAX)
 }
 
+export function tagsEqual(left?: string[], right?: string[]) {
+  const a = normalizeTags(left) || []
+  const b = normalizeTags(right) || []
+  if (a.length !== b.length) return false
+  return a.every((tag, index) => tag.toLowerCase() === b[index].toLowerCase())
+}
+
+export function streamDetailsUnchanged(current: StreamDetails, next: StreamDetails) {
+  return current.title === next.title
+    && current.category === next.category
+    && (current.categoryId || '') === (next.categoryId || '')
+    && tagsEqual(current.tags, next.tags)
+}
+
 export function looksLikeTagLine(line: string) {
   const text = line.trim()
   if (!text || /[.!?]/.test(text)) return false

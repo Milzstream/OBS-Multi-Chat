@@ -13,6 +13,8 @@ import {
   looksLikeTagLine,
   normalizeTags,
   parseTagsFromDescription,
+  streamDetailsUnchanged,
+  tagsEqual,
   twitchTagsForApi,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
@@ -82,6 +84,15 @@ describe('stream tags', () => {
     assert.equal(isTwitchTag('First Play'), false)
     assert.deepEqual(twitchTagsForApi(['English', 'nope!', 'FirstPlaythrough']), ['English', 'FirstPlaythrough'])
     assert.deepEqual(twitchTagsForApi([]), [])
+    assert.equal(tagsEqual(['English', 'IRL'], ['english', 'IRL']), true)
+    assert.equal(streamDetailsUnchanged(
+      { title: 'A', category: 'IRL', categoryId: '1', tags: ['English'] },
+      { title: 'A', category: 'IRL', categoryId: '1', tags: ['english'] },
+    ), true)
+    assert.equal(streamDetailsUnchanged(
+      { title: 'A', category: 'IRL', tags: ['English'] },
+      { title: 'B', category: 'IRL', tags: ['English'] },
+    ), false)
   })
 
   it('treats the last description line as tags without rewriting the blurb', () => {

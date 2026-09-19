@@ -31,6 +31,7 @@ import {
   descriptionWithTagLine,
   normalizeTags,
   parseTagsFromDescription,
+  tagsEqual,
   twitchTagsForApi,
   looksLikePlaceholder,
   mergeIncomingChat,
@@ -375,7 +376,7 @@ app.post('/api/stream-info', async (request, response) => {
   ])
   let changed = false
   for (const result of results) {
-    if (!result.ok) continue
+    if (!result.ok || ('skipped' in result && result.skipped)) continue
     if (result.platform === 'YouTube') state.streamInfo.YouTube = { title: '', category: '', tags: youtubeTags }
     else state.streamInfo[result.platform] = detailsByPlatform[result.platform]
     changed = true
@@ -2200,24 +2201,30 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
   return { platform, ok: false, error: 'Unsupported stream platform' }
 }
 
-async function updateYouTubeTags(tags: string[]): Promise<{ platform: 'YouTube'; ok: boolean; error?: string }> {
-  if (!tokens.YouTube) return { platform: 'YouTube', ok: false, error: 'Not connected' }
-  if (!youtubeTargets.length) return { platform: 'YouTube', ok: true }
+async function updateYouTubeTags(tags: string[]): Promise<{ platform: 'YouTube'; ok: boolean; error?: string; warning?: string; skipped?: boolean }> {
+  if (tagsEqual(state.streamInfo.YouTube.tags, tags) && youtubeTargets.every((target) => descriptionWithTagLine(target.description || '', tags) === (target.description || ''))) {
+    return { platform: 'YouTube', ok: true, skipped: true }
+  }
+  if (!tokens.YouTube) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
+  if (!youtubeTargets.length) return { platform: 'YouTube', ok: true, warning: 'YouTube is not live — tags saved for when you go live' }
   const token = await ensureToken('YouTube')
-  if (!token) return { platform: 'YouTube', ok: false, error: 'Not connected' }
+  if (!token) return { platform: 'YouTube', ok: true, warning: 'YouTube is not connected — tags saved locally' }
   if (youtubeQuotaBlocked()) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
   try {
+    let wrote = false
     for (const target of youtubeTargets) {
       if (!target.title || !target.scheduledStartTime) return { platform: 'YouTube', ok: false, error: 'YouTube live is missing title or schedule for a description update' }
       const description = descriptionWithTagLine(target.description || '', tags)
+      if (description === (target.description || '')) continue
       await youtubeApi('/liveBroadcasts?part=snippet', token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: target.videoId, snippet: { title: target.title, scheduledStartTime: target.scheduledStartTime, description } }),
       })
       target.description = description
+      wrote = true
     }
-    return { platform: 'YouTube', ok: true }
+    return wrote ? { platform: 'YouTube', ok: true } : { platform: 'YouTube', ok: true, skipped: true }
   } catch (error) {
     if (noteYouTubeQuota(error)) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
     return { platform: 'YouTube', ok: false, error: error instanceof Error ? error.message : String(error) }

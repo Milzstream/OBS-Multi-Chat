@@ -215,13 +215,21 @@ function App() {
     setStreamDetails(details)
     try {
       const response = await fetch('/api/stream-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, Twitch: details.Twitch, Kick: details.Kick, YouTube: details.YouTube }) })
-      const result = await response.json() as { results: { platform: 'Twitch' | 'Kick' | 'YouTube'; ok: boolean; error?: string }[] }
-      const ok = (result.results || []).filter((item) => item.ok).map((item) => item.platform)
-      const failed = (result.results || []).filter((item) => !item.ok)
-      const text = failed.length
-        ? (ok.length ? `Updated ${ok.join(' + ')}. ${failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')}` : failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | '))
-        : `Title, categories, and tags set on ${ok.join(' + ') || 'Twitch + Kick + YouTube'}`
-      return { ok: failed.length === 0, message: text }
+      const result = await response.json() as { results: { platform: 'Twitch' | 'Kick' | 'YouTube'; ok: boolean; error?: string; warning?: string; skipped?: boolean }[] }
+      const rows = result.results || []
+      const failed = rows.filter((item) => !item.ok)
+      const warnings = rows.filter((item) => item.warning)
+      const updated = rows.filter((item) => item.ok && !item.skipped && !item.warning).map((item) => item.platform)
+      if (failed.length) {
+        const prefix = updated.length ? `Updated ${updated.join(' + ')}. ` : ''
+        return { ok: false, message: `${prefix}${failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')}` }
+      }
+      if (!updated.length && !warnings.length) return { ok: true, message: 'Nothing to update' }
+      if (warnings.length) {
+        const prefix = updated.length ? `Updated ${updated.join(' + ')}. ` : ''
+        return { ok: true, warn: true, message: `${prefix}${warnings.map((item) => item.warning).join(' ')}` }
+      }
+      return { ok: true, message: `Updated ${updated.join(' + ')}` }
     } catch {
       return { ok: false, message: 'Could not set title, categories, and tags' }
     }
@@ -510,11 +518,11 @@ async function resolveCategory(platform: StreamPlatform, query: string) {
   }
 }
 
-function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; message: string }>; onClose: () => void }) {
+function StreamControls({ title, details, connections, onSave, onClose }: { title: string; details: StreamDetailsByPlatform; connections: Connection[]; onSave: (title: string, details: StreamDetailsByPlatform) => Promise<{ ok: boolean; warn?: boolean; message: string }>; onClose: () => void }) {
   const [draftTitle, setDraftTitle] = useState(title || details.Twitch.title || details.Kick.title)
   const [draftDetails, setDraftDetails] = useState(details)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null)
+  const [status, setStatus] = useState<{ text: string; kind: 'ok' | 'warn' | 'error' } | null>(null)
   const [splitCategories, setSplitCategories] = useState(() => {
     const twitch = details.Twitch.category.trim().toLowerCase()
     const kick = details.Kick.category.trim().toLowerCase()
@@ -548,7 +556,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   const save = async () => {
     setSaving(true)
     const result = await onSave(draftTitle, draftDetails)
-    setStatus({ text: result.message, ok: result.ok })
+    setStatus({ text: result.message, kind: result.ok ? (result.warn ? 'warn' : 'ok') : 'error' })
     if (result.ok) editedRef.current = false
     setSaving(false)
   }
@@ -585,7 +593,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       </div>
       <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
       <button type="button" className="controls-link studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>
-      {status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}
+      {status ? <div className={`stream-status ${status.kind}`}>{status.text}</div> : null}
     </aside>
   )
 }
