@@ -43,7 +43,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click the stream title in the chat dock header to open a live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). If more than one account is connected, a small menu lets you pick.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile (or the stream title) to open that live dashboard: Twitch Stream Manager, Kick stream dashboard, or YouTube Studio. If you click the title and more than one account is connected, a small menu lets you pick.
 
 ## API setup
 
