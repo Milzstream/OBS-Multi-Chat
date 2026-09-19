@@ -77,7 +77,7 @@ describe('stream details', () => {
 
 describe('stream tags', () => {
   it('normalizes, caps, and filters Twitch tags', () => {
-    assert.deepEqual(normalizeTags([' English ', 'english', 'IRL', '']), ['English', 'IRL'])
+    assert.deepEqual(normalizeTags([' English ', 'english', '#IRL', '']), ['English', 'IRL'])
     assert.equal(isTwitchTag('English'), true)
     assert.equal(isTwitchTag('First Play'), false)
     assert.deepEqual(twitchTagsForApi(['English', 'nope!', 'FirstPlaythrough']), ['English', 'FirstPlaythrough'])
@@ -88,10 +88,10 @@ describe('stream tags', () => {
     assert.equal(looksLikeTagLine('English IRL'), true)
     assert.equal(looksLikeTagLine('Hello chat'), false)
     assert.equal(looksLikeTagLine('Come hang out tonight!'), false)
-    assert.deepEqual(parseTagsFromDescription('Hello chat\nEnglish IRL'), ['English', 'IRL'])
-    assert.equal(descriptionWithTagLine('Hello chat', ['English', 'IRL']), 'Hello chat\nEnglish IRL')
-    assert.equal(descriptionWithTagLine('Hello chat\nOldTag', ['English']), 'Hello chat\nEnglish')
-    assert.equal(descriptionWithTagLine('Hello chat\nOldTag', []), 'Hello chat')
+    assert.deepEqual(parseTagsFromDescription('Hello chat\n#English #IRL'), ['English', 'IRL'])
+    assert.equal(descriptionWithTagLine('Hello chat', ['English', 'IRL']), 'Hello chat\n#English #IRL')
+    assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', ['English']), 'Hello chat\n#English')
+    assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', []), 'Hello chat')
   })
 })
 

@@ -909,7 +909,7 @@ export function normalizeTags(value: unknown): string[] | undefined {
   const seen = new Set<string>()
   const tags: string[] = []
   for (const item of value) {
-    const tag = String(item || '').trim()
+    const tag = String(item || '').trim().replace(/^#+/, '')
     if (!tag) continue
     const key = tag.toLowerCase()
     if (seen.has(key)) continue
@@ -941,6 +941,11 @@ export function looksLikeTagLine(line: string) {
   return true
 }
 
+/** YouTube discovery wants a hash on the description line; chips and Twitch/Kick stay bare. */
+export function youtubeTagLine(tags: string[]) {
+  return (normalizeTags(tags) || []).map((tag) => `#${tag}`).join(' ')
+}
+
 export function parseTagsFromDescription(description: string) {
   const lines = String(description || '').replace(/\r\n/g, '\n').split('\n')
   const last = lines.at(-1) || ''
@@ -951,7 +956,7 @@ export function parseTagsFromDescription(description: string) {
 /** Replace or append the last description line; never rewrite the blurb above it. */
 export function descriptionWithTagLine(description: string, tags: string[]) {
   const body = String(description || '').replace(/\r\n/g, '\n')
-  const tagLine = (normalizeTags(tags) || []).join(' ')
+  const tagLine = youtubeTagLine(tags)
   const lines = body.split('\n')
   const lastIsTags = looksLikeTagLine(lines.at(-1) || '')
   if (lastIsTags) {

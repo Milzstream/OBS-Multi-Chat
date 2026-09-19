@@ -89,10 +89,11 @@ export function sharedStreamTags(...lists: Array<string[] | undefined>) {
   const tags: string[] = []
   for (const list of lists) {
     for (const tag of list || []) {
-      const key = tag.trim().toLowerCase()
+      const value = tag.trim().replace(/^#+/, '')
+      const key = value.toLowerCase()
       if (!key || seen.has(key)) continue
       seen.add(key)
-      tags.push(tag.trim())
+      tags.push(value)
       if (tags.length >= 10) return tags
     }
   }

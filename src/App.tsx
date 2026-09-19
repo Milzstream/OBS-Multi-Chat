@@ -441,7 +441,7 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
 function TagEditor({ tags, disabled, strictTwitch, onChange }: { tags: string[]; disabled: boolean; strictTwitch?: boolean; onChange: (tags: string[]) => void }) {
   const [draft, setDraft] = useState('')
   const commit = (raw: string) => {
-    const pieces = raw.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean)
+    const pieces = raw.split(/[\s,]+/).map((item) => item.trim().replace(/^#+/, '')).filter(Boolean)
     if (!pieces.length) return
     const next = [...tags]
     for (const piece of pieces) {
