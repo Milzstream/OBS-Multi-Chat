@@ -13,7 +13,7 @@ import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
-import { checkForUpdates } from './check-update.js'
+import { checkForUpdates, getCurrentVersion } from './check-update.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
@@ -508,7 +508,7 @@ httpServer.listen(port, bindHost, () => {
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
-  console.log('Relay Chat Dock')
+  console.log(`Relay Chat Dock v${getCurrentVersion()}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)
