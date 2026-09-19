@@ -13,7 +13,7 @@ import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
-import { checkForUpdates } from './check-update.js'
+import { checkForUpdates, getCurrentVersion } from './check-update.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
@@ -28,6 +28,9 @@ import {
   normalizeChatHandle,
   kickBadges,
   kickStreamDetails,
+  normalizeTags,
+  twitchTagsForApi,
+  kickTagsForApi,
   looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
@@ -84,6 +87,7 @@ import type {
   Platform,
   StreamDetails,
   StreamElementsStatus,
+  StreamInfoMap,
   StreamPlatform,
   Token,
   TokenPlatform,
@@ -115,7 +119,7 @@ const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runti
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
 
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -137,6 +141,7 @@ if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `http://localhost:${port}/oauth/callback`
 const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
 const activityWarnings = new Map<string, string>()
+const chatWarnings = new Map<string, string>()
 const streamElements = new StreamElementsClient()
 let twitchEventSubSessionId = ''
 const oauthStates = createOAuthStateStore()
@@ -213,11 +218,13 @@ const state: State = {
   streamInfo: {
     Twitch: { ...settings.streamInfo.Twitch },
     Kick: { ...settings.streamInfo.Kick },
+    YouTube: { ...settings.streamInfo.YouTube },
   },
   messages: loadChat(),
   health: { Twitch: emptyHealth(), Kick: emptyHealth(), YouTube: emptyHealth() },
   activity: activityStore.list(),
   activityWarnings: [],
+  chatWarnings: [],
   streamelements: { connected: false, handle: '', missing: [] },
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
@@ -344,8 +351,9 @@ app.get('/api/categories/:platform', async (request, response) => {
 app.post('/api/stream-info/:platform', async (request, response) => {
   const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
   if (!platform) return response.status(404).json({ error: 'Unknown stream platform' })
-  const { title, category, categoryId } = request.body as Partial<StreamDetails>
-  const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}) }
+  const { title, category, categoryId, tags } = request.body as Partial<StreamDetails>
+  const normalizedTags = normalizeTags(tags)
+  const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}), ...(normalizedTags ? { tags: normalizedTags } : {}) }
   const result = await updateStreamInfo(platform, details)
   if (result.ok) {
     state.streamInfo[platform] = details
@@ -356,11 +364,15 @@ app.post('/api/stream-info/:platform', async (request, response) => {
 })
 app.post('/api/stream-info', async (request, response) => {
   const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
-  const detailsByPlatform = { Twitch: { category: '', ...Twitch, title: String(title || '').trim() }, Kick: { category: '', ...Kick, title: String(title || '').trim() } }
+  const sharedTitle = String(title || '').trim()
+  const detailsByPlatform = {
+    Twitch: { category: '', ...Twitch, title: sharedTitle, tags: normalizeTags(Twitch?.tags) || [] },
+    Kick: { category: '', ...Kick, title: sharedTitle, tags: normalizeTags(Kick?.tags) || [] },
+  }
   const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
   let changed = false
   for (const result of results) {
-    if (!result.ok) continue
+    if (!result.ok || ('skipped' in result && result.skipped)) continue
     state.streamInfo[result.platform] = detailsByPlatform[result.platform]
     changed = true
   }
@@ -432,7 +444,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   saveTokens()
   const account = state.accounts.find((item) => item.platform === platform)
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
-  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes') }
+  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes'); setChatWarning('twitch-moderate') }
   if (platform === 'Kick') void kickChat.stop()
   if (platform === 'YouTube') { setYouTubeTargets([]); void youtubeChat.stop() }
   setHealth(platform, 'ok')
@@ -496,7 +508,7 @@ httpServer.listen(port, bindHost, () => {
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
-  console.log('Relay Chat Dock')
+  console.log(`Relay Chat Dock v${getCurrentVersion()}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)
@@ -881,8 +893,8 @@ function dropEndedYouTubeChat(chatId: string) {
   if (next.length !== youtubeTargets.length) setYouTubeTargets(next)
 }
 
-async function youtubeApi(endpoint: string, token: Token): Promise<any> {
-  const result = await youtubeRequest(endpoint, token)
+async function youtubeApi(endpoint: string, token: Token, options: RequestInit = {}): Promise<any> {
+  const result = await youtubeRequest(endpoint, token, options)
   if (result.status === 403 && /quotaExceeded/i.test(result.text)) throw new Error('YouTube API 403 quota exceeded')
   if (!result.ok) throw new Error(`YouTube API ${result.status}: ${youtubeApiErrorReason(result.text)}`)
   return result.text ? JSON.parse(result.text) : {}
@@ -1064,6 +1076,7 @@ async function subscribeTwitchEvents(sessionId: string) {
   const transport = { method: 'websocket', session_id: sessionId }
   let chatOk = false
   let activityFailed = false
+  let moderationFailed = false
   for (const spec of twitchEventSubs) {
     if (spec.activity && !settings.activityFallback) continue
     try {
@@ -1086,6 +1099,7 @@ async function subscribeTwitchEvents(sessionId: string) {
           twitchEventSubUnsupported = true
           console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
         }
+        if (spec.type === 'channel.unban' && (message.includes('403') || message.includes('401') || message.includes('scope'))) moderationFailed = true
       }
     }
   }
@@ -1099,6 +1113,10 @@ async function subscribeTwitchEvents(sessionId: string) {
     console.log('Twitch native alert backup needs a reconnect in settings (follow, sub, bits scopes).')
     setActivityWarning('twitch-scopes', 'Reconnect Twitch to enable native follow/sub/bits backup')
   } else setActivityWarning('twitch-scopes')
+  if (moderationFailed) {
+    console.log('Twitch EventSub unban needs the channel:moderate scope. Reconnect Twitch in settings to restore struck-through messages on unban.')
+    setChatWarning('twitch-moderate', 'Reconnect Twitch to grant channel:moderate so unbans restore struck-through messages')
+  } else setChatWarning('twitch-moderate')
 }
 
 function handleTwitchEventSub(payload: any) {
@@ -1528,6 +1546,15 @@ function setActivityWarning(key: string, message?: string) {
   broadcast()
 }
 
+function setChatWarning(key: string, message?: string) {
+  if (message) chatWarnings.set(key, message)
+  else chatWarnings.delete(key)
+  const next = [...chatWarnings.values()]
+  if (next.length === state.chatWarnings.length && next.every((item, index) => item === state.chatWarnings[index])) return
+  state.chatWarnings = next
+  broadcast()
+}
+
 async function startStreamElements(backfill = false) {
   const slots = streamElementsJwtSlots()
   const missing = slots.filter((slot) => !slot.jwt).map((slot) => slot.platform)
@@ -1634,11 +1661,11 @@ async function pollTwitch() {
   restorePlatformConnection('Twitch')
   Object.assign(account, { live: Boolean(stream), viewers: stream?.viewer_count || 0, handle: token.user || account.handle })
   if (stream) {
-    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined })
+    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined, tags: normalizeTags(stream.tags) })
   } else {
     const channel = await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token)
     const info = channel.data?.[0]
-    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined })
+    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined, tags: normalizeTags(info.tags) })
   }
   void ensureTwitchBadges()
   ensureTwitchChat()
@@ -1728,11 +1755,13 @@ async function pollYouTubeStatus(token: Token) {
       videoId,
       liveChatId: chatId ? String(chatId) : undefined,
       title: String(item.snippet?.title || existing?.title || ''),
+      description: item.snippet?.description != null ? String(item.snippet.description) : existing?.description,
+      scheduledStartTime: item.snippet?.scheduledStartTime ? String(item.snippet.scheduledStartTime) : existing?.scheduledStartTime,
     }
   }).filter((item: YouTubeChatTarget) => item.videoId)
   setYouTubeTargets(next)
   restorePlatformConnection('YouTube')
-  Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
+  Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, channelId: token.channelId, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) {
     const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
     console.log(`YouTube lives: ${liveItems.length} chat(s)${labels.length ? ` (${labels.join(', ')})` : ''}`)
@@ -2161,7 +2190,8 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     const token = await ensureToken('Twitch')
     if (!token) return { platform, ok: false, error: 'Not connected' }
     const games = info.categoryId ? { data: [{ id: info.categoryId }] } : await twitchApi(`/helix/games?name=${encodeURIComponent(info.category)}`, token)
-    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}) }
+    const tags = twitchTagsForApi(info.tags)
+    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}), ...(tags ? { tags } : {}) }
     try {
       await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       return { platform, ok: true }
@@ -2170,7 +2200,8 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     }
   }
   if (platform === 'Kick') {
-    const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}) }) })
+    const tags = kickTagsForApi(info.tags)
+    const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}), ...(tags ? { custom_tags: tags } : {}) }) })
     return { platform, ok: response.ok, error: response.ok ? undefined : await response.text() }
   }
   return { platform, ok: false, error: 'Unsupported stream platform' }
@@ -2196,6 +2227,7 @@ function ssePresence() {
     accounts: state.accounts,
     streamInfo: state.streamInfo,
     health: state.health,
+    chatWarnings: state.chatWarnings,
     youtubeQuota: state.youtubeQuota,
     streamelements: state.streamelements,
   }
@@ -2256,7 +2288,7 @@ function loadTokens(): Partial<Record<TokenPlatform, Token>> {
 }
 
 function persistStreamInfo() {
-  const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick } }
+  const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick }, YouTube: { ...state.streamInfo.YouTube } }
   if (JSON.stringify(settings.streamInfo) === JSON.stringify(next)) return
   settings.streamInfo = next
   saveSettings()

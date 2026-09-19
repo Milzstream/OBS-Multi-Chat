@@ -65,7 +65,7 @@ export function versionManifestPaths(input: { packaged: boolean; cwd: string; ex
   ]
 }
 
-function getCurrentVersion(): string {
+export function getCurrentVersion(): string {
   const packaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
   const pathsToTry = versionManifestPaths({ packaged, cwd: process.cwd(), execPath: process.execPath })
 

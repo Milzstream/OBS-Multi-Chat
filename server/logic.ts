@@ -15,7 +15,10 @@ import {
   type Health,
   type MessagePart,
   type Platform,
+  STREAM_TAG_MAX,
+  TWITCH_TAG_MAX_LENGTH,
   type StreamDetails,
+  type StreamInfoMap,
   type StreamPlatform,
   type YoutubeQuota,
 } from './types.js'
@@ -32,7 +35,9 @@ export {
   CHAT_MAX_HARD,
   CHAT_MAX_MIN,
   KICK_OAUTH_SCOPES,
+  STREAM_TAG_MAX,
   TWITCH_OAUTH_SCOPES,
+  TWITCH_TAG_MAX_LENGTH,
   YOUTUBE_OAUTH_SCOPES,
   YOUTUBE_QUOTA_LIMIT,
 } from './types.js'
@@ -101,7 +106,11 @@ export function youtubeQuotaCost(endpoint: string, method = 'GET') {
   }
 
   // 3. Other standard list endpoints
-  if (path.startsWith('liveBroadcasts') || path.startsWith('channels') || path.startsWith('videos')) {
+  if (path.startsWith('liveBroadcasts')) {
+    if (verb === 'PUT' || verb === 'POST') return 50
+    return 1
+  }
+  if (path.startsWith('channels') || path.startsWith('videos')) {
     return 1
   }
 
@@ -122,7 +131,11 @@ export function youtubeQuotaLabel(endpoint: string, method = 'GET') {
     return 'liveChatMessages.list'
   }
 
-  if (path.startsWith('liveBroadcasts')) return 'liveBroadcasts.list'
+  if (path.startsWith('liveBroadcasts')) {
+    if (verb === 'PUT') return 'liveBroadcasts.update'
+    if (verb === 'POST') return 'liveBroadcasts.insert'
+    return 'liveBroadcasts.list'
+  }
   if (path.startsWith('channels')) return 'channels.list'
   if (path.startsWith('videos')) return 'videos.list'
   
@@ -886,8 +899,114 @@ export function emptyStreamDetails(): StreamDetails {
   return { title: '', category: '' }
 }
 
-export function emptyStreamInfo(): Record<StreamPlatform, StreamDetails> {
-  return { Twitch: emptyStreamDetails(), Kick: emptyStreamDetails() }
+export function emptyStreamInfo(): StreamInfoMap {
+  return { Twitch: emptyStreamDetails(), Kick: emptyStreamDetails(), YouTube: emptyStreamDetails() }
+}
+
+/** Dedupe, trim, cap at 10. `undefined` means the payload omitted tags. */
+export function normalizeTags(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const seen = new Set<string>()
+  const tags: string[] = []
+  for (const item of value) {
+    const tag = String(item || '').trim().replace(/^#+/, '')
+    if (!tag) continue
+    const key = tag.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= STREAM_TAG_MAX) break
+  }
+  return tags
+}
+
+export function isTwitchTag(value: string) {
+  return new RegExp(`^[A-Za-z0-9]{1,${TWITCH_TAG_MAX_LENGTH}}$`).test(value)
+}
+
+/** Twitch rejects spaces and specials; empty array clears channel tags. */
+export function twitchTagsForApi(tags?: string[]) {
+  if (!tags) return
+  return tags.map((tag) => tag.trim().replace(/^#+/, '')).filter(isTwitchTag).slice(0, STREAM_TAG_MAX)
+}
+
+export function isKickTag(value: string) {
+  return /^[A-Za-z0-9_-]{1,40}$/.test(value)
+}
+
+/** Kick is freeform strings with no catalog; keep chips Kick can actually store. */
+export function kickTagsForApi(tags?: string[]) {
+  if (!tags) return
+  return (normalizeTags(tags) || []).filter(isKickTag)
+}
+
+export function tagsEqual(left?: string[], right?: string[]) {
+  const a = normalizeTags(left) || []
+  const b = normalizeTags(right) || []
+  if (a.length !== b.length) return false
+  return a.every((tag, index) => tag.toLowerCase() === b[index].toLowerCase())
+}
+
+export function streamDetailsUnchanged(current: StreamDetails, next: StreamDetails) {
+  return current.title === next.title
+    && current.category === next.category
+    && (current.categoryId || '') === (next.categoryId || '')
+    && tagsEqual(current.tags, next.tags)
+}
+
+/**
+ * Whether a YouTube description PUT would change anything. Uses the snippet we
+ * already cached from liveBroadcasts.list — never an extra read (list is 1 unit,
+ * update is 50).
+ */
+export function youtubeTagWriteNeeded(targets: { description?: string }[], persistedTags: string[] | undefined, nextTags: string[]) {
+  if (targets.length) {
+    return targets.some((target) => descriptionWithTagLine(target.description || '', nextTags) !== (target.description || ''))
+  }
+  return !tagsEqual(persistedTags, nextTags)
+}
+
+export function looksLikeTagLine(line: string) {
+  const text = line.trim()
+  if (!text || /[.!?]/.test(text)) return false
+  const tokens = text.split(/[\s,]+/).filter(Boolean)
+  if (!tokens.length || tokens.length > STREAM_TAG_MAX) return false
+  if (!tokens.every((token) => /^#?[A-Za-z0-9_]{1,40}$/.test(token))) return false
+  // Lowercase words like "chat" / "tonight" are prose, not a tag line.
+  if (tokens.some((token) => !token.startsWith('#') && token === token.toLowerCase() && token.length > 3)) return false
+  return true
+}
+
+/** YouTube discovery wants a hash on the description line; chips and Twitch/Kick stay bare. */
+export function youtubeTagLine(tags: string[]) {
+  return (normalizeTags(tags) || []).map((tag) => `#${tag}`).join(' ')
+}
+
+export function parseTagsFromDescription(description: string) {
+  const lines = String(description || '').replace(/\r\n/g, '\n').split('\n')
+  const last = lines.at(-1) || ''
+  if (!looksLikeTagLine(last)) return []
+  return normalizeTags(last.split(/[\s,]+/)) || []
+}
+
+/** Replace or append the last description line; never rewrite the blurb above it. */
+export function descriptionWithTagLine(description: string, tags: string[]) {
+  const body = String(description || '').replace(/\r\n/g, '\n')
+  const tagLine = youtubeTagLine(tags)
+  const lines = body.split('\n')
+  const lastIsTags = looksLikeTagLine(lines.at(-1) || '')
+  if (lastIsTags) {
+    if (!tagLine) {
+      lines.pop()
+      while (lines.length && lines.at(-1) === '') lines.pop()
+      return lines.join('\n')
+    }
+    lines[lines.length - 1] = tagLine
+    return lines.join('\n')
+  }
+  if (!tagLine) return body
+  if (!body.trim()) return tagLine
+  return `${body.replace(/\n+$/, '')}\n${tagLine}`
 }
 
 export function normalizeStreamDetails(value: unknown): StreamDetails {
@@ -896,12 +1015,13 @@ export function normalizeStreamDetails(value: unknown): StreamDetails {
   const title = String(item.title || '').trim()
   const category = String(item.category || '').trim()
   const categoryId = item.categoryId != null && String(item.categoryId).trim() ? String(item.categoryId).trim() : undefined
-  return { title, category, ...(categoryId ? { categoryId } : {}) }
+  const tags = normalizeTags(item.tags)
+  return { title, category, ...(categoryId ? { categoryId } : {}), ...(tags ? { tags } : {}) }
 }
 
-export function loadStreamInfo(value: unknown): Record<StreamPlatform, StreamDetails> {
+export function loadStreamInfo(value: unknown): StreamInfoMap {
   const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return { Twitch: normalizeStreamDetails(raw.Twitch), Kick: normalizeStreamDetails(raw.Kick) }
+  return { Twitch: normalizeStreamDetails(raw.Twitch), Kick: normalizeStreamDetails(raw.Kick), YouTube: normalizeStreamDetails(raw.YouTube) }
 }
 
 export function isMoreSpecificCategory(specific: string, general: string) {
@@ -916,11 +1036,13 @@ export function applyLiveStreamDetails(current: StreamDetails, live: StreamDetai
   const title = (live.title || current.title || '').trim()
   const liveCategory = (live.category || '').trim()
   const currentCategory = (current.category || '').trim()
-  if (!liveCategory) return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
+  const tags = live.tags !== undefined ? live.tags : current.tags
+  const withTags = (details: StreamDetails): StreamDetails => tags !== undefined ? { ...details, tags } : details
+  if (!liveCategory) return withTags({ title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) })
   if (isMoreSpecificCategory(currentCategory, liveCategory)) {
-    return { title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) }
+    return withTags({ title, category: currentCategory, ...(current.categoryId ? { categoryId: current.categoryId } : {}) })
   }
-  return { title, category: liveCategory, ...(live.categoryId ? { categoryId: live.categoryId } : current.categoryId ? { categoryId: current.categoryId } : {}) }
+  return withTags({ title, category: liveCategory, ...(live.categoryId ? { categoryId: live.categoryId } : current.categoryId ? { categoryId: current.categoryId } : {}) })
 }
 
 export function kickStreamDetails(channel: any): StreamDetails {
@@ -937,7 +1059,8 @@ export function kickStreamDetails(channel: any): StreamDetails {
     if (!name) continue
     if (!best || isMoreSpecificCategory(name, best.name) || (id && !best.id && name.toLowerCase() === best.name.toLowerCase())) best = { name, id }
   }
-  return { title: String(channel?.stream_title || '').trim(), category: best?.name || '', ...(best?.id ? { categoryId: best.id } : {}) }
+  const tags = normalizeTags(channel?.stream?.custom_tags)
+  return { title: String(channel?.stream_title || '').trim(), category: best?.name || '', ...(best?.id ? { categoryId: best.id } : {}), ...(tags ? { tags } : {}) }
 }
 
 export function loadYouTubeQuota(value: unknown): YoutubeQuota {

@@ -26,7 +26,7 @@ export type YouTubeChatMessage = {
   preload?: boolean
 }
 
-export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string; title?: string }
+export type YouTubeChatTarget = { videoId: string; liveChatId?: string; label?: string; title?: string; description?: string; scheduledStartTime?: string }
 
 type Session = { videoId: string; apiKey: string; clientVersion: string; continuation: string; visitorData?: string }
 

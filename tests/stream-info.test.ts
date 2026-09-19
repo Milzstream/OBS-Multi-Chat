@@ -3,11 +3,22 @@ import { describe, it } from 'node:test'
 import {
   applyLiveStreamDetails,
   defaultAppSettings,
+  descriptionWithTagLine,
   isMoreSpecificCategory,
   isPermanentTokenRefreshError,
   isTokenRefreshHealthMessage,
+  isKickTag,
+  isTwitchTag,
+  kickTagsForApi,
   kickStreamDetails,
   loadStreamInfo,
+  looksLikeTagLine,
+  normalizeTags,
+  parseTagsFromDescription,
+  streamDetailsUnchanged,
+  tagsEqual,
+  twitchTagsForApi,
+  youtubeTagWriteNeeded,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
   parseAppSettings,
@@ -49,6 +60,58 @@ describe('stream details', () => {
     assert.equal(details.title, 'Friday')
     assert.equal(details.category, 'Just Chatting (IRL)')
     assert.equal(details.categoryId, '3')
+  })
+
+  it('keeps current tags when the live payload omits them', () => {
+    const next = applyLiveStreamDetails(
+      { title: 'Old', category: 'IRL', tags: ['English'] },
+      { title: 'Now', category: 'IRL' },
+    )
+    assert.deepEqual(next.tags, ['English'])
+  })
+
+  it('reads Kick custom_tags from the stream object', () => {
+    const details = kickStreamDetails({
+      stream_title: 'Friday',
+      category: { name: 'Just Chatting', id: '1' },
+      stream: { custom_tags: ['English', 'IRL'] },
+    })
+    assert.deepEqual(details.tags, ['English', 'IRL'])
+  })
+})
+
+describe('stream tags', () => {
+  it('normalizes, caps, and filters Twitch tags', () => {
+    assert.deepEqual(normalizeTags([' English ', 'english', '#IRL', '']), ['English', 'IRL'])
+    assert.equal(isTwitchTag('English'), true)
+    assert.equal(isTwitchTag('First Play'), false)
+    assert.deepEqual(twitchTagsForApi(['English', 'nope!', 'FirstPlaythrough']), ['English', 'FirstPlaythrough'])
+    assert.deepEqual(twitchTagsForApi([]), [])
+    assert.equal(isKickTag('first-play'), true)
+    assert.deepEqual(kickTagsForApi(['English', 'first-play', 'こんにちは']), ['English', 'first-play'])
+    assert.equal(tagsEqual(['English', 'IRL'], ['english', 'IRL']), true)
+    assert.equal(streamDetailsUnchanged(
+      { title: 'A', category: 'IRL', categoryId: '1', tags: ['English'] },
+      { title: 'A', category: 'IRL', categoryId: '1', tags: ['english'] },
+    ), true)
+    assert.equal(streamDetailsUnchanged(
+      { title: 'A', category: 'IRL', tags: ['English'] },
+      { title: 'B', category: 'IRL', tags: ['English'] },
+    ), false)
+  })
+
+  it('treats the last description line as tags without rewriting the blurb', () => {
+    assert.equal(looksLikeTagLine('English IRL'), true)
+    assert.equal(looksLikeTagLine('Hello chat'), false)
+    assert.equal(looksLikeTagLine('Come hang out tonight!'), false)
+    assert.deepEqual(parseTagsFromDescription('Hello chat\n#English #IRL'), ['English', 'IRL'])
+    assert.equal(descriptionWithTagLine('Hello chat', ['English', 'IRL']), 'Hello chat\n#English #IRL')
+    assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', ['English']), 'Hello chat\n#English')
+    assert.equal(descriptionWithTagLine('Hello chat\n#OldTag', []), 'Hello chat')
+    assert.equal(youtubeTagWriteNeeded([{ description: 'Hello chat\n#English #IRL' }], ['English'], ['English', 'IRL']), false)
+    assert.equal(youtubeTagWriteNeeded([{ description: 'Hello chat\n#English' }], ['English'], ['English', 'IRL']), true)
+    assert.equal(youtubeTagWriteNeeded([], ['English'], ['English']), false)
+    assert.equal(youtubeTagWriteNeeded([], ['English'], ['IRL']), true)
   })
 })
 

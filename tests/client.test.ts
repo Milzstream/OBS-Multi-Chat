@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, nextOptionIndex, preferredCategory, selectedSendPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
 
@@ -47,9 +47,45 @@ describe('chat dock helpers', () => {
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {
-    assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com')
+    assert.equal(youtubeStudioUrl(), 'https://studio.youtube.com/livestreaming')
     assert.equal(youtubeStudioUrl('UC1234567890123456789012'), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
-    assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com')
+    assert.equal(youtubeStudioUrl('not-a-channel'), 'https://studio.youtube.com/livestreaming')
+    assert.equal(streamDashboardUrl('Twitch', { handle: 'Ada' }), 'https://dashboard.twitch.tv/u/ada/stream-manager')
+    assert.equal(streamDashboardUrl('Kick', { handle: 'ada' }), 'https://kick.com/dashboard/stream')
+    assert.equal(streamDashboardUrl('YouTube', { channelId: 'UC1234567890123456789012' }), 'https://studio.youtube.com/channel/UC1234567890123456789012/livestreaming')
+  })
+
+  it('merges Twitch and Kick category hits by name and keeps platform ids', () => {
+    const merged = mergeCategoryResults(
+      [{ id: 't1', name: 'Just Chatting' }, { id: 't2', name: 'Art' }],
+      [{ id: 'k1', name: 'just chatting' }, { id: 'k2', name: 'Music' }],
+    )
+    assert.equal(merged[0].name, 'Just Chatting')
+    assert.equal(merged[0].twitchId, 't1')
+    assert.equal(merged[0].kickId, 'k1')
+    const art = merged.find((item) => item.name === 'Art')
+    assert.equal(art?.twitchId, 't2')
+    assert.equal(art?.kickId, undefined)
+    const music = merged.find((item) => item.name === 'Music')
+    assert.equal(music?.kickId, 'k2')
+    assert.equal(music?.twitchId, undefined)
+  })
+
+  it('unions tag lists without duplicates', () => {
+    assert.deepEqual(sharedStreamTags(['English'], ['english', 'IRL'], ['IRL']), ['English', 'IRL'])
+  })
+
+  it('marks which platforms can take a tag', () => {
+    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick'])
+    assert.deepEqual(tagPlatforms('first-play'), ['Kick'])
+    assert.deepEqual(tagPlatforms('こんにちは'), [])
+  })
+
+  it('builds per-tag platform assignments from the three lists', () => {
+    const assigned = tagAssignments(['English'], ['English', 'first-play'])
+    const english = assigned.find((item) => item.tag === 'English')
+    assert.deepEqual(english?.platforms, ['Twitch', 'Kick'])
+    assert.deepEqual(assigned.find((item) => item.tag === 'first-play')?.platforms, ['Kick'])
   })
 })
 

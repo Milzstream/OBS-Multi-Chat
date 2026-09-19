@@ -92,6 +92,7 @@ describe('YouTube send', () => {
 describe('YouTube quota', () => {
   it('charges the documented unit costs', () => {
     assert.equal(youtubeQuotaCost('/liveBroadcasts?part=snippet'), 1)
+    assert.equal(youtubeQuotaCost('/liveBroadcasts?part=snippet', 'PUT'), 50)
     assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'GET'), 1)
     assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'POST'), 50)
     assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'POST'), 50)
@@ -108,6 +109,7 @@ describe('YouTube quota', () => {
     assert.equal(youtubeQuotaLabel('/liveChat/bans?part=snippet', 'POST'), 'liveChatBans.insert')
     assert.equal(youtubeQuotaLabel('/videos?chart=mostPopular', 'GET'), 'videos.list')
     assert.equal(youtubeQuotaLabel('/liveBroadcasts?status=active', 'GET'), 'liveBroadcasts.list')
+    assert.equal(youtubeQuotaLabel('/liveBroadcasts?part=snippet', 'PUT'), 'liveBroadcasts.update')
     assert.equal(youtubeQuotaLabel('/playlists', 'PATCH'), 'playlists PATCH')
   })
 

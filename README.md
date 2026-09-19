@@ -6,6 +6,8 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Activity dock with follows, donations, and platform icons](docs/activity.png)
 
+![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
+
 ## Download
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
@@ -28,7 +30,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
-- Unified Twitch + Kick stream title/category controls, with arrow-key category picking and an Open YouTube Studio link
+- Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows background executable packaging
 
@@ -43,7 +45,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets the shared Twitch + Kick title and categories. Type a category and use **Down** / **Up** / **Enter** to pick from the list. YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
 
 ## API setup
 
@@ -60,7 +62,7 @@ http://localhost:4173/oauth/callback
 3. Set the OAuth redirect URL to the callback URL above.
 4. Set the client type to **Confidential/Private**, copy the client ID, and generate a client secret.
 
-The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, follower, subscription, and bits permissions. After updating the app, disconnect and reconnect Twitch so the new chat and alert scopes can be granted. The client secret stays in the backend environment file and is never sent to OBS.
+The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, moderation (so platform-reported bans and unbans update the dock), follower, subscription, and bits permissions. After updating the app, disconnect and reconnect Twitch so the new chat and alert scopes can be granted. The client secret stays in the backend environment file and is never sent to OBS.
 
 ### Automatic chat translation
 
@@ -220,7 +222,8 @@ The executable serves the docks at `http://localhost:4173` and binds to loopback
 - `POST /api/open` - open an allowlisted Twitch, Kick, or YouTube profile URL, or YouTube Studio, in the system default browser
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
-- `POST /api/stream-info/:platform` - apply title/category to one platform
+- `POST /api/stream-info/:platform` - apply title/category/tags to one platform
+- `POST /api/stream-info` - apply shared title plus per-platform Twitch/Kick category and tags
 - `POST /api/disconnect/:platform` - remove a saved platform connection
 - `POST /api/live-check/:platform` - run that platform's live check immediately (does not change the slower automatic YouTube interval)
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
