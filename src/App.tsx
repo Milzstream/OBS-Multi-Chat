@@ -1,8 +1,8 @@
-import { FormEvent, MouseEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
-import { dockAvatarSrc, kickProfileSlug, preferredCategory, selectedSendPlatforms, visibleChatMessages } from './chat-helpers'
+import { dockAvatarSrc, kickProfileSlug, nextOptionIndex, preferredCategory, selectedSendPlatforms, visibleChatMessages, youtubeStudioUrl } from './chat-helpers'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
@@ -309,11 +309,14 @@ function MessageItem({ message, showTranslationMark, onModerate }: { message: Ch
   return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={part.url} alt={part.name} title={part.name} /> : <span key={index}>{part.text}</span>)}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
+/** Twitch/Kick category field. Arrow keys only move the open list; closed input keeps default caret behavior. */
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {
   const [options, setOptions] = useState<CategoryOption[]>([])
   const [open, setOpen] = useState(false)
+  const [highlight, setHighlight] = useState(0)
   const typingRef = useRef(false)
   const pickedRef = useRef(false)
+  const visible = options.slice(0, 8)
   useEffect(() => {
     if (disabled || details.category.trim().length < 2) { setOptions([]); setOpen(false); return }
     if (pickedRef.current) { pickedRef.current = false; setOpen(false); return }
@@ -323,8 +326,33 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
     }, 200)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [details.category, disabled, platform])
+  useEffect(() => { setHighlight(0) }, [details.category, open])
   const pick = (option: CategoryOption) => { pickedRef.current = true; typingRef.current = false; setOpen(false); setOptions([]); onChange({ ...details, category: option.name, categoryId: option.id }) }
-  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} />{open && options.length > 0 && <ul className="category-options">{options.slice(0, 8).map((option) => <li key={option.id}><button type="button" onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!open || visible.length === 0) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setHighlight((current) => nextOptionIndex(current, visible.length, 1))
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setHighlight((current) => nextOptionIndex(current, visible.length, -1))
+      return
+    }
+    if (event.key === 'Enter') {
+      const option = visible[highlight]
+      if (!option) return
+      event.preventDefault()
+      pick(option)
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      setOpen(false)
+    }
+  }
+  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
 }
 
 function isMoreSpecificCategory(specific: string, general: string) {
@@ -405,7 +433,11 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
     if (result.ok) editedRef.current = false
     setSaving(false)
   }
-  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories.</p><input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
+  const youtubeConnected = Boolean(connections.find((connection) => connection.platform === 'YouTube')?.connected)
+  const openYouTubeStudio = () => {
+    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: youtubeStudioUrl() }) }).catch((error) => console.error('Failed to open YouTube Studio:', error))
+  }
+  return <aside className="controls-popover"><div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div><div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div><p className="settings-note">One title, separate platform categories. YouTube stays in Studio.</p><input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />{(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)}<button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title and categories'}</button><button type="button" className="studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>{status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}</aside>
 }
 
 export default App

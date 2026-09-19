@@ -1,6 +1,7 @@
 /**
  * Shared helpers for the chat and activity docks: avatar/media URL proxying,
- * Kick handle normalization, category preference, and feed filtering.
+ * Kick handle normalization, category preference, feed filtering, combobox
+ * highlight math, and the YouTube Studio URL the stream-controls link opens.
  */
 
 export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
@@ -44,4 +45,17 @@ export function visibleChatMessages<T extends { platform: ChatPlatform; platform
 export function selectedSendPlatforms(connected: ChatPlatform[], optOut: Iterable<ChatPlatform> = []) {
   const skip = new Set(optOut)
   return (['Twitch', 'Kick', 'YouTube'] as ChatPlatform[]).filter((platform) => connected.includes(platform) && !skip.has(platform))
+}
+
+/** Clamp a combobox highlight. Closed lists never call this; delta is +1 / -1. */
+export function nextOptionIndex(current: number, length: number, delta: number) {
+  if (length <= 0) return 0
+  return Math.max(0, Math.min(length - 1, current + delta))
+}
+
+/** YouTube Studio live page when we have a channel id; otherwise the Studio home. */
+export function youtubeStudioUrl(channelId?: string) {
+  const id = String(channelId || '').trim()
+  if (/^UC[\w-]{20,}$/i.test(id)) return `https://studio.youtube.com/channel/${encodeURIComponent(id)}/livestreaming`
+  return 'https://studio.youtube.com'
 }

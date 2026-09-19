@@ -4,7 +4,7 @@ import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type
 import { ConnectionSettings } from '../ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
 import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, parseStoredFilter, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
-import { subscribeDockSse } from '../sse'
+import { activityDockFields, subscribeDockSse } from '../sse'
 
 /**
  * The activity dock: renders follows, subs, tips, raids, and more from the
@@ -91,6 +91,7 @@ export default function ActivityApp() {
   const [activityWarnings, setActivityWarnings] = useState<string[]>([])
   const [missingJwts, setMissingJwts] = useState<string[]>([])
   const [seConnected, setSeConnected] = useState(false)
+  const [seReady, setSeReady] = useState(false)
   const [streamelements, setStreamelements] = useState({ connected: false, handle: '', missing: [] as string[] })
   const [connections, setConnections] = useState(initialConnections)
   const [activityFallback, setActivityFallback] = useState(true)
@@ -121,21 +122,25 @@ export default function ActivityApp() {
   }, [])
 
   useEffect(() => {
-    // Subscribe to Relay's SSE stream: snapshot/presence/settings frames carry
-    // full dock state and activity frames carry new alerts — all forwarded to
-    // applySnapshot so the dock mirrors the backend
+    // Subscribe to Relay's SSE stream. activityDockFields ignores omitted keys
+    // so an activity/settings slice cannot flash “StreamElements not configured”.
     const applySnapshot = (remote: BackendState) => {
-      if (remote.activity) setEvents(remote.activity)
-      if (remote.activityWarnings) setActivityWarnings(remote.activityWarnings)
-      setMissingJwts(remote.streamelements?.missing || [])
-      setSeConnected(Boolean(remote.streamelements?.connected))
-      if (remote.streamelements) setStreamelements({ connected: remote.streamelements.connected, handle: remote.streamelements.handle, missing: remote.streamelements.missing || [] })
-      if (remote.accounts?.length) setConnections(remote.accounts)
-      if (typeof remote.activityFallback === 'boolean') setActivityFallback(remote.activityFallback)
-      if (typeof remote.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(remote.ignoreMissingJwt)
-      if (typeof remote.dropOldAlerts === 'boolean') setDropOldAlerts(remote.dropOldAlerts)
-      if (typeof remote.translateChat === 'boolean') setTranslateChat(remote.translateChat)
-      if (typeof remote.translateError === 'string') setTranslateError(remote.translateError)
+      const fields = activityDockFields(remote as unknown as Record<string, unknown>)
+      if (fields.activity) setEvents(fields.activity as ActivityEvent[])
+      if (fields.activityWarnings) setActivityWarnings(fields.activityWarnings as string[])
+      if (fields.streamelements) {
+        const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[] }
+        setMissingJwts(streamelements.missing || [])
+        setSeConnected(Boolean(streamelements.connected))
+        setStreamelements({ connected: streamelements.connected, handle: streamelements.handle, missing: streamelements.missing || [] })
+        setSeReady(true)
+      }
+      if (fields.accounts?.length) setConnections(fields.accounts as Connection[])
+      if (typeof fields.activityFallback === 'boolean') setActivityFallback(fields.activityFallback)
+      if (typeof fields.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(fields.ignoreMissingJwt)
+      if (typeof fields.dropOldAlerts === 'boolean') setDropOldAlerts(fields.dropOldAlerts)
+      if (typeof fields.translateChat === 'boolean') setTranslateChat(fields.translateChat)
+      if (typeof fields.translateError === 'string') setTranslateError(fields.translateError)
       setBackendOnline(true)
     }
     const asState = (data: Record<string, unknown>) => data as unknown as BackendState
@@ -156,7 +161,7 @@ export default function ActivityApp() {
   }, [events, filter])
   const { paused, onScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
   const warningMessages = [...new Set(activityWarnings)]
-  const showSetup = !dismissedWarning && (warningMessages.length > 0 || (!ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
+  const showSetup = !dismissedWarning && (warningMessages.length > 0 || (seReady && !ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
 
   const sendTest = (item: (typeof tests)[number]) => {
     setShowTests(false)
