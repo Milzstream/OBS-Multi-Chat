@@ -571,18 +571,20 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
     <aside className="controls-popover">
       <div className="popover-title"><span>STREAM CONTROLS</span><button onClick={onClose} aria-label="Close stream controls">×</button></div>
       <div className="control-tabs"><span className="unified-badge">TWITCH + KICK</span></div>
-      <p className="settings-note">One title, one category search, one tag list. Expand categories if Twitch and Kick need different games. YouTube tags are the last line of the live description.</p>
-      <input className="unified-title" value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />
+      <div className="stream-fields">
+        <div className="stream-fields-heading"><strong>Title</strong></div>
+        <input value={draftTitle} onChange={(event) => { editedRef.current = true; setDraftTitle(event.target.value) }} placeholder="Shared stream title" />
+      </div>
       {splitCategories
         ? (['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)
         : <UnifiedCategoryField twitch={draftDetails.Twitch} kick={draftDetails.Kick} twitchEnabled={twitchConnected} kickEnabled={kickConnected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, ...next })) }} />}
-      <button type="button" className="category-split" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
+      <button type="button" className="controls-link" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
       <div className="stream-fields">
-        <div className="stream-fields-heading"><strong>Tags</strong><small>Shared · max 10</small></div>
+        <div className="stream-fields-heading"><strong>Tags</strong></div>
         <TagEditor tags={sharedStreamTags(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} strictTwitch onChange={setTags} />
       </div>
       <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
-      <button type="button" className="studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>
+      <button type="button" className="controls-link studio-link" disabled={!youtubeConnected} onClick={openYouTubeStudio}>Open YouTube Studio</button>
       {status ? <div className={`stream-status ${status.ok ? 'ok' : 'error'}`}>{status.text}</div> : null}
     </aside>
   )
