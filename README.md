@@ -28,7 +28,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
-- Unified Twitch + Kick stream title/category controls, with arrow-key category picking and an Open YouTube Studio link
+- Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows background executable packaging
 
@@ -43,7 +43,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets the shared Twitch + Kick title and categories. Type a category and use **Down** / **Up** / **Enter** to pick from the list. YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected.
+Stream Controls (gamepad on the chat dock) sets the shared Twitch + Kick title, categories, and tags. Type a category and use **Down** / **Up** / **Enter** to pick from the list. Tags are per platform (Twitch allows letters/numbers only, max 10). YouTube titles stay in Studio — **Open YouTube Studio** opens it in your browser when YouTube is connected. YouTube tags are written as the **last line of the live description** and leave the rest of the blurb alone.
 
 ## API setup
 
@@ -220,7 +220,8 @@ The executable serves the docks at `http://localhost:4173` and binds to loopback
 - `POST /api/open` - open an allowlisted Twitch, Kick, or YouTube profile URL, or YouTube Studio, in the system default browser
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
-- `POST /api/stream-info/:platform` - apply title/category to one platform
+- `POST /api/stream-info/:platform` - apply title/category/tags to one platform
+- `POST /api/stream-info` - apply shared title plus per-platform category and tags (YouTube tags update the live description last line)
 - `POST /api/disconnect/:platform` - remove a saved platform connection
 - `POST /api/live-check/:platform` - run that platform's live check immediately (does not change the slower automatic YouTube interval)
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`

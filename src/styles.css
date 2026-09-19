@@ -58,6 +58,10 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .category-options { position: absolute; z-index: 8; left: 0; right: 0; top: calc(100% - 2px); max-height: 150px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid #3b4749; border-radius: 4px; background: #151a1c; box-shadow: 0 10px 24px rgba(0,0,0,.35); }
 .category-options button { display: block; width: 100%; padding: 6px 8px; border-radius: 3px; background: transparent; color: #ecf2ef; font-size: 11px; text-align: left; }
 .category-options button:hover, .category-options button.active { background: #293331; }
+.tag-editor { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 28px; padding: 4px; border: 1px solid #3b4749; border-radius: 4px; background: #151a1c; }
+.tag-chip { padding: 2px 6px; border-radius: 3px; background: #293331; color: #dce6e2; font-size: 10px; }
+.tag-chip:disabled { opacity: .5; }
+.tag-editor input { min-width: 90px; flex: 1; border: 0; outline: 0; background: transparent; color: #ecf2ef; font-size: 11px; }
 .studio-link { width: 100%; margin-top: 8px; padding: 7px; border: 1px solid #3b4749; border-radius: 4px; background: transparent; color: #c3cdca; font: 10px 'DM Mono', monospace; }
 .studio-link:disabled { opacity: .35; cursor: not-allowed; }
 .studio-link:not(:disabled):hover { border-color: #ff5b62; color: #ff5b62; }

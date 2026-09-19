@@ -3,11 +3,17 @@ import { describe, it } from 'node:test'
 import {
   applyLiveStreamDetails,
   defaultAppSettings,
+  descriptionWithTagLine,
   isMoreSpecificCategory,
   isPermanentTokenRefreshError,
   isTokenRefreshHealthMessage,
+  isTwitchTag,
   kickStreamDetails,
   loadStreamInfo,
+  looksLikeTagLine,
+  normalizeTags,
+  parseTagsFromDescription,
+  twitchTagsForApi,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
   parseAppSettings,
@@ -49,6 +55,43 @@ describe('stream details', () => {
     assert.equal(details.title, 'Friday')
     assert.equal(details.category, 'Just Chatting (IRL)')
     assert.equal(details.categoryId, '3')
+  })
+
+  it('keeps current tags when the live payload omits them', () => {
+    const next = applyLiveStreamDetails(
+      { title: 'Old', category: 'IRL', tags: ['English'] },
+      { title: 'Now', category: 'IRL' },
+    )
+    assert.deepEqual(next.tags, ['English'])
+  })
+
+  it('reads Kick custom_tags from the stream object', () => {
+    const details = kickStreamDetails({
+      stream_title: 'Friday',
+      category: { name: 'Just Chatting', id: '1' },
+      stream: { custom_tags: ['English', 'IRL'] },
+    })
+    assert.deepEqual(details.tags, ['English', 'IRL'])
+  })
+})
+
+describe('stream tags', () => {
+  it('normalizes, caps, and filters Twitch tags', () => {
+    assert.deepEqual(normalizeTags([' English ', 'english', 'IRL', '']), ['English', 'IRL'])
+    assert.equal(isTwitchTag('English'), true)
+    assert.equal(isTwitchTag('First Play'), false)
+    assert.deepEqual(twitchTagsForApi(['English', 'nope!', 'FirstPlaythrough']), ['English', 'FirstPlaythrough'])
+    assert.deepEqual(twitchTagsForApi([]), [])
+  })
+
+  it('treats the last description line as tags without rewriting the blurb', () => {
+    assert.equal(looksLikeTagLine('English IRL'), true)
+    assert.equal(looksLikeTagLine('Hello chat'), false)
+    assert.equal(looksLikeTagLine('Come hang out tonight!'), false)
+    assert.deepEqual(parseTagsFromDescription('Hello chat\nEnglish IRL'), ['English', 'IRL'])
+    assert.equal(descriptionWithTagLine('Hello chat', ['English', 'IRL']), 'Hello chat\nEnglish IRL')
+    assert.equal(descriptionWithTagLine('Hello chat\nOldTag', ['English']), 'Hello chat\nEnglish')
+    assert.equal(descriptionWithTagLine('Hello chat\nOldTag', []), 'Hello chat')
   })
 })
 

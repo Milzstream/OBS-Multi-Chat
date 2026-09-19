@@ -9,6 +9,7 @@
 export type Platform = 'Twitch' | 'Kick' | 'YouTube'
 export type TokenPlatform = Platform | 'StreamElements'
 export type StreamPlatform = 'Twitch' | 'Kick'
+export type StreamInfoPlatform = StreamPlatform | 'YouTube'
 export type Token = { accessToken: string; refreshToken?: string; expiresAt?: number; user?: string; userId?: string; channelId?: string; liveChatId?: string; liveChatIds?: string[]; provider?: string }
 export type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string }
 export type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
@@ -18,18 +19,21 @@ export type ChatMessage = { id: string; platform: Platform; platforms?: Platform
 // both hide a user's messages; `unban` restores them. Timeout durations live
 // in the per-platform source, so this type stays duration-free.
 export type ChatModeration = { action: 'delete' | 'timeout' | 'ban' | 'unban'; platform: Platform; messageId?: string; userId?: string; user?: string }
-export type StreamDetails = { title: string; category: string; categoryId?: string }
+export type StreamDetails = { title: string; category: string; categoryId?: string; tags?: string[] }
+export type StreamInfoMap = Record<StreamInfoPlatform, StreamDetails>
 export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
 export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
-export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: Record<StreamPlatform, StreamDetails>; youtubeQuota: YoutubeQuota }
+export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: StreamInfoMap; youtubeQuota: YoutubeQuota }
 
 // Chat-history cap: `CHAT_MAX` is the default, `RELAY_CHAT_MAX` may pull it
 // down to `CHAT_MAX_MIN` or up to `CHAT_MAX_HARD`.
 export const CHAT_MAX = 5000
 export const CHAT_MAX_MIN = 100
 export const CHAT_MAX_HARD = 1_000_000
+export const STREAM_TAG_MAX = 10
+export const TWITCH_TAG_MAX_LENGTH = 25
 // YouTube's free daily Data API budget in quota units.
 export const YOUTUBE_QUOTA_LIMIT = 10_000
 // Kick is the stricter set: read/write chat and moderation only — no billing permissions.

@@ -28,6 +28,10 @@ import {
   normalizeChatHandle,
   kickBadges,
   kickStreamDetails,
+  descriptionWithTagLine,
+  normalizeTags,
+  parseTagsFromDescription,
+  twitchTagsForApi,
   looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
@@ -84,6 +88,7 @@ import type {
   Platform,
   StreamDetails,
   StreamElementsStatus,
+  StreamInfoMap,
   StreamPlatform,
   Token,
   TokenPlatform,
@@ -115,7 +120,7 @@ const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runti
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
 
-type State = { accounts: Account[]; streamInfo: Record<StreamPlatform, StreamDetails>; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -213,6 +218,7 @@ const state: State = {
   streamInfo: {
     Twitch: { ...settings.streamInfo.Twitch },
     Kick: { ...settings.streamInfo.Kick },
+    YouTube: { ...settings.streamInfo.YouTube },
   },
   messages: loadChat(),
   health: { Twitch: emptyHealth(), Kick: emptyHealth(), YouTube: emptyHealth() },
@@ -344,8 +350,9 @@ app.get('/api/categories/:platform', async (request, response) => {
 app.post('/api/stream-info/:platform', async (request, response) => {
   const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
   if (!platform) return response.status(404).json({ error: 'Unknown stream platform' })
-  const { title, category, categoryId } = request.body as Partial<StreamDetails>
-  const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}) }
+  const { title, category, categoryId, tags } = request.body as Partial<StreamDetails>
+  const normalizedTags = normalizeTags(tags)
+  const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}), ...(normalizedTags ? { tags: normalizedTags } : {}) }
   const result = await updateStreamInfo(platform, details)
   if (result.ok) {
     state.streamInfo[platform] = details
@@ -355,13 +362,22 @@ app.post('/api/stream-info/:platform', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results: [result] })
 })
 app.post('/api/stream-info', async (request, response) => {
-  const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
-  const detailsByPlatform = { Twitch: { category: '', ...Twitch, title: String(title || '').trim() }, Kick: { category: '', ...Kick, title: String(title || '').trim() } }
-  const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
+  const { title, Twitch, Kick, YouTube } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails; YouTube?: StreamDetails }
+  const sharedTitle = String(title || '').trim()
+  const detailsByPlatform = {
+    Twitch: { category: '', ...Twitch, title: sharedTitle, tags: normalizeTags(Twitch?.tags) || [] },
+    Kick: { category: '', ...Kick, title: sharedTitle, tags: normalizeTags(Kick?.tags) || [] },
+  }
+  const youtubeTags = normalizeTags(YouTube?.tags) || []
+  const results = await Promise.all([
+    ...(['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])),
+    updateYouTubeTags(youtubeTags),
+  ])
   let changed = false
   for (const result of results) {
     if (!result.ok) continue
-    state.streamInfo[result.platform] = detailsByPlatform[result.platform]
+    if (result.platform === 'YouTube') state.streamInfo.YouTube = { title: '', category: '', tags: youtubeTags }
+    else state.streamInfo[result.platform] = detailsByPlatform[result.platform]
     changed = true
   }
   if (changed) persistStreamInfo()
@@ -881,8 +897,8 @@ function dropEndedYouTubeChat(chatId: string) {
   if (next.length !== youtubeTargets.length) setYouTubeTargets(next)
 }
 
-async function youtubeApi(endpoint: string, token: Token): Promise<any> {
-  const result = await youtubeRequest(endpoint, token)
+async function youtubeApi(endpoint: string, token: Token, options: RequestInit = {}): Promise<any> {
+  const result = await youtubeRequest(endpoint, token, options)
   if (result.status === 403 && /quotaExceeded/i.test(result.text)) throw new Error('YouTube API 403 quota exceeded')
   if (!result.ok) throw new Error(`YouTube API ${result.status}: ${youtubeApiErrorReason(result.text)}`)
   return result.text ? JSON.parse(result.text) : {}
@@ -1634,11 +1650,11 @@ async function pollTwitch() {
   restorePlatformConnection('Twitch')
   Object.assign(account, { live: Boolean(stream), viewers: stream?.viewer_count || 0, handle: token.user || account.handle })
   if (stream) {
-    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined })
+    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined, tags: normalizeTags(stream.tags) })
   } else {
     const channel = await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token)
     const info = channel.data?.[0]
-    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined })
+    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined, tags: normalizeTags(info.tags) })
   }
   void ensureTwitchBadges()
   ensureTwitchChat()
@@ -1728,9 +1744,15 @@ async function pollYouTubeStatus(token: Token) {
       videoId,
       liveChatId: chatId ? String(chatId) : undefined,
       title: String(item.snippet?.title || existing?.title || ''),
+      description: item.snippet?.description != null ? String(item.snippet.description) : existing?.description,
+      scheduledStartTime: item.snippet?.scheduledStartTime ? String(item.snippet.scheduledStartTime) : existing?.scheduledStartTime,
     }
   }).filter((item: YouTubeChatTarget) => item.videoId)
   setYouTubeTargets(next)
+  const youtubeTagSource = next.find((target: YouTubeChatTarget) => parseTagsFromDescription(target.description || '').length)?.description
+  if (youtubeTagSource != null) {
+    state.streamInfo.YouTube = applyLiveStreamDetails(state.streamInfo.YouTube, { title: '', category: '', tags: parseTagsFromDescription(youtubeTagSource) })
+  }
   restorePlatformConnection('YouTube')
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) {
@@ -2161,7 +2183,8 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     const token = await ensureToken('Twitch')
     if (!token) return { platform, ok: false, error: 'Not connected' }
     const games = info.categoryId ? { data: [{ id: info.categoryId }] } : await twitchApi(`/helix/games?name=${encodeURIComponent(info.category)}`, token)
-    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}) }
+    const tags = twitchTagsForApi(info.tags)
+    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}), ...(tags ? { tags } : {}) }
     try {
       await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       return { platform, ok: true }
@@ -2170,10 +2193,35 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     }
   }
   if (platform === 'Kick') {
-    const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}) }) })
+    const tags = normalizeTags(info.tags)
+    const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}), ...(tags ? { custom_tags: tags } : {}) }) })
     return { platform, ok: response.ok, error: response.ok ? undefined : await response.text() }
   }
   return { platform, ok: false, error: 'Unsupported stream platform' }
+}
+
+async function updateYouTubeTags(tags: string[]): Promise<{ platform: 'YouTube'; ok: boolean; error?: string }> {
+  if (!tokens.YouTube) return { platform: 'YouTube', ok: false, error: 'Not connected' }
+  if (!youtubeTargets.length) return { platform: 'YouTube', ok: true }
+  const token = await ensureToken('YouTube')
+  if (!token) return { platform: 'YouTube', ok: false, error: 'Not connected' }
+  if (youtubeQuotaBlocked()) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
+  try {
+    for (const target of youtubeTargets) {
+      if (!target.title || !target.scheduledStartTime) return { platform: 'YouTube', ok: false, error: 'YouTube live is missing title or schedule for a description update' }
+      const description = descriptionWithTagLine(target.description || '', tags)
+      await youtubeApi('/liveBroadcasts?part=snippet', token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: target.videoId, snippet: { title: target.title, scheduledStartTime: target.scheduledStartTime, description } }),
+      })
+      target.description = description
+    }
+    return { platform: 'YouTube', ok: true }
+  } catch (error) {
+    if (noteYouTubeQuota(error)) return { platform: 'YouTube', ok: false, error: 'YouTube API quota exceeded' }
+    return { platform: 'YouTube', ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
 }
 
 function writeSse(client: express.Response, chunk: string) {
@@ -2256,7 +2304,7 @@ function loadTokens(): Partial<Record<TokenPlatform, Token>> {
 }
 
 function persistStreamInfo() {
-  const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick } }
+  const next = { Twitch: { ...state.streamInfo.Twitch }, Kick: { ...state.streamInfo.Kick }, YouTube: { ...state.streamInfo.YouTube } }
   if (JSON.stringify(settings.streamInfo) === JSON.stringify(next)) return
   settings.streamInfo = next
   saveSettings()
