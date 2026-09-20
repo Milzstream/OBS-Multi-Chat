@@ -11,7 +11,7 @@ import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { jwtPreview, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
-import { createObsWebSocket } from './obs-ws.js'
+import { createObsWebSocket, parseObsWebsocketConfig } from './obs-ws.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -180,7 +180,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus; endYouTubeOnObsStop: boolean; obsWebsocketHost: string; obsWebsocketPort: number; obsWebsocketConfigured: boolean; obsConnected: boolean }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus; endYouTubeOnObsStop: boolean; obsConnected: boolean }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -294,14 +294,11 @@ const state: State = {
   translateError: '',
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
   endYouTubeOnObsStop: settings.endYouTubeOnObsStop,
-  obsWebsocketHost: settings.obsWebsocketHost,
-  obsWebsocketPort: settings.obsWebsocketPort,
-  obsWebsocketConfigured: Boolean(settings.obsWebsocketPassword),
   obsConnected: false,
 }
 
 const obsSocket = createObsWebSocket({
-  getConfig: () => ({ host: settings.obsWebsocketHost, port: settings.obsWebsocketPort, password: settings.obsWebsocketPassword }),
+  getConfig: () => parseObsWebsocketConfig(),
   onStatus: (connected) => {
     if (state.obsConnected === connected) return
     state.obsConnected = connected
@@ -460,7 +457,7 @@ app.post('/api/stream-info', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results })
 })
 app.post('/api/settings', (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; endYouTubeOnObsStop?: boolean }
   let changed = false
   if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
     settings.activityFallback = body.activityFallback
@@ -489,39 +486,14 @@ app.post('/api/settings', (request, response) => {
     state.translateChat = body.translateChat
     changed = true
   }
-  const companionBody = request.body as { endYouTubeOnObsStop?: boolean; obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketPassword?: string }
-  if (typeof companionBody.endYouTubeOnObsStop === 'boolean' && companionBody.endYouTubeOnObsStop !== settings.endYouTubeOnObsStop) {
-    settings.endYouTubeOnObsStop = companionBody.endYouTubeOnObsStop
-    state.endYouTubeOnObsStop = companionBody.endYouTubeOnObsStop
+  if (typeof body.endYouTubeOnObsStop === 'boolean' && body.endYouTubeOnObsStop !== settings.endYouTubeOnObsStop) {
+    settings.endYouTubeOnObsStop = body.endYouTubeOnObsStop
+    state.endYouTubeOnObsStop = body.endYouTubeOnObsStop
     changed = true
-  }
-  if (typeof companionBody.obsWebsocketHost === 'string') {
-    const host = companionBody.obsWebsocketHost.trim() || '127.0.0.1'
-    if (host !== settings.obsWebsocketHost) {
-      settings.obsWebsocketHost = host
-      state.obsWebsocketHost = host
-      changed = true
-    }
-  }
-  if (companionBody.obsWebsocketPort != null) {
-    const obsPort = Math.max(1, Math.min(65535, Math.floor(Number(companionBody.obsWebsocketPort) || 4455)))
-    if (obsPort !== settings.obsWebsocketPort) {
-      settings.obsWebsocketPort = obsPort
-      state.obsWebsocketPort = obsPort
-      changed = true
-    }
-  }
-  let obsReconnect = false
-  if (typeof companionBody.obsWebsocketPassword === 'string') {
-    settings.obsWebsocketPassword = companionBody.obsWebsocketPassword
-    state.obsWebsocketConfigured = Boolean(settings.obsWebsocketPassword)
-    changed = true
-    obsReconnect = true
   }
   if (changed) {
     saveSettings()
     broadcast()
-    if (obsReconnect || companionBody.obsWebsocketHost != null || companionBody.obsWebsocketPort != null) obsSocket.reconnect()
   }
   response.json({
     activityFallback: settings.activityFallback,
@@ -529,9 +501,6 @@ app.post('/api/settings', (request, response) => {
     dropOldAlerts: settings.dropOldAlerts,
     translateChat: settings.translateChat,
     endYouTubeOnObsStop: settings.endYouTubeOnObsStop,
-    obsWebsocketHost: settings.obsWebsocketHost,
-    obsWebsocketPort: settings.obsWebsocketPort,
-    obsWebsocketConfigured: state.obsWebsocketConfigured,
     obsConnected: state.obsConnected,
     streamelements: state.streamelements,
   })
@@ -2411,9 +2380,6 @@ function sseSettings() {
     translateChat: state.translateChat,
     translateError: state.translateError,
     endYouTubeOnObsStop: state.endYouTubeOnObsStop,
-    obsWebsocketHost: state.obsWebsocketHost,
-    obsWebsocketPort: state.obsWebsocketPort,
-    obsWebsocketConfigured: state.obsWebsocketConfigured,
     obsConnected: state.obsConnected,
   }
 }

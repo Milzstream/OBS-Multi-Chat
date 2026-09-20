@@ -31,9 +31,6 @@ export type AppSettings = {
   dropOldAlerts: boolean
   translateChat: boolean
   endYouTubeOnObsStop: boolean
-  obsWebsocketHost: string
-  obsWebsocketPort: number
-  obsWebsocketPassword: string
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota
 }

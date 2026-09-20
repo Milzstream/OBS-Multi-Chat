@@ -1112,9 +1112,6 @@ export function defaultAppSettings(): AppSettings {
     dropOldAlerts: false,
     translateChat: true,
     endYouTubeOnObsStop: false,
-    obsWebsocketHost: '127.0.0.1',
-    obsWebsocketPort: 4455,
-    obsWebsocketPassword: '',
     streamInfo: emptyStreamInfo(),
     youtubeQuota: { day: '', used: 0 },
   }
@@ -1130,9 +1127,6 @@ export function parseAppSettings(value: unknown): AppSettings {
     dropOldAlerts: parsed.dropOldAlerts === true,
     translateChat: parsed.translateChat !== false,
     endYouTubeOnObsStop: parsed.endYouTubeOnObsStop === true,
-    obsWebsocketHost: String(parsed.obsWebsocketHost || '127.0.0.1').trim() || '127.0.0.1',
-    obsWebsocketPort: Math.max(1, Math.min(65535, Math.floor(Number(parsed.obsWebsocketPort) || 4455))),
-    obsWebsocketPassword: String(parsed.obsWebsocketPassword || ''),
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }

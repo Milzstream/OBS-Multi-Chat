@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Bell } from 'lucide-react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -32,9 +32,6 @@ export function ConnectionSettings({
   showCompanionOptions,
   jwtSlots,
   endYouTubeOnObsStop,
-  obsWebsocketHost,
-  obsWebsocketPort,
-  obsWebsocketConfigured,
   obsConnected,
   platformIcon,
   onClose,
@@ -60,9 +57,6 @@ export function ConnectionSettings({
   showCompanionOptions?: boolean
   jwtSlots?: Record<string, JwtPreview>
   endYouTubeOnObsStop?: boolean
-  obsWebsocketHost?: string
-  obsWebsocketPort?: number
-  obsWebsocketConfigured?: boolean
   obsConnected?: boolean
   platformIcon: (platform: Platform, size?: number) => ReactNode
   onClose: () => void
@@ -74,15 +68,12 @@ export function ConnectionSettings({
   onToggleDropOld: () => void
   onToggleTranslateChat: () => void
   onJwtChange?: (platform: Platform, jwt: string) => void
-  onCompanionSettings?: (body: { endYouTubeOnObsStop?: boolean; obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketPassword?: string }) => void
+  onCompanionSettings?: (body: { endYouTubeOnObsStop?: boolean }) => void
   note?: string
 }) {
   const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
-  const [obsHost, setObsHost] = useState(obsWebsocketHost || '127.0.0.1')
-  const [obsPort, setObsPort] = useState(String(obsWebsocketPort || 4455))
-  const [obsPassword, setObsPassword] = useState('')
   const jwtTimers = useRef<Partial<Record<Platform, number>>>({})
   const jwtDirty = useRef<Partial<Record<Platform, boolean>>>({})
   const checkLive = async (platform: Platform) => {
@@ -90,10 +81,6 @@ export function ConnectionSettings({
     setChecking((current) => ({ ...current, [platform]: true }))
     try { await onCheckLive(platform) } finally { setChecking((current) => ({ ...current, [platform]: false })) }
   }
-  useEffect(() => {
-    setObsHost(obsWebsocketHost || '127.0.0.1')
-    setObsPort(String(obsWebsocketPort || 4455))
-  }, [obsWebsocketHost, obsWebsocketPort])
   const commitJwt = (platform: Platform, value: string) => {
     if (!jwtDirty.current[platform]) return
     jwtDirty.current[platform] = false
@@ -105,9 +92,6 @@ export function ConnectionSettings({
     setJwtDraft((current) => ({ ...current, [platform]: value }))
     if (jwtTimers.current[platform]) window.clearTimeout(jwtTimers.current[platform])
     jwtTimers.current[platform] = window.setTimeout(() => commitJwt(platform, value), 700)
-  }
-  const commitObs = (body: { obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketPassword?: string }) => {
-    onCompanionSettings?.(body)
   }
   return (
     <aside className="settings-popover">
@@ -192,19 +176,7 @@ export function ConnectionSettings({
             <span>End YouTube live when OBS stops streaming</span>
             <input type="checkbox" checked={Boolean(endYouTubeOnObsStop)} onChange={() => onCompanionSettings?.({ endYouTubeOnObsStop: !endYouTubeOnObsStop })} />
           </label>
-          <p className="settings-note">OBS WebSocket {obsConnected ? 'connected' : 'disconnected'} · default 127.0.0.1:4455. Ends every YouTube live this companion is tracking, including Live + Shorts.</p>
-          <label className="settings-jwt">
-            <span>OBS host</span>
-            <input value={obsHost} onChange={(event) => setObsHost(event.target.value)} onBlur={() => commitObs({ obsWebsocketHost: obsHost })} />
-          </label>
-          <label className="settings-jwt">
-            <span>OBS port</span>
-            <input value={obsPort} onChange={(event) => setObsPort(event.target.value)} onBlur={() => commitObs({ obsWebsocketPort: Math.floor(Number(obsPort) || 4455) })} />
-          </label>
-          <label className="settings-jwt">
-            <span>OBS password</span>
-            <input value={obsPassword} placeholder={obsWebsocketConfigured ? 'Configured · last 4 hidden' : 'Optional'} autoComplete="off" onChange={(event) => setObsPassword(event.target.value)} onBlur={() => { if (obsPassword || !obsWebsocketConfigured) { commitObs({ obsWebsocketPassword: obsPassword }); setObsPassword('') } }} />
-          </label>
+          <p className="settings-note">OBS WebSocket {obsConnected ? 'connected' : 'disconnected'} (local 127.0.0.1:4455, or RELAY_OBS_HOST / RELAY_OBS_PORT / RELAY_OBS_PASSWORD). Fires only when OBS Stop Streaming, not on internet drop. Ends every YouTube live this companion is tracking, including Live + Shorts.</p>
         </>
       ) : null}
     </aside>

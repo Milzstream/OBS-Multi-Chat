@@ -25,6 +25,13 @@ export function obsWebSocketUrl(host: string, port: number) {
   return `ws://${hostname}:${n > 0 && n < 65536 ? n : 4455}`
 }
 
+export function parseObsWebsocketConfig(env: Record<string, string | undefined> = process.env) {
+  const host = String(env.RELAY_OBS_HOST || '').trim() || '127.0.0.1'
+  const port = Math.max(1, Math.min(65535, Math.floor(Number(env.RELAY_OBS_PORT) || 4455)))
+  const password = String(env.RELAY_OBS_PASSWORD || '')
+  return { host, port, password }
+}
+
 export function createObsWebSocket(options: {
   getConfig: () => { host: string; port: number; password: string }
   onStatus: (connected: boolean) => void

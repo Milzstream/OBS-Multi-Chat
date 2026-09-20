@@ -62,7 +62,7 @@ Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending
 
 Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
 
-Chat dock **Connection Settings → Companion** can end every YouTube live this companion is tracking (Live and Shorts) when OBS Stop Streaming fires. It uses OBS 28+ built-in WebSocket (`127.0.0.1:4455` by default, optional password). The setting is off until you turn it on. Twitch and Kick already drop with RTMP.
+Chat dock **Connection Settings → Companion** can end every YouTube live this companion is tracking (Live and Shorts) when OBS Stop Streaming fires. That uses OBS 28+ built-in WebSocket on this PC (`127.0.0.1:4455` by default). Host, port, and password belong in `production.env` as `RELAY_OBS_HOST`, `RELAY_OBS_PORT`, and `RELAY_OBS_PASSWORD` if you changed OBS from the defaults. The checkbox is off until you turn it on. An internet drop does not fire it — only OBS Stop Streaming. Twitch and Kick already drop with RTMP.
 
 ## API setup
 

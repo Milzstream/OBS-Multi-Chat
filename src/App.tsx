@@ -26,7 +26,7 @@ type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; use
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
 type YoutubeQuotaStatus = { used: number; limit: number }
-type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; translateError?: string; youtubeQuota?: YoutubeQuotaStatus; endYouTubeOnObsStop?: boolean; obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketConfigured?: boolean; obsConnected?: boolean }
+type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; translateError?: string; youtubeQuota?: YoutubeQuotaStatus; endYouTubeOnObsStop?: boolean; obsConnected?: boolean }
 
 const platformMeta: Record<Platform, { color: string; route: string }> = {
   Twitch: { color: '#a970ff', route: 'twitch' },
@@ -71,9 +71,6 @@ function App() {
   const [translateChat, setTranslateChat] = useState(true)
   const [translateError, setTranslateError] = useState('')
   const [endYouTubeOnObsStop, setEndYouTubeOnObsStop] = useState(false)
-  const [obsWebsocketHost, setObsWebsocketHost] = useState('127.0.0.1')
-  const [obsWebsocketPort, setObsWebsocketPort] = useState(4455)
-  const [obsWebsocketConfigured, setObsWebsocketConfigured] = useState(false)
   const [obsConnected, setObsConnected] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
@@ -153,9 +150,6 @@ function App() {
         setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
       if (typeof fields.endYouTubeOnObsStop === 'boolean') setEndYouTubeOnObsStop(fields.endYouTubeOnObsStop)
-      if (typeof fields.obsWebsocketHost === 'string') setObsWebsocketHost(fields.obsWebsocketHost)
-      if (typeof fields.obsWebsocketPort === 'number') setObsWebsocketPort(fields.obsWebsocketPort)
-      if (typeof fields.obsWebsocketConfigured === 'boolean') setObsWebsocketConfigured(fields.obsWebsocketConfigured)
       if (typeof fields.obsConnected === 'boolean') setObsConnected(fields.obsConnected)
       setBackendOnline(true)
       if (fields.streamInfo) {
@@ -191,14 +185,12 @@ function App() {
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
-  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; endYouTubeOnObsStop?: boolean; obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketPassword?: string }) => {
+  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; endYouTubeOnObsStop?: boolean }) => {
     if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
     if (typeof body.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(body.ignoreMissingJwt)
     if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
     if (typeof body.translateChat === 'boolean') setTranslateChat(body.translateChat)
     if (typeof body.endYouTubeOnObsStop === 'boolean') setEndYouTubeOnObsStop(body.endYouTubeOnObsStop)
-    if (typeof body.obsWebsocketHost === 'string') setObsWebsocketHost(body.obsWebsocketHost)
-    if (typeof body.obsWebsocketPort === 'number') setObsWebsocketPort(body.obsWebsocketPort)
     void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   }
   const togglePlatform = (platform: Platform) => {
@@ -275,9 +267,6 @@ function App() {
         showActivityOptions={false}
         showCompanionOptions
         endYouTubeOnObsStop={endYouTubeOnObsStop}
-        obsWebsocketHost={obsWebsocketHost}
-        obsWebsocketPort={obsWebsocketPort}
-        obsWebsocketConfigured={obsWebsocketConfigured}
         obsConnected={obsConnected}
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}

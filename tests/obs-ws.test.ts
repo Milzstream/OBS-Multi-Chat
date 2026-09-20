@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { obsAuthToken, obsStreamStopped, obsWebSocketUrl } from '../server/obs-ws.js'
+import { obsAuthToken, obsStreamStopped, obsWebSocketUrl, parseObsWebsocketConfig } from '../server/obs-ws.js'
 
 describe('OBS websocket helpers', () => {
   it('builds the Identify auth hash and treats stream stop events as stopped', () => {
@@ -13,5 +13,7 @@ describe('OBS websocket helpers', () => {
     assert.equal(obsStreamStopped('StreamStateChanged', { outputActive: true }), false)
     assert.equal(obsWebSocketUrl('', 0), 'ws://127.0.0.1:4455')
     assert.equal(obsWebSocketUrl('127.0.0.1', 4455), 'ws://127.0.0.1:4455')
+    assert.deepEqual(parseObsWebsocketConfig({}), { host: '127.0.0.1', port: 4455, password: '' })
+    assert.equal(parseObsWebsocketConfig({ RELAY_OBS_HOST: '10.0.0.2', RELAY_OBS_PORT: '4456', RELAY_OBS_PASSWORD: 'x' }).port, 4456)
   })
 })
