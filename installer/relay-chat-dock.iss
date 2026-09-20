@@ -226,7 +226,25 @@ begin
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
+var
+  i: Integer;
 begin
+  if CurPageID = wpSelectTasks then
+  begin
+    for i := 0 to WizardForm.TasksList.Items.Count - 1 do
+    begin
+      if Pos('OBS custom browser docks', WizardForm.TasksList.ItemCaption[i]) > 0 then
+      begin
+        if DocksAlreadyPresent then
+        begin
+          WizardForm.TasksList.ItemEnabled[i] := False;
+          WizardForm.TasksList.Checked[i] := False;
+        end
+        else
+          WizardForm.TasksList.ItemEnabled[i] := True;
+      end;
+    end;
+  end;
   if CurPageID = wpFinished then
     WizardForm.FinishedLabel.Caption :=
       'Relay Chat Dock is installed.'#13#10#13#10 +
@@ -253,24 +271,6 @@ begin
   Result := Dots = 2;
 end;
 
-function ProbeSeJwt(const Jwt: String): Boolean;
-var
-  Http: Variant;
-begin
-  Result := False;
-  try
-    Http := CreateOleObject('WinHttp.WinHttpRequest.5.1');
-    Http.SetTimeouts(4000, 4000, 4000, 8000);
-    Http.Open('GET', 'https://api.streamelements.com/kappa/v2/channels/me', False);
-    Http.SetRequestHeader('Authorization', 'Bearer ' + Jwt);
-    Http.SetRequestHeader('Accept', 'application/json');
-    Http.Send;
-    Result := Integer(Http.Status) = 200;
-  except
-    Result := False;
-  end;
-end;
-
 function PairOrNeither(Page: TInputQueryWizardPage; const PlatformName: String): Boolean;
 var
   HasId, HasSecret: Boolean;
@@ -284,24 +284,6 @@ begin
   end
   else
     Result := True;
-end;
-
-function ConfirmJwt(const LabelName, Jwt: String): Boolean;
-begin
-  Result := True;
-  if Jwt = '' then
-    Exit;
-  if not LooksLikeJwt(Jwt) then
-  begin
-    MsgBox('The ' + LabelName + ' StreamElements value does not look like a JWT. Copy it from Dashboard → avatar → Show secrets.', mbError, MB_OK);
-    Result := False;
-    Exit;
-  end;
-  if not ProbeSeJwt(Jwt) then
-  begin
-    if MsgBox('StreamElements rejected the ' + LabelName + ' JWT, or the network is unavailable. Continue anyway?', mbConfirmation, MB_YESNO) = IDNO then
-      Result := False;
-  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -326,7 +308,21 @@ begin
       Result := False;
       Exit;
     end;
-    Result := ConfirmJwt('Twitch', TwitchJwt) and ConfirmJwt('Kick', KickJwt) and ConfirmJwt('YouTube', YouTubeJwt);
+    if (TwitchJwt <> '') and not LooksLikeJwt(TwitchJwt) then
+    begin
+      MsgBox('The Twitch StreamElements value does not look like a JWT.', mbError, MB_OK);
+      Result := False;
+    end
+    else if (KickJwt <> '') and not LooksLikeJwt(KickJwt) then
+    begin
+      MsgBox('The Kick StreamElements value does not look like a JWT.', mbError, MB_OK);
+      Result := False;
+    end
+    else if (YouTubeJwt <> '') and not LooksLikeJwt(YouTubeJwt) then
+    begin
+      MsgBox('The YouTube StreamElements value does not look like a JWT.', mbError, MB_OK);
+      Result := False;
+    end;
   end;
 end;
 
