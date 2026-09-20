@@ -9,12 +9,13 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
+import { fileUrl, resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion } from './check-update.js'
+import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
@@ -117,9 +118,10 @@ process.on('warning', (warning) => {
 })
 
 const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
-const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
-const envPath = resolveEnvFilePath(runtimeDir)
-const envTemplatePath = resolveEnvTemplatePath(runtimeDir)
+const exeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
+const filesDir = operatorFilesDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd() })
+const envPath = resolveEnvFilePath(filesDir)
+const envTemplatePath = resolveEnvTemplatePath(exeDir)
 let envKeysAdded: string[] = []
 try {
   if (fs.existsSync(envPath) || isPackaged) envKeysAdded = syncEnvFile(envPath, envTemplatePath).added
@@ -129,6 +131,30 @@ try {
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
 const activityMax = parseActivityMax()
+
+if (process.argv.includes('--add-obs-docks')) {
+  const portArg = process.argv.indexOf('--port')
+  const configArg = process.argv.indexOf('--obs-config')
+  const dockPort = Number((portArg >= 0 && process.argv[portArg + 1]) || process.env.PORT || 4173)
+  const configDir = configArg >= 0 ? process.argv[configArg + 1] : undefined
+  if (obsProcessRunning()) {
+    console.error('OBS is running. Close OBS Studio, then add docks from the installer or Custom Browser Docks.')
+    process.exit(2)
+  }
+  const result = installRelayObsDocks({ configDir, port: dockPort })
+  if (result.status === 'added') console.log(`Added OBS docks in ${result.file}`)
+  else if (result.status === 'exists') console.log(`OBS docks already present in ${result.file}`)
+  else if (result.status === 'not-found') {
+    console.error('OBS settings folder not found. Add docks by hand:')
+    console.error(`  Chat      http://127.0.0.1:${dockPort}/`)
+    console.error(`  Activity  http://127.0.0.1:${dockPort}/activity`)
+    process.exitCode = 3
+  } else {
+    console.error(`Could not write OBS docks (${result.status}). Add them by hand from Custom Browser Docks.`)
+    process.exitCode = 4
+  }
+  process.exit()
+}
 
 type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
@@ -520,6 +546,7 @@ httpServer.listen(port, bindHost, () => {
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
+  console.log(`  Configuration:  ${fileUrl(envPath)}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)

@@ -3,7 +3,28 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { envKeyFromLine, envKeys, mergeEnvTemplate, resolveEnvFilePath, syncEnvFile } from '../server/env-file.js'
+import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+
+describe('console file links', () => {
+  it('builds a file URL and only wraps OSC-8 when the terminal supports it', () => {
+    assert.equal(fileUrl('D:\\Code Projects\\OBS-Multi-Chat\\deploy\\production.env'), 'file:///D:/Code%20Projects/OBS-Multi-Chat/deploy/production.env')
+    const label = 'D:\\env\\production.env'
+    const url = fileUrl(label)
+    assert.equal(consoleHyperlink(url, label, {}), label)
+    assert.match(consoleHyperlink(url, label, { WT_SESSION: '1' }), /^\u001b]8;;file:\/\/\//)
+  })
+})
+
+describe('set env key', () => {
+  it('fills an existing uncommented key and ignores empty values', () => {
+    const start = 'TWITCH_CLIENT_ID=\n# RELAY_BIND=127.0.0.1\nPORT=4173\n'
+    assert.equal(setEnvKey(start, 'TWITCH_CLIENT_ID', ''), start)
+    const next = setEnvKey(start, 'TWITCH_CLIENT_ID', 'abc')
+    assert.match(next, /^TWITCH_CLIENT_ID=abc$/m)
+    assert.match(next, /# RELAY_BIND=127\.0\.0\.1/)
+    assert.match(setEnvKey(start, 'STREAMELEMENTS_JWT_TWITCH', 'jwt-value'), /STREAMELEMENTS_JWT_TWITCH=jwt-value/)
+  })
+})
 
 describe('env key lines', () => {
   it('reads uncommented and commented KEY= lines, and ignores prose', () => {

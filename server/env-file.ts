@@ -39,6 +39,27 @@ export function envTemplateBlocks(text: string) {
   return blocks
 }
 
+/** Set an uncommented `KEY=value` line. Empty value is ignored. Does not touch commented keys. */
+export function setEnvKey(existing: string, key: string, value: string) {
+  const next = String(value || '').trim()
+  if (!key || !next) return existing
+  const nl = existing.includes('\r\n') ? '\r\n' : '\n'
+  const lines = existing.length ? existing.split(/\r?\n/) : []
+  const prefix = `${key}=`
+  let found = false
+  const out = lines.map((line) => {
+    if (found) return line
+    if (line.trimStart().startsWith('#') ) return line
+    if (line.trimStart().startsWith(prefix) || line.trim() === key) {
+      found = true
+      return `${key}=${next}`
+    }
+    return line
+  })
+  if (!found) out.push(`${key}=${next}`)
+  return out.join(nl)
+}
+
 /** Append template keys that are missing from `existing` (commented or not). */
 export function mergeEnvTemplate(existing: string, template: string) {
   const present = envKeys(existing)
@@ -55,6 +76,19 @@ export function mergeEnvTemplate(existing: string, template: string) {
   const body = existing.replace(/\s*$/, '')
   const chunk = extra.join('\n').replace(/^\n+/, '').replace(/\n/g, nl)
   return { text: `${body}${nl}${nl}${chunk}${nl}`, added }
+}
+
+/** `file:///C:/path` so terminals can treat the env file like the dock http links. */
+export function fileUrl(filePath: string) {
+  const normalized = path.resolve(filePath).replace(/\\/g, '/')
+  const prefixed = /^[A-Za-z]:/.test(normalized) ? `/${normalized}` : normalized
+  return `file://${encodeURI(prefixed)}`
+}
+
+/** OSC-8 hyperlink when Windows Terminal / VS Code will actually underline it. */
+export function consoleHyperlink(url: string, label: string, env: NodeJS.ProcessEnv = process.env) {
+  if (!env.WT_SESSION && env.TERM_PROGRAM !== 'vscode') return label
+  return `\u001b]8;;${url}\u001b\\${label}\u001b]8;;\u001b\\`
 }
 
 export function resolveEnvFilePath(runtimeDir: string, env: NodeJS.ProcessEnv = process.env) {

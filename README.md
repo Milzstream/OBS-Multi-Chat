@@ -12,13 +12,24 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
 
-1. Download `obs-multi-chat-v*-windows-x64.zip`
-2. Unzip it and fill in `production.env` with your API credentials and StreamElements JWTs
-3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe` (they are in the zip). The app reads its version from `package.json` to check GitHub for updates. On launch it appends any new keys from `.env.example` onto `production.env` without changing your existing values. When updating, replace the exe and `.env.example`; keep your filled `production.env`.
-4. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
-5. In OBS, add custom browser docks for chat and activity
+**Installer (recommended)**
 
-GitHub Actions builds that zip and attaches it to the GitHub Release when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
+1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
+2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist (the installer skips the question when the URLs are already in OBS)
+3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
+4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the console prints that path on every launch
+5. Start **Relay Chat Dock** from the Start Menu
+
+The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen.
+
+**Portable zip**
+
+1. Download `obs-multi-chat-v*-windows-x64.zip`
+2. Unzip it and fill in `production.env`
+3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe`
+4. Run `relay-chat-dock.exe` and add the two dock URLs in OBS if you did not use the installer
+
+GitHub Actions attaches both the zip and the setup exe when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
 
 ## What is included
 
@@ -190,7 +201,7 @@ Hiding or skipping an event in the StreamElements dashboard does **not** remove 
 
 Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Installer copies keep `production.env` and `data\` under `%LOCALAPPDATA%\Relay Chat Dock`. Portable zips keep those files beside the exe. Development runs keep them under the project directory. `RELAY_DATA_DIR` overrides any of those. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 
@@ -200,13 +211,14 @@ Activity history is stored locally in `data/activity.json` (last 5000 real event
 
 ## Run as a Windows background app
 
-Prefer the [prebuilt Windows zip](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. To build the executable locally:
+Prefer the [prebuilt Windows installer](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. To build the executable locally:
 
 ```powershell
 npm run package:win
+npm run installer:win
 ```
 
-This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` and `.env.example` beside the executable, then run:
+`package:win` creates `deploy\relay-chat-dock.exe`. `installer:win` needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and writes `obs-multi-chat-v*-windows-x64-setup.exe`. For a portable run, keep `production.env` and `.env.example` beside the executable, then run:
 
 ```powershell
 .\relay-chat-dock.exe
@@ -214,7 +226,7 @@ This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime support
 
 The same command also creates a ready-to-copy `deploy` folder containing the latest executable and frontend `dist` files. Existing values in `deploy/production.env` (including StreamElements JWTs) are preserved; the packager only adds missing keys. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`.
 
-On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Keep `.env.example` beside the exe when you update so that merge can run.
+On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
 The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
 
