@@ -8,6 +8,8 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
 
+![Companion console with dock URLs and configuration path](docs/console.png)
+
 ## Download
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
@@ -15,7 +17,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 **Installer (recommended)**
 
 1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
-2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist (the installer skips the question when the URLs are already in OBS)
+2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. After OBS starts, open **Docks** and check **Relay Chat** and **Relay Activity** — OBS lists installer-added docks but leaves them hidden until you enable them
 3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
 4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the console prints that path on every launch
 5. Start **Relay Chat Dock** from the Start Menu
@@ -43,6 +45,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
+
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows background executable packaging
 
@@ -55,7 +58,7 @@ http://localhost:4173
 http://localhost:4173/activity
 ```
 
-Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
+Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Activity is the alert feed.
 
 Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
 
@@ -108,6 +111,8 @@ Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
+
+Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
 
 ### Kick
 
@@ -179,9 +184,9 @@ Right-click a chat row to delete that message, or timeout/ban the chatter on tha
 
 ### Activity dock
 
-StreamElements is the source of truth. Put one JWT per linked platform in `production.env`. Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours; paste a new value and restart if SE rotates one.
+StreamElements is the source of truth. Paste one JWT per linked platform in Activity dock **Connection Settings** (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT in settings reconnects StreamElements without restarting the companion.
 
-If a JWT is missing, the console and Activity dock warn you until you add it and restart. Use **Ignore missing StreamElements JWT alerts** if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
+If a JWT is missing, the console and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
 
 | Filter | What you see |
 | --- | --- |

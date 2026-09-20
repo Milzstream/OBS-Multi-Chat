@@ -39,7 +39,7 @@ UsedUserAreasWarning=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks (skips URLs that already exist)"; GroupDescription: "OBS:";
+Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks (enable them under Docks in OBS after install)"; GroupDescription: "OBS:";
 
 [Files]
 Source: "..\deploy\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -283,6 +283,7 @@ begin
   if CurPageID = wpFinished then
     WizardForm.FinishedLabel.Caption :=
       'Relay Chat Dock is installed.'#13#10#13#10 +
+      'In OBS, open Docks and check Relay Chat and Relay Activity. OBS lists installer-added docks but leaves them hidden until you enable them.'#13#10#13#10 +
       'Your environment file is:'#13#10 +
       EnvFilePath + #13#10#13#10 +
       'Edit that file if a client ID, secret, or StreamElements JWT needs to change. The same path is printed in the companion console every launch.';

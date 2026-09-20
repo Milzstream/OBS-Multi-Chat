@@ -81,8 +81,8 @@ export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDi
       ) : (
         <>
           <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
-          <span>Save, then restart this app.</span>
+          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in Activity settings or production.env.` : 'Add StreamElements JWTs in Activity settings or production.env.'}</span>
+          <span>Paste a JWT in settings. No restart needed.</span>
         </>
       )}
     </div>
@@ -267,6 +267,16 @@ export default function ActivityApp() {
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
         onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
+        onJwtChange={async (platform, jwt) => {
+          try {
+            const response = await fetch('/api/jwts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: jwt }) })
+            const data = await response.json() as { error?: string }
+            if (!response.ok) return data.error || 'Could not save JWT'
+            return data.error
+          } catch {
+            return 'Could not save JWT'
+          }
+        }}
         note="Connect accounts here for backup or chat."
       />}
       {showSetup ? (

@@ -3,7 +3,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, hasDuplicateFilledValues, looksLikeJwt, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, hasDuplicateFilledValues, jwtPreview, looksLikeJwt, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+
+describe('jwt preview', () => {
+  it('never returns the full token', () => {
+    assert.deepEqual(jwtPreview(''), { configured: false, last4: '' })
+    assert.deepEqual(jwtPreview('secret-token-9876'), { configured: true, last4: '9876' })
+    assert.equal(setEnvKey('STREAMELEMENTS_JWT_TWITCH=old\n', 'STREAMELEMENTS_JWT_TWITCH', '', true), 'STREAMELEMENTS_JWT_TWITCH=\n')
+  })
+})
 
 describe('installer JWT checks', () => {
   it('accepts three-part JWTs and flags duplicate pasted values', () => {

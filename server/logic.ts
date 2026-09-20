@@ -925,8 +925,8 @@ export function youtubeOfficialModeration(item: any): ChatModeration | undefined
 export function missingStreamElementsMessage(missing: string[]) {
   if (!missing.length) return
   const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
-  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in production.env, then restart.`
-  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in production.env, then restart.`
+  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in Activity settings or production.env.`
+  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in Activity settings or production.env.`
 }
 
 export function emptyStreamDetails(): StreamDetails {
@@ -1105,7 +1105,14 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
 }
 
 export function defaultAppSettings(): AppSettings {
-  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, translateChat: true, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
+  return {
+    activityFallback: true,
+    ignoreMissingJwt: false,
+    dropOldAlerts: false,
+    translateChat: true,
+    streamInfo: emptyStreamInfo(),
+    youtubeQuota: { day: '', used: 0 },
+  }
 }
 
 /** Coerce the persisted settings JSON into a known-good shape, filling missing keys with app defaults. */

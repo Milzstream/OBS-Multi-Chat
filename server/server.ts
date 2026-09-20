@@ -10,7 +10,8 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { fileUrl, resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
+import { resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
+
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -139,10 +140,8 @@ process.on('unhandledRejection', (error) => {
   holdConsoleAndExit(1)
 })
 
-try {
-  fs.mkdirSync(filesDir, { recursive: true })
-  fs.appendFileSync(path.join(filesDir, 'launch.log'), `${new Date().toISOString()} start exe=${process.execPath} files=${filesDir}\n`)
-} catch { /* ignore */ }
+try { fs.mkdirSync(filesDir, { recursive: true }) } catch { /* ignore */ }
+try { fs.unlinkSync(path.join(filesDir, 'launch.log')) } catch { /* ignore */ }
 const envPath = resolveEnvFilePath(filesDir)
 const envTemplatePath = resolveEnvTemplatePath(exeDir)
 let envKeysAdded: string[] = []
@@ -477,7 +476,47 @@ app.post('/api/settings', (request, response) => {
     saveSettings()
     broadcast()
   }
-  response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, translateChat: settings.translateChat, streamelements: state.streamelements })
+  response.json({
+    activityFallback: settings.activityFallback,
+    ignoreMissingJwt: settings.ignoreMissingJwt,
+    dropOldAlerts: settings.dropOldAlerts,
+    translateChat: settings.translateChat,
+    streamelements: state.streamelements,
+  })
+})
+app.get('/api/jwts', (_request, response) => {
+  const slots = streamElementsJwtSlots()
+  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])))
+})
+app.post('/api/jwts', async (request, response) => {
+  const body = request.body as Partial<Record<'Twitch' | 'Kick' | 'YouTube', string>>
+  const platforms = ['Twitch', 'Kick', 'YouTube'] as const
+  let text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
+  if (!text) {
+    try { syncEnvFile(envPath, envTemplatePath) } catch { /* ignore */ }
+    text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
+  }
+  const saved: Array<'Twitch' | 'Kick' | 'YouTube'> = []
+  for (const platform of platforms) {
+    if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
+    const value = String(body[platform] ?? '').trim()
+    const key = STREAMELEMENTS_JWT_KEYS[platform]
+    text = setEnvKey(text, key, value, true)
+    process.env[key] = value
+    saved.push(platform)
+  }
+  let failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
+  if (saved.length) {
+    fs.mkdirSync(path.dirname(envPath), { recursive: true })
+    fs.writeFileSync(envPath, text, { encoding: 'utf8' })
+    failed = await startStreamElements(false)
+  }
+  const slots = streamElementsJwtSlots()
+  const error = failed.filter((item) => saved.includes(item.platform)).map((item) => item.message).join(' ')
+  response.json({
+    tokens: Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])),
+    error: error || undefined,
+  })
 })
 app.post('/api/open', createOpenHandler(openInDefaultBrowser))
 app.post('/api/activity/test', (request, response) => {
@@ -572,7 +611,7 @@ httpServer.listen(port, bindHost, () => {
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
-  console.log(`  Configuration:  ${fileUrl(envPath)}`)
+  console.log(`  Configuration:  ${envPath}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)
@@ -599,7 +638,7 @@ httpServer.listen(port, bindHost, () => {
   if (missing.length && !settings.ignoreMissingJwt) {
     const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
     console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
-    console.error(`  Add ${keys} in production.env, then restart this app.`)
+    console.error(`  Add ${keys} in Activity settings or production.env.`)
     console.error('')
   }
 })
@@ -1597,9 +1636,9 @@ function addNativeActivity(event: ActivityEvent) {
 
 function streamElementsJwtSlots() {
   return [
-    { platform: 'Twitch', jwt: String(process.env.STREAMELEMENTS_JWT_TWITCH || '').trim() },
-    { platform: 'Kick', jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
-    { platform: 'YouTube', jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
+    { platform: 'Twitch' as const, jwt: String(process.env.STREAMELEMENTS_JWT_TWITCH || '').trim() },
+    { platform: 'Kick' as const, jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
+    { platform: 'YouTube' as const, jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
   ]
 }
 
@@ -1622,28 +1661,40 @@ function setChatWarning(key: string, message?: string) {
 }
 
 async function startStreamElements(backfill = false) {
+  await streamElements.stop()
   const slots = streamElementsJwtSlots()
   const missing = slots.filter((slot) => !slot.jwt).map((slot) => slot.platform)
-  const jwts = [...new Set(slots.map((slot) => slot.jwt).filter(Boolean))]
   const missingNote = missingStreamElementsMessage(missing)
-  if (!jwts.length) {
+  const failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
+  if (!slots.some((slot) => slot.jwt)) {
     state.streamelements = { connected: false, handle: '', missing }
     setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
-    return
+    return failed
   }
   const channels = []
-  for (const jwt of jwts) {
+  const seen = new Map<string, Awaited<ReturnType<typeof hydrateStreamElements>>>()
+  for (const slot of slots) {
+    if (!slot.jwt) continue
+    const cached = seen.get(slot.jwt)
+    if (cached) {
+      channels.push(cached)
+      continue
+    }
     try {
-      channels.push(await hydrateStreamElements(jwt))
+      const channel = await hydrateStreamElements(slot.jwt)
+      seen.set(slot.jwt, channel)
+      channels.push(channel)
     } catch (error) {
-      console.error('StreamElements JWT failed:', error instanceof Error ? error.message : error)
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`StreamElements ${slot.platform} JWT failed:`, message)
+      failed.push({ platform: slot.platform, message })
     }
   }
   if (!channels.length) {
     state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
-    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check production.env, then restart.')
-    console.error('StreamElements JWTs failed to load. Check production.env, then restart.')
-    return
+    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check Activity settings or production.env.')
+    console.error('StreamElements JWTs failed to load. Check Activity settings or production.env.')
+    return failed
   }
   const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')
   state.streamelements = { connected: true, handle, missing }
@@ -1656,6 +1707,7 @@ async function startStreamElements(backfill = false) {
       for (const event of events) addActivity(event)
     }
   }
+  return failed
 }
 
 function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
