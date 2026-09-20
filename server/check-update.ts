@@ -10,7 +10,7 @@ import { isInstallerInstall } from './obs-docks.js'
  * copies can prompt, download the setup exe, exit, and let Setup replace the files.
  */
 
-interface GitHubRelease {
+export type GitHubRelease = {
   tag_name: string
   html_url: string
   draft: boolean
@@ -22,6 +22,10 @@ export type UpdateHooks = {
   confirm?: (message: string) => boolean
   download?: (url: string, dest: string) => Promise<void>
   startInstaller?: (setupPath: string) => void
+  currentVersion?: string
+  latestRelease?: GitHubRelease | null
+  installerCopy?: boolean
+  exit?: () => void
 }
 
 function parseVersion(version: string): number[] {
@@ -107,8 +111,18 @@ async function downloadFile(url: string, dest: string) {
   fs.writeFileSync(dest, Buffer.from(await response.arrayBuffer()))
 }
 
+export function silentSetupArgs() {
+  return ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/FORCECLOSEAPPLICATIONS', '/TASKS=!addobsdocks']
+}
+
+export function silentRelaunchPowershell(exePath: string, workingDir: string) {
+  const exe = exePath.replace(/'/g, "''")
+  const dir = workingDir.replace(/'/g, "''")
+  return `[void]([wmiclass]'Win32_Process').Create('"${exe}"','${dir}')`
+}
+
 function startInstaller(setupPath: string) {
-  spawn(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/FORCECLOSEAPPLICATIONS', '/TASKS=!addobsdocks'], {
+  spawn(setupPath, silentSetupArgs(), {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -121,14 +135,14 @@ function startInstaller(setupPath: string) {
  */
 export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
   try {
-    const currentVersion = getCurrentVersion()
-    const latestRelease = await getLatestGitHubRelease()
+    const currentVersion = hooks.currentVersion ?? getCurrentVersion()
+    const latestRelease = hooks.latestRelease !== undefined ? hooks.latestRelease : await getLatestGitHubRelease()
     if (!latestRelease || latestRelease.draft) return
     const latestVersion = latestRelease.tag_name
     if (compareVersions(latestVersion, currentVersion) <= 0) return
 
     const setupUrl = pickInstallerAsset(latestRelease.assets)
-    const installerCopy = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg) && isInstallerInstall(process.execPath)
+    const installerCopy = hooks.installerCopy ?? (Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg) && isInstallerInstall(process.execPath))
 
     console.log('')
     console.log('  Update available!')
@@ -146,10 +160,9 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     await (hooks.download || downloadFile)(setupUrl, dest)
     console.log('  Closing so Setup can replace the exe…')
     if (hooks.startInstaller) hooks.startInstaller(dest)
-    else {
-      startInstaller(dest)
-      process.exit(0)
-    }
+    else startInstaller(dest)
+    if (hooks.exit) hooks.exit()
+    else process.exit(0)
   } catch {
     // Update check is not critical
   }

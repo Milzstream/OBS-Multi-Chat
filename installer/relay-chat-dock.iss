@@ -386,7 +386,10 @@ begin
   begin
     ApplyGuidedEnv;
     if WizardSilent then
-      ShellExecAsOriginalUser('open', ExpandConstant('{app}\{#MyAppExeName}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode)
+    begin
+      Args := '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "[void]([wmiclass]''Win32_Process'').Create(''"' + ExpandConstant('{app}\{#MyAppExeName}') + '"'',' + '''' + ExpandConstant('{app}') + ''')"';
+      Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end
     else if WizardIsTaskSelected('addobsdocks') then
     begin
       Args := '--add-obs-docks --port 4173 --obs-config "' + GetObsConfig('') + '"';
