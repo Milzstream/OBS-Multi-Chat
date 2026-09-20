@@ -33,7 +33,7 @@ UsedUserAreasWarning=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks"; GroupDescription: "OBS:"; Flags: checked; Check: DocksNeeded
+Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks"; GroupDescription: "OBS:"; Check: DocksNeeded
 
 [Files]
 Source: "..\deploy\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
