@@ -151,6 +151,8 @@ describe('installer vs portable file locations', () => {
     const cwd = path.join(os.tmpdir(), 'cwd')
     const local = path.join(os.tmpdir(), 'localapp')
     assert.equal(operatorFilesDir({ packaged: true, execPath: exe, cwd, env: {} }), path.dirname(exe))
+    const pfExe = path.join('C:\\Program Files\\Relay Chat Dock', 'relay-chat-dock.exe')
+    assert.equal(operatorFilesDir({ packaged: true, execPath: pfExe, cwd, env: { LOCALAPPDATA: local } }), path.join(local, 'Relay Chat Dock'))
     const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-marker-'))
     const markerExe = path.join(markerDir, 'relay-chat-dock.exe')
     fs.writeFileSync(path.join(markerDir, 'installed.origin'), 'installer\n')

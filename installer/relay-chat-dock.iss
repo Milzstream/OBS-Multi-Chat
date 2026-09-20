@@ -60,7 +60,7 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 [Run]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Relay Chat Dock.lnk'); $s.TargetPath='{app}\{#MyAppExeName}'; $s.WorkingDirectory='{app}'; $s.Save()"""; Description: "Create a desktop shortcut"; Flags: postinstall skipifsilent runhidden
 Filename: "{win}\explorer.exe"; Parameters: "/select,""{localappdata}\{#MyAppName}\production.env"""; Description: "Open production.env location"; Flags: postinstall nowait skipifsilent
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch Relay Chat Dock"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "Launch Relay Chat Dock"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallDelete]
 Type: files; Name: "{app}\installed.origin"
