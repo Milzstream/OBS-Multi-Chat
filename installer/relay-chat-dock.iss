@@ -221,19 +221,19 @@ begin
   TwitchPage := CreateInputQueryPage(CredsIntro.ID, 'Twitch', 'https://dev.twitch.tv/console/apps',
     'Create a Confidential/Private application. Set the OAuth redirect to http://localhost:4173/oauth/callback then paste the client ID and secret.');
   TwitchPage.Add('Client ID:', False);
-  TwitchPage.Add('Client secret:', True);
+  TwitchPage.Add('Client secret:', False);
   AddLinkButton(TwitchPage, 'https://dev.twitch.tv/console/apps', 'Open Twitch developer console');
 
   KickPage := CreateInputQueryPage(TwitchPage.ID, 'Kick', 'https://dev.kick.com/',
     'Create an application. Set the OAuth redirect to http://localhost:4173/oauth/callback then paste the client ID and secret.');
   KickPage.Add('Client ID:', False);
-  KickPage.Add('Client secret:', True);
+  KickPage.Add('Client secret:', False);
   AddLinkButton(KickPage, 'https://dev.kick.com/', 'Open Kick developer portal');
 
   YouTubePage := CreateInputQueryPage(KickPage.ID, 'YouTube / Google', 'https://console.cloud.google.com/',
     'Enable YouTube Data API v3. Create a Web application OAuth client. Authorized redirect: http://localhost:4173/oauth/callback');
   YouTubePage.Add('Client ID:', False);
-  YouTubePage.Add('Client secret:', True);
+  YouTubePage.Add('Client secret:', False);
   AddLinkButton(YouTubePage, 'https://console.cloud.google.com/', 'Open Google Cloud console');
 
   SePage := CreateInputQueryPage(YouTubePage.ID, 'StreamElements', 'https://streamelements.com/dashboard',
