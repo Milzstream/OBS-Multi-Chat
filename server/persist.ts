@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { operatorFilesDir } from './obs-docks.js'
 
 /**
  * Durable JSON persistence for the server: resolves the data directory
@@ -8,7 +9,7 @@ import path from 'node:path'
  * previous good file so a crash mid-write is recoverable.
  */
 
-/** `RELAY_DATA_DIR` wins; otherwise packaged builds store next to the exe, dev builds under cwd. */
+/** `RELAY_DATA_DIR` wins; otherwise installer copies use LocalAppData, portable beside the exe, dev under cwd. */
 export function resolveDataDir(input: {
   packaged?: boolean
   execPath?: string
@@ -21,7 +22,7 @@ export function resolveDataDir(input: {
   const packaged = input.packaged ?? Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
   const execPath = input.execPath ?? process.execPath
   const cwd = input.cwd ?? process.cwd()
-  return path.resolve(packaged ? path.dirname(execPath) : cwd, 'data')
+  return path.join(operatorFilesDir({ packaged, execPath, cwd, env }), 'data')
 }
 
 /**

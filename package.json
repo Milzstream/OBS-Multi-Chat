@@ -1,7 +1,7 @@
 {
   "name": "obs-multi-chat",
   "private": true,
-  "version": "0.4.8",
+  "version": "0.5.0",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
@@ -11,7 +11,8 @@
     "test": "node scripts/run-tests.mjs",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
-    "package:win": "npm run build && tsc -p tsconfig.package.json && node -e \"require('fs').cpSync('dist','dist-package/dist',{recursive:true}); require('fs').copyFileSync('package-runtime.json','dist-package/package.json')\" && pkg dist-package/server.js --targets node18-win-x64 --output relay-chat-dock.build.exe && node scripts/finish-win-package.cjs"
+    "package:win": "npm run build && tsc -p tsconfig.package.json && node -e \"require('fs').cpSync('dist','dist-package/dist',{recursive:true}); require('fs').copyFileSync('package-runtime.json','dist-package/package.json')\" && pkg dist-package/server.js --targets node18-win-x64 --output relay-chat-dock.build.exe && node scripts/finish-win-package.cjs",
+    "installer:win": "node scripts/build-installer.cjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

@@ -4,12 +4,25 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createActivityStore } from '../server/activity.js'
-import { versionManifestPaths } from '../server/check-update.js'
+import { compareVersions, pickInstallerAsset, versionManifestPaths } from '../server/check-update.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'relay-persist-'))
 }
+
+describe('release update helpers', () => {
+  it('compares versions and picks the Windows setup asset', () => {
+    assert.equal(compareVersions('0.5.0', '0.4.8'), 1)
+    assert.equal(compareVersions('v0.5.0', '0.5.0'), 0)
+    assert.equal(compareVersions('0.4.9', '0.5.0'), -1)
+    assert.equal(pickInstallerAsset([
+      { name: 'obs-multi-chat-v0.5.0-windows-x64.zip', browser_download_url: 'https://example/x.zip' },
+      { name: 'obs-multi-chat-v0.5.0-windows-x64-setup.exe', browser_download_url: 'https://example/setup.exe' },
+    ]), 'https://example/setup.exe')
+    assert.equal(pickInstallerAsset([{ name: 'notes.md', browser_download_url: 'https://example/n' }]), undefined)
+  })
+})
 
 describe('packaged version manifest', () => {
   it('reads package.json beside the exe and does not walk into parent folders', () => {
@@ -23,10 +36,22 @@ describe('packaged version manifest', () => {
 })
 
 describe('packaged data directory', () => {
-  it('stores packaged data beside the executable, not cwd', () => {
+  it('stores packaged portable data beside the executable, not cwd', () => {
     const exe = path.join(os.tmpdir(), 'relay-install', 'relay-chat-dock.exe')
     const cwd = path.join(os.tmpdir(), 'other-cwd')
     assert.equal(resolveDataDir({ packaged: true, execPath: exe, cwd, env: {} }), path.join(path.dirname(exe), 'data'))
+  })
+
+  it('stores installer-managed data under LocalAppData', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-ins-'))
+    const exe = path.join(dir, 'relay-chat-dock.exe')
+    fs.writeFileSync(path.join(dir, 'installed.origin'), 'installer\n')
+    const local = path.join(os.tmpdir(), 'localapp-relay')
+    try {
+      assert.equal(resolveDataDir({ packaged: true, execPath: exe, cwd: path.join(os.tmpdir(), 'cwd'), env: { LOCALAPPDATA: local } }), path.join(local, 'Relay Chat Dock', 'data'))
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('keeps development data under the project cwd', () => {

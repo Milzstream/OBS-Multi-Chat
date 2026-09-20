@@ -1,10 +1,13 @@
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { isInstallerInstall } from './obs-docks.js'
 
 /**
  * Startup update check: compares the local `package.json` version against the
- * latest GitHub release and logs a one-off "update available" banner. Read-only;
- * it never downloads anything and silently no-ops when GitHub is unreachable.
+ * latest GitHub release. Portable copies log the download URL. Installer
+ * copies can prompt, download the setup exe, run it, and relaunch.
  */
 
 interface GitHubRelease {
@@ -12,15 +15,19 @@ interface GitHubRelease {
   html_url: string
   draft: boolean
   prerelease: boolean
+  assets?: { name: string; browser_download_url: string }[]
 }
 
-/**
- * Parses a semantic version string into comparable numbers
- * "0.3.9" -> [0, 3, 9]
- */
+export type UpdateHooks = {
+  confirm?: (message: string) => boolean
+  download?: (url: string, dest: string) => Promise<void>
+  runInstaller?: (setupPath: string) => number | null
+  relaunch?: (exePath: string) => void
+}
+
 function parseVersion(version: string): number[] {
   return version
-    .replace(/^v/, '') // Remove leading 'v' if present
+    .replace(/^v/, '')
     .split('.')
     .map((part) => {
       const num = parseInt(part, 10)
@@ -28,14 +35,10 @@ function parseVersion(version: string): number[] {
     })
 }
 
-/**
- * Compares two semantic versions
- * Returns: 1 if version1 > version2, -1 if version1 < version2, 0 if equal
- */
-function compareVersions(version1: string, version2: string): number {
+/** Returns 1 if version1 > version2, -1 if version1 < version2, 0 if equal. */
+export function compareVersions(version1: string, version2: string): number {
   const v1 = parseVersion(version1)
   const v2 = parseVersion(version2)
-
   for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
     const part1 = v1[i] ?? 0
     const part2 = v2[i] ?? 0
@@ -45,11 +48,13 @@ function compareVersions(version1: string, version2: string): number {
   return 0
 }
 
-/**
- * Candidate `package.json` locations to read the current version from.
- * Packaged builds look next to the exe first; dev runs walk up from cwd before
- * falling back to the exe dir (e.g. an Electron wrapper).
- */
+export function pickInstallerAsset(assets: { name: string; browser_download_url: string }[] | undefined) {
+  if (!assets?.length) return
+  const setup = assets.find((asset) => /windows-x64-setup\.exe$/i.test(asset.name))
+    || assets.find((asset) => /setup/i.test(asset.name) && /\.exe$/i.test(asset.name))
+  return setup?.browser_download_url
+}
+
 export function versionManifestPaths(input: { packaged: boolean; cwd: string; execPath: string }) {
   if (input.packaged) {
     return [
@@ -68,59 +73,91 @@ export function versionManifestPaths(input: { packaged: boolean; cwd: string; ex
 export function getCurrentVersion(): string {
   const packaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
   const pathsToTry = versionManifestPaths({ packaged, cwd: process.cwd(), execPath: process.execPath })
-
   for (const filePath of pathsToTry) {
     try {
       if (fs.existsSync(filePath)) {
         const packageJson = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-        if (packageJson.version) {
-          return packageJson.version
-        }
+        if (packageJson.version) return packageJson.version
       }
     } catch {
       // Try next path
     }
   }
-
   return '0.0.0'
 }
 
-/**
- * Fetches the latest release from GitHub
- */
 async function getLatestGitHubRelease(): Promise<GitHubRelease | null> {
   try {
     const response = await fetch('https://api.github.com/repos/Milzstream/OBS-Multi-Chat/releases/latest')
     if (!response.ok) return null
-    const data = (await response.json()) as GitHubRelease
-    return data
-  } catch (error) {
-    // Silently fail if we can't reach GitHub
+    return await response.json() as GitHubRelease
+  } catch {
     return null
   }
 }
 
+function windowsYesNo(message: string, title: string) {
+  if (process.platform !== 'win32') return false
+  const ps = `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show(@'\n${message}\n'@, @'\n${title}\n'@, 'YesNo', 'Question'); if ($r -eq 'Yes') { exit 0 } else { exit 1 }`
+  return spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { windowsHide: true }).status === 0
+}
+
+async function downloadFile(url: string, dest: string) {
+  const response = await fetch(url)
+  if (!response.ok || !response.body) throw new Error(`download ${response.status}`)
+  fs.writeFileSync(dest, Buffer.from(await response.arrayBuffer()))
+}
+
+function runInstaller(setupPath: string) {
+  const result = spawnSync(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES'], { windowsHide: true })
+  return result.status
+}
+
+function relaunch(exePath: string) {
+  spawn(exePath, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+}
+
 /**
- * Checks if an update is available and logs it to console
+ * Checks if an update is available. Portable copies log the GitHub URL.
+ * Installer copies prompt once, then download/run setup and relaunch.
  */
-export async function checkForUpdates(): Promise<void> {
+export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
   try {
     const currentVersion = getCurrentVersion()
     const latestRelease = await getLatestGitHubRelease()
-
     if (!latestRelease || latestRelease.draft) return
-
     const latestVersion = latestRelease.tag_name
-    const comparison = compareVersions(latestVersion, currentVersion)
+    if (compareVersions(latestVersion, currentVersion) <= 0) return
 
-    if (comparison > 0) {
-      console.log('')
-      console.log('  Update available!')
-      console.log(`  Current: ${currentVersion}, Latest: ${latestVersion}`)
-      console.log(`  Download: ${latestRelease.html_url}`)
-      console.log('')
+    const setupUrl = pickInstallerAsset(latestRelease.assets)
+    const installerCopy = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg) && isInstallerInstall(process.execPath)
+
+    console.log('')
+    console.log('  Update available!')
+    console.log(`  Current: ${currentVersion}, Latest: ${latestVersion}`)
+    console.log(`  Download: ${latestRelease.html_url}`)
+    console.log('')
+
+    if (!installerCopy || !setupUrl) return
+
+    const confirm = hooks.confirm || ((message) => windowsYesNo(message, 'Relay Chat Dock'))
+    const message = `Relay Chat Dock ${latestVersion} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
+    if (!confirm(message)) return
+
+    const dest = path.join(os.tmpdir(), `obs-multi-chat-${latestVersion.replace(/^v/i, '')}-setup.exe`)
+    await (hooks.download || downloadFile)(setupUrl, dest)
+    const status = (hooks.runInstaller || runInstaller)(dest)
+    if (status !== 0 && status != null) {
+      console.error(`  Installer exited ${status}. Download: ${latestRelease.html_url}`)
+      return
     }
-  } catch (error) {
-    // Silently fail - update check is not critical
+    const exePath = process.execPath
+    if (hooks.relaunch) hooks.relaunch(exePath)
+    else {
+      relaunch(exePath)
+      process.exit(0)
+    }
+  } catch {
+    // Update check is not critical
   }
 }

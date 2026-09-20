@@ -99,6 +99,14 @@ jobs:
         if: steps.gate.outputs.publish == 'true'
         run: npm run package:win
 
+      - name: Install Inno Setup
+        if: steps.gate.outputs.publish == 'true'
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        if: steps.gate.outputs.publish == 'true'
+        run: npm run installer:win
+
       - name: Stage release files
         if: steps.gate.outputs.publish == 'true'
         id: stage
@@ -108,10 +116,12 @@ jobs:
         run: |
           node scripts/stage-release.cjs
           $zip = "obs-multi-chat-v$env:RELEASE_VERSION-windows-x64.zip"
+          $setup = "obs-multi-chat-v$env:RELEASE_VERSION-windows-x64-setup.exe"
           if (Test-Path $zip) { Remove-Item $zip }
           Compress-Archive -Path "release-staging\*" -DestinationPath $zip
           "zip=$zip" >> $env:GITHUB_OUTPUT
-          Get-Item $zip | Select-Object Name, Length
+          "setup=$setup" >> $env:GITHUB_OUTPUT
+          Get-Item $zip, $setup | Select-Object Name, Length
 
       - name: Publish GitHub Release
         if: steps.gate.outputs.publish == 'true'
@@ -123,15 +133,17 @@ jobs:
           body: |
             Windows x64 build of Relay Chat Dock.
 
-            1. Unzip the archive
-            2. Fill in `production.env` with Twitch, Kick, and YouTube API credentials plus StreamElements JWTs
-            3. Run `relay-chat-dock.exe`
-            4. In OBS, add custom browser docks:
-               Chat      `http://localhost:4173`
-               Activity  `http://localhost:4173/activity`
+            **Installer (recommended):** run `obs-multi-chat-v*-windows-x64-setup.exe`. The companion goes in Program Files. Fill in `%LOCALAPPDATA%\Relay Chat Dock\production.env`. The installer can add the two OBS docks if those URLs are not already present.
 
-            Keep `package.json` and `.env.example` beside the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing existing values. When updating, replace the exe and `.env.example`; keep your filled `production.env`.
+            **Portable:** unzip the archive, fill in `production.env`, keep `package.json` and `.env.example` beside the exe.
 
-            Do not commit or share `production.env` or the `data` folder that appears beside the executable.
+            Dock URLs:
+            - Chat      `http://127.0.0.1:4173/`
+            - Activity  `http://127.0.0.1:4173/activity`
+
+            Installed copies can prompt to install the next release. `production.env` and `data\` are kept.
+
+            Do not commit or share `production.env` or the `data` folder.
           files: |
             ${{ steps.stage.outputs.zip }}
+            ${{ steps.stage.outputs.setup }}
