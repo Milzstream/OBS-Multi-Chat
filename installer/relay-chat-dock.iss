@@ -31,8 +31,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 SetupIconFile=..\assets\app-icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-CloseApplications=yes
-ForceCloseApplications=yes
+CloseApplications=force
 RestartApplications=no
 UsedUserAreasWarning=no
 
