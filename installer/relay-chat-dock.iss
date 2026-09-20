@@ -95,7 +95,7 @@ end;
 
 function GuideCredentials: Boolean;
 begin
-  Result := FirstInstall and Assigned(CredsIntro) and (CredsIntro.SelectedValue = 0);
+  Result := FirstInstall and Assigned(CredsIntro) and CredsIntro.Values[0];
 end;
 
 procedure OpenHintUrl(Sender: TObject);
@@ -188,8 +188,8 @@ begin
     'Relay needs a client ID and secret per platform (Twitch, Kick, YouTube) and StreamElements JWTs for the Activity dock. Skip if you would rather paste them into production.env yourself. The finish page always shows where that file is.',
     True, False);
   CredsIntro.Add('Guide me through each provider (opens their developer page)');
-  CredsIntro.Add('Skip — I will edit production.env myself');
-  CredsIntro.SelectedValue := 0;
+  CredsIntro.Add('Skip - I will edit production.env myself');
+  CredsIntro.Values[0] := True;
 
   TwitchPage := CreateInputQueryPage(CredsIntro.ID, 'Twitch', 'https://dev.twitch.tv/console/apps',
     'Create a Confidential/Private application. Set the OAuth redirect to http://localhost:4173/oauth/callback then paste the client ID and secret.');
