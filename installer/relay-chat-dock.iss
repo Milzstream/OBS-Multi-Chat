@@ -33,7 +33,7 @@ UsedUserAreasWarning=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks"; GroupDescription: "OBS:"; Check: DocksNeeded
+Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks (skips URLs that already exist)"; GroupDescription: "OBS:";
 
 [Files]
 Source: "..\deploy\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -41,7 +41,7 @@ Source: "..\deploy\dist\*"; DestDir: "{app}\dist"; Flags: ignoreversion recurses
 Source: "..\deploy\package.json"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "installed.origin"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\.env.example"; DestDir: "{localappdata}\{#MyAppName}"; DestName: "production.env"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "..\.env.example"; DestDir: "{localappdata}\{#MyAppName}"; DestName: "production.env"; Flags: onlyifdoesntexist
 Source: "..\scripts\obs-docks-present.ps1"; DestDir: "{tmp}"; Flags: dontcopy nocompression
 
 [Dirs]
@@ -52,10 +52,12 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{win}\explorer.exe"; Parameters: "/select,""{localappdata}\{#MyAppName}\production.env"""; Description: "Open production.env location"; Flags: postinstall nowait skipifsilent unchecked
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Relay Chat Dock.lnk'); $s.TargetPath='{app}\{#MyAppExeName}'; $s.WorkingDirectory='{app}'; $s.Save()"""; Description: "Create a desktop shortcut"; Flags: postinstall skipifsilent runhidden
+Filename: "{win}\explorer.exe"; Parameters: "/select,""{localappdata}\{#MyAppName}\production.env"""; Description: "Open production.env location"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
 Type: files; Name: "{app}\installed.origin"
+Type: files; Name: "{userdesktop}\Relay Chat Dock.lnk"
 
 [Code]
 var
@@ -78,11 +80,6 @@ var
 begin
   ExtractTemporaryFile('obs-docks-present.ps1');
   Result := Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\obs-docks-present.ps1') + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
-end;
-
-function DocksNeeded: Boolean;
-begin
-  Result := not DocksAlreadyPresent;
 end;
 
 function GetObsConfig(Param: String): String;
@@ -210,10 +207,10 @@ begin
   AddLinkButton(YouTubePage, 'https://console.cloud.google.com/', 'Open Google Cloud console');
 
   SePage := CreateInputQueryPage(YouTubePage.ID, 'StreamElements', 'https://streamelements.com/dashboard',
-    'Activity dock source of truth. In the SE dashboard: avatar → switch to that platform''s channel → Show secrets. JWTs last weeks. Leave a field blank to skip that platform.');
-  SePage.Add('Twitch JWT:', True);
-  SePage.Add('Kick JWT:', True);
-  SePage.Add('YouTube JWT:', True);
+    'Activity dock source of truth. In the SE dashboard: avatar → switch to that platform''s channel → Show secrets. JWTs last weeks. Leave a field blank to skip that platform. Values stay visible so you can confirm you did not paste the same token twice.');
+  SePage.Add('Twitch JWT:', False);
+  SePage.Add('Kick JWT:', False);
+  SePage.Add('YouTube JWT:', False);
   AddLinkButton(SePage, 'https://streamelements.com/dashboard', 'Open StreamElements dashboard');
 end;
 
@@ -236,6 +233,116 @@ begin
       'Your environment file is:'#13#10 +
       EnvFilePath + #13#10#13#10 +
       'Edit that file if a client ID, secret, or StreamElements JWT needs to change. The same path is printed in the companion console every launch.';
+end;
+
+function LooksLikeJwt(const Value: String): Boolean;
+var
+  i, Dots: Integer;
+begin
+  Result := False;
+  if Length(Value) < 20 then
+    Exit;
+  Dots := 0;
+  for i := 1 to Length(Value) do
+  begin
+    if Value[i] = '.' then
+      Dots := Dots + 1
+    else if not (((Value[i] >= 'A') and (Value[i] <= 'Z')) or ((Value[i] >= 'a') and (Value[i] <= 'z')) or ((Value[i] >= '0') and (Value[i] <= '9')) or (Value[i] = '-') or (Value[i] = '_')) then
+      Exit;
+  end;
+  Result := Dots = 2;
+end;
+
+function ProbeSeJwt(const Jwt: String): Boolean;
+var
+  Http: Variant;
+begin
+  Result := False;
+  try
+    Http := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+    Http.SetTimeouts(4000, 4000, 4000, 8000);
+    Http.Open('GET', 'https://api.streamelements.com/kappa/v2/channels/me', False);
+    Http.SetRequestHeader('Authorization', 'Bearer ' + Jwt);
+    Http.SetRequestHeader('Accept', 'application/json');
+    Http.Send;
+    Result := Integer(Http.Status) = 200;
+  except
+    Result := False;
+  end;
+end;
+
+function PairOrNeither(Page: TInputQueryWizardPage; const PlatformName: String): Boolean;
+var
+  HasId, HasSecret: Boolean;
+begin
+  HasId := Trim(Page.Values[0]) <> '';
+  HasSecret := Trim(Page.Values[1]) <> '';
+  if HasId <> HasSecret then
+  begin
+    MsgBox('Enter both the ' + PlatformName + ' client ID and secret, or leave both blank to skip.', mbError, MB_OK);
+    Result := False;
+  end
+  else
+    Result := True;
+end;
+
+function ConfirmJwt(const LabelName, Jwt: String): Boolean;
+begin
+  Result := True;
+  if Jwt = '' then
+    Exit;
+  if not LooksLikeJwt(Jwt) then
+  begin
+    MsgBox('The ' + LabelName + ' StreamElements value does not look like a JWT. Copy it from Dashboard → avatar → Show secrets.', mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
+  if not ProbeSeJwt(Jwt) then
+  begin
+    if MsgBox('StreamElements rejected the ' + LabelName + ' JWT, or the network is unavailable. Continue anyway?', mbConfirmation, MB_YESNO) = IDNO then
+      Result := False;
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  TwitchJwt, KickJwt, YouTubeJwt: String;
+begin
+  Result := True;
+  if Assigned(TwitchPage) and (CurPageID = TwitchPage.ID) then
+    Result := PairOrNeither(TwitchPage, 'Twitch')
+  else if Assigned(KickPage) and (CurPageID = KickPage.ID) then
+    Result := PairOrNeither(KickPage, 'Kick')
+  else if Assigned(YouTubePage) and (CurPageID = YouTubePage.ID) then
+    Result := PairOrNeither(YouTubePage, 'YouTube')
+  else if Assigned(SePage) and (CurPageID = SePage.ID) then
+  begin
+    TwitchJwt := Trim(SePage.Values[0]);
+    KickJwt := Trim(SePage.Values[1]);
+    YouTubeJwt := Trim(SePage.Values[2]);
+    if ((TwitchJwt <> '') and ((TwitchJwt = KickJwt) or (TwitchJwt = YouTubeJwt))) or ((KickJwt <> '') and (KickJwt = YouTubeJwt)) then
+    begin
+      MsgBox('Each StreamElements JWT is for one platform. You pasted the same value into more than one field.', mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+    Result := ConfirmJwt('Twitch', TwitchJwt) and ConfirmJwt('Kick', KickJwt) and ConfirmJwt('YouTube', YouTubeJwt);
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    DataDir := ExpandConstant('{localappdata}\{#MyAppName}');
+    if DirExists(DataDir) then
+    begin
+      DelTree(DataDir, True, True, True);
+      MsgBox('Removed configuration and data (including production.env with API secrets and JWTs) from:'#13#10#13#10 + DataDir, mbInformation, MB_OK);
+    end;
+  end;
 end;
 
 procedure CurStepChanged(Step: TSetupStep);

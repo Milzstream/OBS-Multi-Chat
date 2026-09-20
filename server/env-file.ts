@@ -9,6 +9,16 @@ import path from 'node:path'
 
 const KEY_LINE = /^\s*(#\s*)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/
 
+export function looksLikeJwt(value: string) {
+  const parts = String(value || '').trim().split('.')
+  return parts.length === 3 && parts.every((part) => part.length > 0 && /^[A-Za-z0-9_-]+$/.test(part))
+}
+
+export function hasDuplicateFilledValues(values: string[]) {
+  const filled = values.map((value) => value.trim()).filter(Boolean)
+  return new Set(filled).size !== filled.length
+}
+
 export function envKeyFromLine(line: string) {
   const match = line.match(KEY_LINE)
   if (!match) return
