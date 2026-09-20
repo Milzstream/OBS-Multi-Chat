@@ -15,7 +15,7 @@ import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion } from './check-update.js'
-import { installRelayObsDocks, isInstallerInstall, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
+import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
@@ -546,6 +546,7 @@ httpServer.listen(port, bindHost, () => {
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
+  console.log(`  ${envPath}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)
@@ -560,7 +561,6 @@ httpServer.listen(port, bindHost, () => {
   console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
   console.log(`  Activity history ${activityMax.toLocaleString()} events (RELAY_ACTIVITY_MAX) — how many alerts are stored and loaded on launch.`)
   if (envKeysAdded.length) console.log(`  Env file      added ${envKeysAdded.join(', ')} to ${path.basename(envPath)} (existing values kept).`)
-  if (isPackaged && isInstallerInstall(process.execPath)) console.log(`  Settings      ${filesDir}`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')

@@ -3,7 +3,18 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { envKeyFromLine, envKeys, mergeEnvTemplate, resolveEnvFilePath, syncEnvFile } from '../server/env-file.js'
+import { envKeyFromLine, envKeys, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+
+describe('set env key', () => {
+  it('fills an existing uncommented key and ignores empty values', () => {
+    const start = 'TWITCH_CLIENT_ID=\n# RELAY_BIND=127.0.0.1\nPORT=4173\n'
+    assert.equal(setEnvKey(start, 'TWITCH_CLIENT_ID', ''), start)
+    const next = setEnvKey(start, 'TWITCH_CLIENT_ID', 'abc')
+    assert.match(next, /^TWITCH_CLIENT_ID=abc$/m)
+    assert.match(next, /# RELAY_BIND=127\.0\.0\.1/)
+    assert.match(setEnvKey(start, 'STREAMELEMENTS_JWT_TWITCH', 'jwt-value'), /STREAMELEMENTS_JWT_TWITCH=jwt-value/)
+  })
+})
 
 describe('env key lines', () => {
   it('reads uncommented and commented KEY= lines, and ignores prose', () => {

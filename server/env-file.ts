@@ -39,6 +39,27 @@ export function envTemplateBlocks(text: string) {
   return blocks
 }
 
+/** Set an uncommented `KEY=value` line. Empty value is ignored. Does not touch commented keys. */
+export function setEnvKey(existing: string, key: string, value: string) {
+  const next = String(value || '').trim()
+  if (!key || !next) return existing
+  const nl = existing.includes('\r\n') ? '\r\n' : '\n'
+  const lines = existing.length ? existing.split(/\r?\n/) : []
+  const prefix = `${key}=`
+  let found = false
+  const out = lines.map((line) => {
+    if (found) return line
+    if (line.trimStart().startsWith('#') ) return line
+    if (line.trimStart().startsWith(prefix) || line.trim() === key) {
+      found = true
+      return `${key}=${next}`
+    }
+    return line
+  })
+  if (!found) out.push(`${key}=${next}`)
+  return out.join(nl)
+}
+
 /** Append template keys that are missing from `existing` (commented or not). */
 export function mergeEnvTemplate(existing: string, template: string) {
   const present = envKeys(existing)

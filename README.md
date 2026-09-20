@@ -16,8 +16,9 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 
 1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
 2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist (the installer skips the question when the URLs are already in OBS)
-3. Fill in `%LOCALAPPDATA%\Relay Chat Dock\production.env` with your API credentials and StreamElements JWTs
-4. Start **Relay Chat Dock** from the Start Menu
+3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
+4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the console prints that path on every launch
+5. Start **Relay Chat Dock** from the Start Menu
 
 The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen.
 
