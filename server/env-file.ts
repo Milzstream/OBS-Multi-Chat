@@ -78,6 +78,19 @@ export function mergeEnvTemplate(existing: string, template: string) {
   return { text: `${body}${nl}${nl}${chunk}${nl}`, added }
 }
 
+/** `file:///C:/path` so terminals can treat the env file like the dock http links. */
+export function fileUrl(filePath: string) {
+  const normalized = path.resolve(filePath).replace(/\\/g, '/')
+  const prefixed = /^[A-Za-z]:/.test(normalized) ? `/${normalized}` : normalized
+  return `file://${encodeURI(prefixed)}`
+}
+
+/** OSC-8 hyperlink when Windows Terminal / VS Code will actually underline it. */
+export function consoleHyperlink(url: string, label: string, env: NodeJS.ProcessEnv = process.env) {
+  if (!env.WT_SESSION && env.TERM_PROGRAM !== 'vscode') return label
+  return `\u001b]8;;${url}\u001b\\${label}\u001b]8;;\u001b\\`
+}
+
 export function resolveEnvFilePath(runtimeDir: string, env: NodeJS.ProcessEnv = process.env) {
   const configured = String(env.DOTENV_CONFIG_PATH || '').trim()
   if (configured) return configured
