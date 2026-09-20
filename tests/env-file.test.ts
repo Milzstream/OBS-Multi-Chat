@@ -3,7 +3,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, hasDuplicateFilledValues, looksLikeJwt, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+
+describe('installer JWT checks', () => {
+  it('accepts three-part JWTs and flags duplicate pasted values', () => {
+    const jwt = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjaGFubmVsIjoieCJ9.signature'
+    assert.equal(looksLikeJwt(jwt), true)
+    assert.equal(looksLikeJwt('not-a-jwt'), false)
+    assert.equal(looksLikeJwt(''), false)
+    assert.equal(hasDuplicateFilledValues(['aaa.bbb.ccc', 'aaa.bbb.ccc', '']), true)
+    assert.equal(hasDuplicateFilledValues(['aaa.bbb.ccc', 'ddd.eee.fff', '']), false)
+    assert.equal(hasDuplicateFilledValues(['', '', '']), false)
+  })
+})
 
 describe('console file links', () => {
   it('builds a file URL and only wraps OSC-8 when the terminal supports it', () => {
