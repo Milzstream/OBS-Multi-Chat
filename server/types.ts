@@ -30,7 +30,6 @@ export type AppSettings = {
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
   translateChat: boolean
-  endYouTubeOnObsStop: boolean
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota
 }

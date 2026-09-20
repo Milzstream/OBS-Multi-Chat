@@ -26,7 +26,7 @@ type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; use
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
 type YoutubeQuotaStatus = { used: number; limit: number }
-type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; translateError?: string; youtubeQuota?: YoutubeQuotaStatus; endYouTubeOnObsStop?: boolean; obsConnected?: boolean }
+type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; translateError?: string; youtubeQuota?: YoutubeQuotaStatus }
 
 const platformMeta: Record<Platform, { color: string; route: string }> = {
   Twitch: { color: '#a970ff', route: 'twitch' },
@@ -70,8 +70,6 @@ function App() {
   const [dropOldAlerts, setDropOldAlerts] = useState(false)
   const [translateChat, setTranslateChat] = useState(true)
   const [translateError, setTranslateError] = useState('')
-  const [endYouTubeOnObsStop, setEndYouTubeOnObsStop] = useState(false)
-  const [obsConnected, setObsConnected] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
   const connectedAccounts = connections.filter((connection) => connection.connected)
@@ -149,8 +147,6 @@ function App() {
         const translateError = remote.translateError
         setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
-      if (typeof fields.endYouTubeOnObsStop === 'boolean') setEndYouTubeOnObsStop(fields.endYouTubeOnObsStop)
-      if (typeof fields.obsConnected === 'boolean') setObsConnected(fields.obsConnected)
       setBackendOnline(true)
       if (fields.streamInfo) {
         const incoming = fields.streamInfo as StreamDetailsByPlatform
@@ -185,12 +181,11 @@ function App() {
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
-  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; endYouTubeOnObsStop?: boolean }) => {
+  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }) => {
     if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
     if (typeof body.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(body.ignoreMissingJwt)
     if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
     if (typeof body.translateChat === 'boolean') setTranslateChat(body.translateChat)
-    if (typeof body.endYouTubeOnObsStop === 'boolean') setEndYouTubeOnObsStop(body.endYouTubeOnObsStop)
     void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   }
   const togglePlatform = (platform: Platform) => {
@@ -265,9 +260,6 @@ function App() {
         translateChat={translateChat}
         translateError={translateError}
         showActivityOptions={false}
-        showCompanionOptions
-        endYouTubeOnObsStop={endYouTubeOnObsStop}
-        obsConnected={obsConnected}
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}
         onConnect={connectPlatform}
@@ -277,7 +269,6 @@ function App() {
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
         onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
-        onCompanionSettings={patchSettings}
         note="Connect accounts here for backup or chat."
       />}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - (menu.message.deleted ? 90 : 190))) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div>{menu.message.deleted ? <button type="button" onClick={() => moderate('unban')}>Unban / untimeout</button> : <><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></>}</div>}

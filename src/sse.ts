@@ -29,8 +29,6 @@ export function chatDockFields(remote: Record<string, unknown>) {
     youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : undefined,
     streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
     streamInfo: remote.streamInfo && typeof remote.streamInfo === 'object' ? remote.streamInfo : undefined,
-    endYouTubeOnObsStop: typeof remote.endYouTubeOnObsStop === 'boolean' ? remote.endYouTubeOnObsStop : undefined,
-    obsConnected: typeof remote.obsConnected === 'boolean' ? remote.obsConnected : undefined,
   }
 }
 

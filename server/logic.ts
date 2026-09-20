@@ -165,8 +165,7 @@ export function youtubeQuotaLabel(endpoint: string, method = 'GET') {
     return 'liveChatMessages.list'
   }
 
-  if (path.startsWith('liveBroadcasts') || /liveBroadcasts\/transition/i.test(endpoint)) {
-    if (/transition/i.test(endpoint) || /broadcastStatus=complete/i.test(endpoint)) return 'liveBroadcasts.transition'
+  if (path.startsWith('liveBroadcasts')) {
     if (verb === 'PUT') return 'liveBroadcasts.update'
     if (verb === 'POST') return 'liveBroadcasts.insert'
     return 'liveBroadcasts.list'
@@ -1111,7 +1110,6 @@ export function defaultAppSettings(): AppSettings {
     ignoreMissingJwt: false,
     dropOldAlerts: false,
     translateChat: true,
-    endYouTubeOnObsStop: false,
     streamInfo: emptyStreamInfo(),
     youtubeQuota: { day: '', used: 0 },
   }
@@ -1126,7 +1124,6 @@ export function parseAppSettings(value: unknown): AppSettings {
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
     translateChat: parsed.translateChat !== false,
-    endYouTubeOnObsStop: parsed.endYouTubeOnObsStop === true,
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }

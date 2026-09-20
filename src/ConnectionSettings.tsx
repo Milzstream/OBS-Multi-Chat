@@ -16,8 +16,8 @@ const JWT_PLATFORMS: Platform[] = ['Twitch', 'Kick', 'YouTube']
 
 /**
  * The connection settings popover: per-platform connect/disconnect and live
- * checks, Chat / Activity / Companion sections. JWT edits stay local and never
- * echo the full token. Companion (OBS websocket / end YouTube) is chat-dock only.
+ * checks, plus Chat / Activity sections. JWT edits stay local and never echo
+ * the full token.
  */
 
 export function ConnectionSettings({
@@ -29,10 +29,7 @@ export function ConnectionSettings({
   translateChat,
   translateError,
   showActivityOptions,
-  showCompanionOptions,
   jwtSlots,
-  endYouTubeOnObsStop,
-  obsConnected,
   platformIcon,
   onClose,
   onConnect,
@@ -43,7 +40,6 @@ export function ConnectionSettings({
   onToggleDropOld,
   onToggleTranslateChat,
   onJwtChange,
-  onCompanionSettings,
   note,
 }: {
   connections: Connection[]
@@ -54,10 +50,7 @@ export function ConnectionSettings({
   translateChat: boolean
   translateError?: string
   showActivityOptions: boolean
-  showCompanionOptions?: boolean
   jwtSlots?: Record<string, JwtPreview>
-  endYouTubeOnObsStop?: boolean
-  obsConnected?: boolean
   platformIcon: (platform: Platform, size?: number) => ReactNode
   onClose: () => void
   onConnect: (platform: Platform) => void
@@ -68,7 +61,6 @@ export function ConnectionSettings({
   onToggleDropOld: () => void
   onToggleTranslateChat: () => void
   onJwtChange?: (platform: Platform, jwt: string) => void
-  onCompanionSettings?: (body: { endYouTubeOnObsStop?: boolean }) => void
   note?: string
 }) {
   const missing = streamelements.missing || []
@@ -166,17 +158,6 @@ export function ConnectionSettings({
             <span>Drop alerts older than 30 days</span>
             <input type="checkbox" checked={dropOldAlerts} onChange={onToggleDropOld} />
           </label>
-        </>
-      ) : null}
-      {showCompanionOptions ? (
-        <>
-          <div className="settings-divider" />
-          <span className="settings-section-title">COMPANION</span>
-          <label className="settings-toggle">
-            <span>End YouTube live when OBS stops streaming</span>
-            <input type="checkbox" checked={Boolean(endYouTubeOnObsStop)} onChange={() => onCompanionSettings?.({ endYouTubeOnObsStop: !endYouTubeOnObsStop })} />
-          </label>
-          <p className="settings-note">OBS WebSocket {obsConnected ? 'connected' : 'disconnected'} (local 127.0.0.1:4455, or RELAY_OBS_HOST / RELAY_OBS_PORT / RELAY_OBS_PASSWORD). Fires only when OBS Stop Streaming, not on internet drop. Ends every YouTube live this companion is tracking, including Live + Shorts.</p>
         </>
       ) : null}
     </aside>

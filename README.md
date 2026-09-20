@@ -45,7 +45,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
-- Optional **End YouTube live when OBS stops streaming** (OBS WebSocket, default off) so YouTube does not stay live after OBS Stop Streaming
+
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows background executable packaging
 
@@ -61,8 +61,6 @@ http://localhost:4173/activity
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
 Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
-
-Chat dock **Connection Settings → Companion** can end every YouTube live this companion is tracking (Live and Shorts) when OBS Stop Streaming fires. That uses OBS 28+ built-in WebSocket on this PC (`127.0.0.1:4455` by default). Host, port, and password belong in `production.env` as `RELAY_OBS_HOST`, `RELAY_OBS_PORT`, and `RELAY_OBS_PASSWORD` if you changed OBS from the defaults. The checkbox is off until you turn it on. An internet drop does not fire it — only OBS Stop Streaming. Twitch and Kick already drop with RTMP.
 
 ## API setup
 
@@ -113,6 +111,8 @@ Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
+
+Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
 
 ### Kick
 
