@@ -110,6 +110,8 @@ describe('YouTube quota', () => {
     assert.equal(youtubeQuotaLabel('/videos?chart=mostPopular', 'GET'), 'videos.list')
     assert.equal(youtubeQuotaLabel('/liveBroadcasts?status=active', 'GET'), 'liveBroadcasts.list')
     assert.equal(youtubeQuotaLabel('/liveBroadcasts?part=snippet', 'PUT'), 'liveBroadcasts.update')
+    assert.equal(youtubeQuotaLabel('/liveBroadcasts/transition?broadcastStatus=complete&id=x', 'POST'), 'liveBroadcasts.transition')
+    assert.equal(youtubeQuotaCost('/liveBroadcasts/transition?broadcastStatus=complete', 'POST'), 50)
     assert.equal(youtubeQuotaLabel('/playlists', 'PATCH'), 'playlists PATCH')
   })
 

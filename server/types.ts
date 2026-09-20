@@ -25,7 +25,18 @@ export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
 export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
-export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: StreamInfoMap; youtubeQuota: YoutubeQuota }
+export type AppSettings = {
+  activityFallback: boolean
+  ignoreMissingJwt: boolean
+  dropOldAlerts: boolean
+  translateChat: boolean
+  endYouTubeOnObsStop: boolean
+  obsWebsocketHost: string
+  obsWebsocketPort: number
+  obsWebsocketPassword: string
+  streamInfo: StreamInfoMap
+  youtubeQuota: YoutubeQuota
+}
 
 // Chat-history cap: `CHAT_MAX` is the default, `RELAY_CHAT_MAX` may pull it
 // down to `CHAT_MAX_MIN` or up to `CHAT_MAX_HARD`. Activity uses the same

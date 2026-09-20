@@ -120,6 +120,8 @@ describe('settings', () => {
     const defaults = defaultAppSettings()
     assert.equal(defaults.activityFallback, true)
     assert.equal(defaults.translateChat, true)
+    assert.equal(defaults.endYouTubeOnObsStop, false)
+    assert.equal(defaults.obsWebsocketPort, 4455)
     assert.equal(defaults.youtubeQuota.used, 0)
     const parsed = parseAppSettings({
       activityFallback: false,

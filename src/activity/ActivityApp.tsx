@@ -81,8 +81,8 @@ export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDi
       ) : (
         <>
           <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the environment file.` : 'Add StreamElements JWTs in the environment file.'}</span>
-          <span>Save, then restart this app.</span>
+          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in Activity settings or production.env.` : 'Add StreamElements JWTs in Activity settings or production.env.'}</span>
+          <span>Paste a JWT in settings. No restart needed.</span>
         </>
       )}
     </div>
@@ -111,6 +111,7 @@ export default function ActivityApp() {
   const [showSettings, setShowSettings] = useState(false)
   const [showKinds, setShowKinds] = useState(false)
   const [testStatus, setTestStatus] = useState('')
+  const [jwtSlots, setJwtSlots] = useState<Record<string, { configured: boolean; last4: string }>>({})
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -124,6 +125,11 @@ export default function ActivityApp() {
   useEffect(() => {
     writeLocalPref(ACTIVITY_KIND_FILTER_KEY, JSON.stringify(kindFilter))
   }, [kindFilter])
+
+  useEffect(() => {
+    if (!showSettings) return
+    void fetch('/api/jwts').then((response) => response.ok ? response.json() : null).then((slots) => { if (slots) setJwtSlots(slots as Record<string, { configured: boolean; last4: string }>) }).catch(() => undefined)
+  }, [showSettings])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
@@ -258,6 +264,7 @@ export default function ActivityApp() {
         translateChat={translateChat}
         translateError={translateError}
         showActivityOptions
+        jwtSlots={jwtSlots}
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}
         onConnect={connectPlatform}
@@ -267,6 +274,9 @@ export default function ActivityApp() {
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
         onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
+        onJwtChange={(platform, jwt) => {
+          void fetch('/api/jwts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: jwt }) }).then((response) => response.ok ? response.json() : null).then((slots) => { if (slots) setJwtSlots(slots as Record<string, { configured: boolean; last4: string }>) }).catch(() => undefined)
+        }}
         note="Connect accounts here for backup or chat."
       />}
       {showSetup ? (

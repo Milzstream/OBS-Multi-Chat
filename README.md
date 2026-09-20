@@ -43,6 +43,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Kick chat over Kick's public chat WebSocket
 - SSE updates from the backend to OBS
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
+- Optional **End YouTube live when OBS stops streaming** (OBS WebSocket, default off) so YouTube does not stay live after OBS Stop Streaming
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows background executable packaging
 
@@ -58,6 +59,8 @@ http://localhost:4173/activity
 Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
 
 Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
+
+Chat dock **Connection Settings → Companion** can end every YouTube live this companion is tracking (Live and Shorts) when OBS Stop Streaming fires. It uses OBS 28+ built-in WebSocket (`127.0.0.1:4455` by default, optional password). The setting is off until you turn it on. Twitch and Kick already drop with RTMP.
 
 ## API setup
 
@@ -179,9 +182,9 @@ Right-click a chat row to delete that message, or timeout/ban the chatter on tha
 
 ### Activity dock
 
-StreamElements is the source of truth. Put one JWT per linked platform in `production.env`. Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours; paste a new value and restart if SE rotates one.
+StreamElements is the source of truth. Paste one JWT per linked platform in Activity dock **Connection Settings** (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT in settings reconnects StreamElements without restarting the companion.
 
-If a JWT is missing, the console and Activity dock warn you until you add it and restart. Use **Ignore missing StreamElements JWT alerts** if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
+If a JWT is missing, the console and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
 
 | Filter | What you see |
 | --- | --- |

@@ -10,7 +10,8 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { fileUrl, resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
+import { jwtPreview, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
+import { createObsWebSocket } from './obs-ws.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -179,7 +180,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus; endYouTubeOnObsStop: boolean; obsWebsocketHost: string; obsWebsocketPort: number; obsWebsocketConfigured: boolean; obsConnected: boolean }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -292,7 +293,22 @@ const state: State = {
   translateChat: settings.translateChat,
   translateError: '',
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
+  endYouTubeOnObsStop: settings.endYouTubeOnObsStop,
+  obsWebsocketHost: settings.obsWebsocketHost,
+  obsWebsocketPort: settings.obsWebsocketPort,
+  obsWebsocketConfigured: Boolean(settings.obsWebsocketPassword),
+  obsConnected: false,
 }
+
+const obsSocket = createObsWebSocket({
+  getConfig: () => ({ host: settings.obsWebsocketHost, port: settings.obsWebsocketPort, password: settings.obsWebsocketPassword }),
+  onStatus: (connected) => {
+    if (state.obsConnected === connected) return
+    state.obsConnected = connected
+    broadcast()
+  },
+  onStreamStopped: () => { if (settings.endYouTubeOnObsStop) void completeYouTubeLives() },
+})
 
 function persistChat() {
   try {
@@ -473,11 +489,81 @@ app.post('/api/settings', (request, response) => {
     state.translateChat = body.translateChat
     changed = true
   }
+  const companionBody = request.body as { endYouTubeOnObsStop?: boolean; obsWebsocketHost?: string; obsWebsocketPort?: number; obsWebsocketPassword?: string }
+  if (typeof companionBody.endYouTubeOnObsStop === 'boolean' && companionBody.endYouTubeOnObsStop !== settings.endYouTubeOnObsStop) {
+    settings.endYouTubeOnObsStop = companionBody.endYouTubeOnObsStop
+    state.endYouTubeOnObsStop = companionBody.endYouTubeOnObsStop
+    changed = true
+  }
+  if (typeof companionBody.obsWebsocketHost === 'string') {
+    const host = companionBody.obsWebsocketHost.trim() || '127.0.0.1'
+    if (host !== settings.obsWebsocketHost) {
+      settings.obsWebsocketHost = host
+      state.obsWebsocketHost = host
+      changed = true
+    }
+  }
+  if (companionBody.obsWebsocketPort != null) {
+    const obsPort = Math.max(1, Math.min(65535, Math.floor(Number(companionBody.obsWebsocketPort) || 4455)))
+    if (obsPort !== settings.obsWebsocketPort) {
+      settings.obsWebsocketPort = obsPort
+      state.obsWebsocketPort = obsPort
+      changed = true
+    }
+  }
+  let obsReconnect = false
+  if (typeof companionBody.obsWebsocketPassword === 'string') {
+    settings.obsWebsocketPassword = companionBody.obsWebsocketPassword
+    state.obsWebsocketConfigured = Boolean(settings.obsWebsocketPassword)
+    changed = true
+    obsReconnect = true
+  }
   if (changed) {
     saveSettings()
     broadcast()
+    if (obsReconnect || companionBody.obsWebsocketHost != null || companionBody.obsWebsocketPort != null) obsSocket.reconnect()
   }
-  response.json({ activityFallback: settings.activityFallback, ignoreMissingJwt: settings.ignoreMissingJwt, dropOldAlerts: settings.dropOldAlerts, translateChat: settings.translateChat, streamelements: state.streamelements })
+  response.json({
+    activityFallback: settings.activityFallback,
+    ignoreMissingJwt: settings.ignoreMissingJwt,
+    dropOldAlerts: settings.dropOldAlerts,
+    translateChat: settings.translateChat,
+    endYouTubeOnObsStop: settings.endYouTubeOnObsStop,
+    obsWebsocketHost: settings.obsWebsocketHost,
+    obsWebsocketPort: settings.obsWebsocketPort,
+    obsWebsocketConfigured: state.obsWebsocketConfigured,
+    obsConnected: state.obsConnected,
+    streamelements: state.streamelements,
+  })
+})
+app.get('/api/jwts', (_request, response) => {
+  const slots = streamElementsJwtSlots()
+  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])))
+})
+app.post('/api/jwts', async (request, response) => {
+  const body = request.body as Partial<Record<'Twitch' | 'Kick' | 'YouTube', string>>
+  const platforms = ['Twitch', 'Kick', 'YouTube'] as const
+  let text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
+  if (!text) {
+    try { syncEnvFile(envPath, envTemplatePath) } catch { /* ignore */ }
+    text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
+  }
+  let changed = false
+  for (const platform of platforms) {
+    if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
+    const key = STREAMELEMENTS_JWT_KEYS[platform]
+    const value = String(body[platform] ?? '').trim()
+    text = setEnvKey(text, key, value, true)
+    process.env[key] = value
+    changed = true
+  }
+  if (changed) {
+    fs.mkdirSync(path.dirname(envPath), { recursive: true })
+    fs.writeFileSync(envPath, text, { encoding: 'utf8' })
+    await startStreamElements(false)
+  }
+  const slots = streamElementsJwtSlots()
+  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])))
 })
 app.post('/api/open', createOpenHandler(openInDefaultBrowser))
 app.post('/api/activity/test', (request, response) => {
@@ -572,7 +658,7 @@ httpServer.listen(port, bindHost, () => {
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
-  console.log(`  Configuration:  ${fileUrl(envPath)}`)
+  console.log(`  Configuration:  ${envPath}`)
   console.log('')
   console.log(`  Chat dock      ${base}`)
   console.log(`  Activity dock  ${base}/activity`)
@@ -596,10 +682,11 @@ httpServer.listen(port, bindHost, () => {
   console.log('')
   listenForYouTubeQuotaInput()
   void checkForUpdates()
+  obsSocket.start()
   if (missing.length && !settings.ignoreMissingJwt) {
     const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
     console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
-    console.error(`  Add ${keys} in production.env, then restart this app.`)
+    console.error(`  Add ${keys} in Activity settings or production.env.`)
     console.error('')
   }
 })
@@ -964,6 +1051,25 @@ async function youtubeApi(endpoint: string, token: Token, options: RequestInit =
   if (result.status === 403 && /quotaExceeded/i.test(result.text)) throw new Error('YouTube API 403 quota exceeded')
   if (!result.ok) throw new Error(`YouTube API ${result.status}: ${youtubeApiErrorReason(result.text)}`)
   return result.text ? JSON.parse(result.text) : {}
+}
+
+async function completeYouTubeLives() {
+  const token = tokens.YouTube
+  if (!token || youtubeQuotaBlocked()) return
+  const ids = [...new Set(youtubeTargets.map((target) => target.videoId).filter(Boolean))]
+  if (!ids.length) return
+  for (const id of ids) {
+    try {
+      await youtubeApi(`liveBroadcasts/transition?part=status&id=${encodeURIComponent(id)}&broadcastStatus=complete`, token, { method: 'POST' })
+      console.log(`Ended YouTube live ${id}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (/invalidTransition|redundantTransition/i.test(message)) console.log(`YouTube live ${id} already ended (${message})`)
+      else console.error(`YouTube complete ${id}:`, message)
+    }
+  }
+  youtubeForceStatus = true
+  try { await pollYouTube() } catch (error) { console.error('YouTube poll after complete:', error instanceof Error ? error.message : error) }
 }
 
 function startAdapter(platform: Platform) {
@@ -1622,6 +1728,7 @@ function setChatWarning(key: string, message?: string) {
 }
 
 async function startStreamElements(backfill = false) {
+  await streamElements.stop()
   const slots = streamElementsJwtSlots()
   const missing = slots.filter((slot) => !slot.jwt).map((slot) => slot.platform)
   const jwts = [...new Set(slots.map((slot) => slot.jwt).filter(Boolean))]
@@ -1641,8 +1748,8 @@ async function startStreamElements(backfill = false) {
   }
   if (!channels.length) {
     state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
-    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check production.env, then restart.')
-    console.error('StreamElements JWTs failed to load. Check production.env, then restart.')
+    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check Activity settings or production.env.')
+    console.error('StreamElements JWTs failed to load. Check Activity settings or production.env.')
     return
   }
   const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')
@@ -2303,6 +2410,11 @@ function sseSettings() {
     dropOldAlerts: state.dropOldAlerts,
     translateChat: state.translateChat,
     translateError: state.translateError,
+    endYouTubeOnObsStop: state.endYouTubeOnObsStop,
+    obsWebsocketHost: state.obsWebsocketHost,
+    obsWebsocketPort: state.obsWebsocketPort,
+    obsWebsocketConfigured: state.obsWebsocketConfigured,
+    obsConnected: state.obsConnected,
   }
 }
 

@@ -9,6 +9,18 @@ import path from 'node:path'
 
 const KEY_LINE = /^\s*(#\s*)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/
 
+export const STREAMELEMENTS_JWT_KEYS = {
+  Twitch: 'STREAMELEMENTS_JWT_TWITCH',
+  Kick: 'STREAMELEMENTS_JWT_KICK',
+  YouTube: 'STREAMELEMENTS_JWT_YOUTUBE',
+} as const
+
+export function jwtPreview(jwt: string) {
+  const value = String(jwt || '').trim()
+  if (!value) return { configured: false, last4: '' }
+  return { configured: true, last4: value.slice(-4) }
+}
+
 export function looksLikeJwt(value: string) {
   const parts = String(value || '').trim().split('.')
   return parts.length === 3 && parts.every((part) => part.length > 0 && /^[A-Za-z0-9_-]+$/.test(part))
@@ -49,10 +61,10 @@ export function envTemplateBlocks(text: string) {
   return blocks
 }
 
-/** Set an uncommented `KEY=value` line. Empty value is ignored. Does not touch commented keys. */
-export function setEnvKey(existing: string, key: string, value: string) {
+/** Set an uncommented `KEY=value` line. Empty value is ignored unless `allowEmpty` is set. */
+export function setEnvKey(existing: string, key: string, value: string, allowEmpty = false) {
   const next = String(value || '').trim()
-  if (!key || !next) return existing
+  if (!key || (!next && !allowEmpty)) return existing
   const nl = existing.includes('\r\n') ? '\r\n' : '\n'
   const lines = existing.length ? existing.split(/\r?\n/) : []
   const prefix = `${key}=`

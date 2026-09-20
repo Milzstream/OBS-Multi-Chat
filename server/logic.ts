@@ -165,7 +165,8 @@ export function youtubeQuotaLabel(endpoint: string, method = 'GET') {
     return 'liveChatMessages.list'
   }
 
-  if (path.startsWith('liveBroadcasts')) {
+  if (path.startsWith('liveBroadcasts') || /liveBroadcasts\/transition/i.test(endpoint)) {
+    if (/transition/i.test(endpoint) || /broadcastStatus=complete/i.test(endpoint)) return 'liveBroadcasts.transition'
     if (verb === 'PUT') return 'liveBroadcasts.update'
     if (verb === 'POST') return 'liveBroadcasts.insert'
     return 'liveBroadcasts.list'
@@ -925,8 +926,8 @@ export function youtubeOfficialModeration(item: any): ChatModeration | undefined
 export function missingStreamElementsMessage(missing: string[]) {
   if (!missing.length) return
   const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
-  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in production.env, then restart.`
-  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in production.env, then restart.`
+  if (missing.length === 3) return `Add STREAMELEMENTS_JWT_TWITCH, STREAMELEMENTS_JWT_KICK, and STREAMELEMENTS_JWT_YOUTUBE in Activity settings or production.env.`
+  return `Missing StreamElements JWT${missing.length === 1 ? '' : 's'} for ${missing.join(', ')}. Add ${keys} in Activity settings or production.env.`
 }
 
 export function emptyStreamDetails(): StreamDetails {
@@ -1105,7 +1106,18 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
 }
 
 export function defaultAppSettings(): AppSettings {
-  return { activityFallback: true, ignoreMissingJwt: false, dropOldAlerts: false, translateChat: true, streamInfo: emptyStreamInfo(), youtubeQuota: { day: '', used: 0 } }
+  return {
+    activityFallback: true,
+    ignoreMissingJwt: false,
+    dropOldAlerts: false,
+    translateChat: true,
+    endYouTubeOnObsStop: false,
+    obsWebsocketHost: '127.0.0.1',
+    obsWebsocketPort: 4455,
+    obsWebsocketPassword: '',
+    streamInfo: emptyStreamInfo(),
+    youtubeQuota: { day: '', used: 0 },
+  }
 }
 
 /** Coerce the persisted settings JSON into a known-good shape, filling missing keys with app defaults. */
@@ -1117,6 +1129,10 @@ export function parseAppSettings(value: unknown): AppSettings {
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
     translateChat: parsed.translateChat !== false,
+    endYouTubeOnObsStop: parsed.endYouTubeOnObsStop === true,
+    obsWebsocketHost: String(parsed.obsWebsocketHost || '127.0.0.1').trim() || '127.0.0.1',
+    obsWebsocketPort: Math.max(1, Math.min(65535, Math.floor(Number(parsed.obsWebsocketPort) || 4455))),
+    obsWebsocketPassword: String(parsed.obsWebsocketPassword || ''),
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }
