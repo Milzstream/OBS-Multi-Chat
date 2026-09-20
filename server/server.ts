@@ -325,6 +325,9 @@ let twitchEventSubUnsupported = false
 let twitchKeepaliveMs = 10_000
 let twitchLastEventSub = 0
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
+let sseSeq = 0
+let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+let lastActivityEvents: ActivityEvent[] = []
 
 app.use(cors({ origin: corsOriginDelegate(localApi) }))
 app.use(express.json())
@@ -2281,10 +2284,6 @@ function writeSse(client: express.Response, chunk: string) {
     clients.delete(client)
   }
 }
-
-let sseSeq = 0
-let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
-let lastActivityEvents: ActivityEvent[] = []
 
 function ssePresence() {
   return {
