@@ -130,6 +130,8 @@ jobs:
                Chat      `http://localhost:4173`
                Activity  `http://localhost:4173/activity`
 
+            Keep `package.json` and `.env.example` beside the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing existing values. When updating, replace the exe and `.env.example`; keep your filled `production.env`.
+
             Do not commit or share `production.env` or the `data` folder that appears beside the executable.
           files: |
             ${{ steps.stage.outputs.zip }}
