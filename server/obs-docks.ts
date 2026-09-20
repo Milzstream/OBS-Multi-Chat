@@ -202,9 +202,13 @@ export function isInstallerInstall(execPath: string) {
   return fs.existsSync(path.join(path.dirname(execPath), INSTALLER_MARKER))
 }
 
+export function isProtectedInstallDir(execPath: string) {
+  return /[\\/]Program Files( \(x86\))?[\\/]/i.test(execPath)
+}
+
 export function operatorFilesDir(input: { packaged: boolean; execPath: string; cwd: string; env?: NodeJS.ProcessEnv }) {
   const env = input.env ?? process.env
-  if (input.packaged && isInstallerInstall(input.execPath) && env.LOCALAPPDATA) {
+  if (input.packaged && env.LOCALAPPDATA && (isInstallerInstall(input.execPath) || isProtectedInstallDir(input.execPath))) {
     return path.join(env.LOCALAPPDATA, APP_FOLDER_NAME)
   }
   return input.packaged ? path.dirname(input.execPath) : input.cwd

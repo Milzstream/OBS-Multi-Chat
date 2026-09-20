@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import dotenv from 'dotenv'
 import express from 'express'
 import cors from 'cors'
@@ -120,6 +121,28 @@ process.on('warning', (warning) => {
 const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
 const exeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
 const filesDir = operatorFilesDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd() })
+
+function holdConsoleAndExit(code = 1): never {
+  process.exitCode = code
+  if (isPackaged && process.platform === 'win32') {
+    try { spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'pause'], { stdio: 'inherit', windowsHide: false }) } catch { /* ignore */ }
+  }
+  process.exit(code)
+}
+
+process.on('uncaughtException', (error) => {
+  console.error(error)
+  holdConsoleAndExit(1)
+})
+process.on('unhandledRejection', (error) => {
+  console.error(error)
+  holdConsoleAndExit(1)
+})
+
+try {
+  fs.mkdirSync(filesDir, { recursive: true })
+  fs.appendFileSync(path.join(filesDir, 'launch.log'), `${new Date().toISOString()} start exe=${process.execPath} files=${filesDir}\n`)
+} catch { /* ignore */ }
 const envPath = resolveEnvFilePath(filesDir)
 const envTemplatePath = resolveEnvTemplatePath(exeDir)
 let envKeysAdded: string[] = []
@@ -302,6 +325,9 @@ let twitchEventSubUnsupported = false
 let twitchKeepaliveMs = 10_000
 let twitchLastEventSub = 0
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
+let sseSeq = 0
+let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+let lastActivityEvents: ActivityEvent[] = []
 
 app.use(cors({ origin: corsOriginDelegate(localApi) }))
 app.use(express.json())
@@ -537,7 +563,7 @@ if (fs.existsSync(distPath)) {
 httpServer.on('error', (error: NodeJS.ErrnoException) => {
   if (error.code === 'EADDRINUSE') console.error(`Relay is already running on port ${port}. Close the existing relay-chat-dock.exe before starting another copy.`)
   else console.error('Relay backend failed to start:', error)
-  process.exitCode = 1
+  holdConsoleAndExit(1)
 })
 httpServer.listen(port, bindHost, () => {
   ensureYouTubeQuotaDay()
@@ -2258,10 +2284,6 @@ function writeSse(client: express.Response, chunk: string) {
     clients.delete(client)
   }
 }
-
-let sseSeq = 0
-let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
-let lastActivityEvents: ActivityEvent[] = []
 
 function ssePresence() {
   return {
