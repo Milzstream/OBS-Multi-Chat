@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import type { ActivityEvent } from './activity.js'
 import type { YouTubeChatTarget } from './youtube-chat.js'
 import {
+  ACTIVITY_MAX,
   CHAT_MAX,
   CHAT_MAX_HARD,
   CHAT_MAX_MIN,
@@ -31,6 +32,7 @@ import {
  */
 
 export {
+  ACTIVITY_MAX,
   CHAT_MAX,
   CHAT_MAX_HARD,
   CHAT_MAX_MIN,
@@ -44,13 +46,45 @@ export {
 
 const NON_ENGLISH = /[\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0590-\u05FF]/
 
+function parseBoundedMax(rawValue: string | undefined, fallback: number) {
+  const raw = String(rawValue || '').trim()
+  if (!raw) return fallback
+  const n = Math.floor(Number(raw))
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(CHAT_MAX_HARD, Math.max(CHAT_MAX_MIN, n))
+}
+
 /** Resolve the `RELAY_CHAT_MAX` chat-history cap from env, clamped to `CHAT_MAX_MIN..CHAT_MAX_HARD`. */
 export function parseChatMax(env: Record<string, string | undefined> = process.env) {
-  const raw = String(env.RELAY_CHAT_MAX || '').trim()
-  if (!raw) return CHAT_MAX
-  const n = Math.floor(Number(raw))
-  if (!Number.isFinite(n)) return CHAT_MAX
-  return Math.min(CHAT_MAX_HARD, Math.max(CHAT_MAX_MIN, n))
+  return parseBoundedMax(env.RELAY_CHAT_MAX, CHAT_MAX)
+}
+
+/** Resolve the `RELAY_ACTIVITY_MAX` activity-history cap from env, same bounds as chat. */
+export function parseActivityMax(env: Record<string, string | undefined> = process.env) {
+  return parseBoundedMax(env.RELAY_ACTIVITY_MAX, ACTIVITY_MAX)
+}
+
+/**
+ * True when `next` is `previous` with one newer row prepended (and maybe the
+ * oldest row dropped at the cap). Used so activity SSE can send that one event
+ * instead of the whole buffer.
+ */
+export function activityAppendedEvent<T extends { id: string }>(previous: T[], next: T[]) {
+  if (!next.length) return
+  const added = next[0]
+  if (!added?.id || previous.some((item) => item.id === added.id)) return
+  const rest = next.slice(1)
+  if (rest.length === previous.length && rest.every((item, i) => item.id === previous[i]?.id)) return added
+  if (rest.length === previous.length - 1 && rest.every((item, i) => item.id === previous[i]?.id)) return added
+}
+
+/** Build the activity SSE slice: one new event, warnings only, or a full replace. */
+export function activitySseFields<T extends { id: string }>(previous: T[], next: T[], warnings: string[]) {
+  const appended = activityAppendedEvent(previous, next)
+  if (appended) return { activityEvent: appended, activityWarnings: warnings }
+  const sameList = previous.length === next.length && previous.every((item, i) => item.id === next[i]?.id)
+  if (sameList) return { activityWarnings: warnings }
+  return { activity: next, activityWarnings: warnings }
 }
 
 export function looksLikePlaceholder(handle: string) {

@@ -50,6 +50,25 @@ describe('activity store', () => {
       try { fs.unlinkSync(file) } catch { /* ignore */ }
     }
   })
+
+  it('caps real events at the configured max and still keeps test rows in memory only', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-cap-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file, 2)
+      assert.equal(store.add({ id: 'f1', platform: 'Twitch', kind: 'follow', user: 'Ada', time: '2026-09-02T12:00:00.000Z' }), true)
+      assert.equal(store.add({ id: 'f2', platform: 'Twitch', kind: 'follow', user: 'Mel', time: '2026-09-02T12:01:00.000Z' }), true)
+      assert.equal(store.add({ id: 'f3', platform: 'Twitch', kind: 'follow', user: 'Pat', time: '2026-09-02T12:02:00.000Z' }), true)
+      assert.equal(store.add({ id: 'test-keep', platform: 'Twitch', kind: 'follow', user: 'TestUser', time: '2026-09-02T12:03:00.000Z' }), true)
+      const ids = store.list().map((event) => event.id)
+      assert.deepEqual(ids.filter((id) => id !== 'test-keep').slice(0, 2), ['f3', 'f2'])
+      assert.equal(ids.includes('f1'), false)
+      assert.equal(ids.includes('test-keep'), true)
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string }[]
+      assert.deepEqual(saved.map((event) => event.id), ['f3', 'f2'])
+    } finally {
+      try { fs.unlinkSync(file) } catch { /* ignore */ }
+    }
+  })
 })
 
 describe('Twitch EventSub activity', () => {

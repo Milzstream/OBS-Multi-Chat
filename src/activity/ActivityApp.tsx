@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'lucide-react'
+import { Bell, Filter, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
 import { ConnectionSettings } from '../ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
-import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, parseStoredFilter, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
-import { activityDockFields, subscribeDockSse } from '../sse'
+import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, parseStoredFilter, parseStoredStringSet, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
+import { ACTIVITY_KIND_GROUP_IDS, ACTIVITY_KIND_GROUPS, visibleActivityEvents } from './format'
+import { activityDockFields, applyActivitySlice, subscribeDockSse } from '../sse'
+import { ACTIVITY_ROW_ESTIMATE, useVirtualWindow } from '../virtualList'
 
 /**
  * The activity dock: renders follows, subs, tips, raids, and more from the
- * server's SSE stream, with a platform filter, relative-time aging, test-alert
- * injector, settings, and the same live-edge scroll convention as chat.
+ * server's SSE stream, with platform and kind filters, a virtualized feed,
+ * relative-time aging, test-alert injector, settings, and the same live-edge
+ * scroll convention as chat.
  */
 
 type Filter = ActivityFilter
@@ -101,10 +104,12 @@ export default function ActivityApp() {
   const [translateError, setTranslateError] = useState('')
   const [dismissedWarning, setDismissedWarning] = useState(false)
   const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
+  const [kindFilter, setKindFilter] = useState<string[]>(() => parseStoredStringSet(readLocalPref(ACTIVITY_KIND_FILTER_KEY), ACTIVITY_KIND_GROUP_IDS))
   const [now, setNow] = useState(Date.now())
   const [backendOnline, setBackendOnline] = useState(false)
   const [showTests, setShowTests] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showKinds, setShowKinds] = useState(false)
   const [testStatus, setTestStatus] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -117,6 +122,10 @@ export default function ActivityApp() {
   }, [filter])
 
   useEffect(() => {
+    writeLocalPref(ACTIVITY_KIND_FILTER_KEY, JSON.stringify(kindFilter))
+  }, [kindFilter])
+
+  useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(timer)
   }, [])
@@ -126,7 +135,7 @@ export default function ActivityApp() {
     // so an activity/settings slice cannot flash “StreamElements not configured”.
     const applySnapshot = (remote: BackendState) => {
       const fields = activityDockFields(remote as unknown as Record<string, unknown>)
-      if (fields.activity) setEvents(fields.activity as ActivityEvent[])
+      if (fields.activity || fields.activityEvent) setEvents((previous) => applyActivitySlice(previous, fields) as ActivityEvent[])
       if (fields.activityWarnings) setActivityWarnings(fields.activityWarnings as string[])
       if (fields.streamelements) {
         const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[] }
@@ -153,13 +162,10 @@ export default function ActivityApp() {
     })
   }, [])
 
-  const visible = useMemo(() => {
-    // Filter rows by the active platform, then order newest-first so new
-    // alerts land at the top of the list
-    const rows = filter === 'All' ? events : events.filter((event) => event.platform === filter)
-    return [...rows].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
-  }, [events, filter])
-  const { paused, onScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
+  const visible = useMemo(() => visibleActivityEvents(events, filter, kindFilter), [events, filter, kindFilter])
+  const { paused, onScroll: onPinScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
+  const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.length, ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
+  const kindsRestricted = kindFilter.length !== ACTIVITY_KIND_GROUP_IDS.length
   const warningMessages = [...new Set(activityWarnings)]
   const showSetup = !dismissedWarning && (warningMessages.length > 0 || (seReady && !ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
 
@@ -208,14 +214,30 @@ export default function ActivityApp() {
         </nav>
         <div className="activity-top-actions">
           {!backendOnline ? <small>offline</small> : testStatus ? <small className="activity-test-status">{testStatus}</small> : null}
-          <button type="button" className="activity-test-toggle" aria-label="Send test alerts" disabled={!backendOnline} onClick={() => { setShowSettings(false); setShowTests((open) => !open) }}>
+          <button type="button" className={showKinds || kindsRestricted ? 'activity-test-toggle active' : 'activity-test-toggle'} aria-label="Filter activity kinds" title="Filter by kind" aria-expanded={showKinds} onClick={() => { setShowTests(false); setShowSettings(false); setShowKinds((open) => !open) }}>
+            <Filter size={14} />
+          </button>
+          <button type="button" className="activity-test-toggle" aria-label="Send test alerts" disabled={!backendOnline} onClick={() => { setShowSettings(false); setShowKinds(false); setShowTests((open) => !open) }}>
             <FlaskConical size={14} />
           </button>
-          <button type="button" className="activity-test-toggle" aria-label="Open settings" onClick={() => { setShowTests(false); setShowSettings((open) => !open) }}>
+          <button type="button" className="activity-test-toggle" aria-label="Open settings" onClick={() => { setShowTests(false); setShowKinds(false); setShowSettings((open) => !open) }}>
             <Settings2 size={15} />
           </button>
         </div>
       </header>
+      {showKinds ? (
+        <div className="activity-kind-popover" role="dialog" aria-label="Activity kinds">
+          {ACTIVITY_KIND_GROUPS.map((group) => {
+            const on = kindFilter.includes(group.id)
+            return (
+              <label key={group.id} className="settings-toggle">
+                <span>{group.label}</span>
+                <input type="checkbox" checked={on} onChange={() => setKindFilter((current) => on ? current.filter((id) => id !== group.id) : [...current, group.id])} />
+              </label>
+            )
+          })}
+        </div>
+      ) : null}
       {showTests ? (
         <div className="activity-test-menu">
           <p>Injects a local test row. Does not hit Twitch, Kick, YouTube, or StreamElements.</p>
@@ -252,13 +274,19 @@ export default function ActivityApp() {
       ) : null}
       <section className="activity-feed">
         <div className="activity-list" ref={listRef} onScroll={onScroll}>
-          {visible.length ? visible.map((event) => (
-            <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} />
-          )) : (
+          {visible.length ? (
+            <>
+              <div className="virtual-spacer" style={{ height: padTop }} aria-hidden="true" />
+              {visible.slice(start, end).map((event) => (
+                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} />
+              ))}
+              <div className="virtual-spacer" style={{ height: padBottom }} aria-hidden="true" />
+            </>
+          ) : (
             <div className="empty-chat activity-empty">
               <div className="empty-icon"><Radio size={20} /></div>
               <strong>{events.length ? 'No matching activity' : 'Waiting for activity'}</strong>
-              <span>{events.length ? 'Try another platform filter.' : 'Use the flask to send a test row, or connect accounts in settings.'}</span>
+              <span>{events.length ? 'Try another platform or kind filter.' : 'Use the flask to send a test row, or connect accounts in settings.'}</span>
             </div>
           )}
         </div>

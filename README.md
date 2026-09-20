@@ -26,6 +26,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - OAuth callback server for Twitch, Kick, and YouTube
 - Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
 - Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default) so a backend restart does not empty the dock
+- Activity history persistence in `data/activity.json` (the most recent `RELAY_ACTIVITY_MAX` events, 5000 by default)
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
@@ -177,7 +178,9 @@ If a JWT is missing, the console and Activity dock warn you until you add it and
 | SE | Donations, merch, and other non-platform StreamElements events |
 | All | Everything |
 
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's profile in your default browser (not inside the OBS dock).
+The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
+
+Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's profile in your default browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
@@ -187,7 +190,7 @@ Hiding or skipping an event in the StreamElements dashboard does **not** remove 
 
 Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. The number is the trade-off: memory and the size of `chat.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 
