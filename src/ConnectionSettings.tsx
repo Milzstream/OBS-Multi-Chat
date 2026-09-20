@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Bell } from 'lucide-react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -14,8 +14,7 @@ const JWT_PLATFORMS: Platform[] = ['Twitch', 'Kick', 'YouTube']
 
 /**
  * The connection settings popover: per-platform connect/disconnect and live
- * checks, plus Chat / Activity sections. JWT edits stay local and never echo
- * the full token.
+ * checks, plus Chat / Activity sections. JWT fields stay masked until focused.
  */
 
 export function ConnectionSettings({
@@ -61,10 +60,26 @@ export function ConnectionSettings({
 }) {
   const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
+  const [jwtSaved, setJwtSaved] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
   const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
   const [jwtError, setJwtError] = useState<Partial<Record<Platform, string>>>({})
+  useEffect(() => {
+    if (!showActivityOptions) return
+    let cancelled = false
+    void fetch('/api/jwts').then((response) => response.ok ? response.json() : null).then((tokens) => {
+      if (cancelled || !tokens || typeof tokens !== 'object') return
+      const next = {
+        Twitch: String((tokens as Record<string, unknown>).Twitch || ''),
+        Kick: String((tokens as Record<string, unknown>).Kick || ''),
+        YouTube: String((tokens as Record<string, unknown>).YouTube || ''),
+      }
+      setJwtSaved(next)
+      setJwtDraft(next)
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [showActivityOptions])
   const checkLive = async (platform: Platform) => {
     if (checking[platform]) return
     setChecking((current) => ({ ...current, [platform]: true }))
@@ -79,7 +94,8 @@ export function ConnectionSettings({
       if (error) setJwtError((current) => ({ ...current, [platform]: error }))
       else {
         setJwtError((current) => ({ ...current, [platform]: '' }))
-        setJwtDraft((current) => ({ ...current, [platform]: '' }))
+        setJwtSaved((current) => ({ ...current, [platform]: value }))
+        setJwtDraft((current) => ({ ...current, [platform]: value }))
       }
     } catch {
       setJwtError((current) => ({ ...current, [platform]: 'Could not save JWT' }))
@@ -130,13 +146,14 @@ export function ConnectionSettings({
           </div>
           {JWT_PLATFORMS.map((platform) => {
             const draft = jwtDraft[platform] || ''
-            const showSave = jwtFocus === platform && Boolean(draft.trim())
+            const dirty = draft.trim() !== (jwtSaved[platform] || '').trim()
+            const showSave = jwtFocus === platform && dirty && Boolean(draft.trim())
             return (
               <div key={platform} className="settings-jwt">
                 <span>{platform} JWT</span>
                 <div className="settings-jwt-field">
                   <input
-                    type="password"
+                    type={jwtFocus === platform ? 'text' : 'password'}
                     value={draft}
                     placeholder="Paste JWT"
                     autoComplete="off"

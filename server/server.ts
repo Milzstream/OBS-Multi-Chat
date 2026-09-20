@@ -10,7 +10,7 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { jwtPreview, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
+import { resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
 
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
@@ -486,7 +486,7 @@ app.post('/api/settings', (request, response) => {
 })
 app.get('/api/jwts', (_request, response) => {
   const slots = streamElementsJwtSlots()
-  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])))
+  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])))
 })
 app.post('/api/jwts', async (request, response) => {
   const body = request.body as Partial<Record<'Twitch' | 'Kick' | 'YouTube', string>>
@@ -515,7 +515,7 @@ app.post('/api/jwts', async (request, response) => {
   const slots = streamElementsJwtSlots()
   const error = failed.filter((item) => saved.includes(item.platform)).map((item) => item.message).join(' ')
   response.json({
-    tokens: Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])),
+    tokens: Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])),
     error: error || undefined,
   })
 })
