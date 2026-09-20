@@ -14,7 +14,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env` with your API credentials and StreamElements JWTs
-3. Keep `package.json` beside `relay-chat-dock.exe` (it is in the zip). The app reads its version from that file to check GitHub for updates
+3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe` (they are in the zip). The app reads its version from `package.json` to check GitHub for updates. On launch it appends any new keys from `.env.example` onto `production.env` without changing your existing values. When updating, replace the exe and `.env.example`; keep your filled `production.env`.
 4. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
 5. In OBS, add custom browser docks for chat and activity
 
@@ -206,13 +206,15 @@ Prefer the [prebuilt Windows zip](https://github.com/Milzstream/OBS-Multi-Chat/r
 npm run package:win
 ```
 
-This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` beside the executable, then run:
+This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` and `.env.example` beside the executable, then run:
 
 ```powershell
 .\relay-chat-dock.exe
 ```
 
 The same command also creates a ready-to-copy `deploy` folder containing the latest executable and frontend `dist` files. Existing values in `deploy/production.env` (including StreamElements JWTs) are preserved; the packager only adds missing keys. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`.
+
+On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Keep `.env.example` beside the exe when you update so that merge can run.
 
 The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
 

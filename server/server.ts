@@ -9,6 +9,7 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
+import { resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -117,7 +118,14 @@ process.on('warning', (warning) => {
 
 const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
 const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
-const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
+const envPath = resolveEnvFilePath(runtimeDir)
+const envTemplatePath = resolveEnvTemplatePath(runtimeDir)
+let envKeysAdded: string[] = []
+try {
+  if (fs.existsSync(envPath) || isPackaged) envKeysAdded = syncEnvFile(envPath, envTemplatePath).added
+} catch (error) {
+  console.error('Could not merge .env.example into the env file:', error instanceof Error ? error.message : error)
+}
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
 const activityMax = parseActivityMax()
@@ -525,6 +533,7 @@ httpServer.listen(port, bindHost, () => {
   }
   console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
   console.log(`  Activity history ${activityMax.toLocaleString()} events (RELAY_ACTIVITY_MAX) — how many alerts are stored and loaded on launch.`)
+  if (envKeysAdded.length) console.log(`  Env file      added ${envKeysAdded.join(', ')} to ${path.basename(envPath)} (existing values kept).`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
