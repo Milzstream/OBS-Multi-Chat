@@ -500,7 +500,6 @@ app.post('/api/jwts', async (request, response) => {
   for (const platform of platforms) {
     if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
     const value = String(body[platform] ?? '').trim()
-    if (!value) continue
     const key = STREAMELEMENTS_JWT_KEYS[platform]
     text = setEnvKey(text, key, value, true)
     process.env[key] = value

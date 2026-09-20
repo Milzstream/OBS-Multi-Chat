@@ -60,7 +60,6 @@ export function ConnectionSettings({
 }) {
   const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
-  const [jwtSaved, setJwtSaved] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
   const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
@@ -75,7 +74,6 @@ export function ConnectionSettings({
         Kick: String((tokens as Record<string, unknown>).Kick || ''),
         YouTube: String((tokens as Record<string, unknown>).YouTube || ''),
       }
-      setJwtSaved(next)
       setJwtDraft(next)
     }).catch(() => undefined)
     return () => { cancelled = true }
@@ -87,14 +85,13 @@ export function ConnectionSettings({
   }
   const saveJwt = async (platform: Platform) => {
     const value = jwtDraft[platform].trim()
-    if (!value || jwtBusy[platform]) return
+    if (jwtBusy[platform]) return
     setJwtBusy((current) => ({ ...current, [platform]: true }))
     try {
       const error = await onJwtChange?.(platform, value)
       if (error) setJwtError((current) => ({ ...current, [platform]: error }))
       else {
         setJwtError((current) => ({ ...current, [platform]: '' }))
-        setJwtSaved((current) => ({ ...current, [platform]: value }))
         setJwtDraft((current) => ({ ...current, [platform]: value }))
       }
     } catch {
@@ -146,8 +143,7 @@ export function ConnectionSettings({
           </div>
           {JWT_PLATFORMS.map((platform) => {
             const draft = jwtDraft[platform] || ''
-            const dirty = draft.trim() !== (jwtSaved[platform] || '').trim()
-            const showSave = jwtFocus === platform && dirty && Boolean(draft.trim())
+            const showSave = jwtFocus === platform
             return (
               <div key={platform} className="settings-jwt">
                 <span>{platform} JWT</span>
