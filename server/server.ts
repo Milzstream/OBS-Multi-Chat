@@ -9,7 +9,7 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { consoleHyperlink, fileUrl, resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
+import { fileUrl, resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -546,10 +546,10 @@ httpServer.listen(port, bindHost, () => {
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
+  console.log(`  Configuration:  ${fileUrl(envPath)}`)
   console.log('')
-  console.log(`  Chat dock            ${base}`)
-  console.log(`  Activity dock        ${base}/activity`)
-  console.log(`  Configuration:       ${consoleHyperlink(fileUrl(envPath), envPath)}`)
+  console.log(`  Chat dock      ${base}`)
+  console.log(`  Activity dock  ${base}/activity`)
   console.log('')
   console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
   if (lanEnabled) {
