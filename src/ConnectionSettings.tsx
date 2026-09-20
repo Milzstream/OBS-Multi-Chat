@@ -63,7 +63,7 @@ export function ConnectionSettings({
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
   const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
-  const [jwtError, setJwtError] = useState<Partial<Record<Platform, string>>>({})
+  const [jwtStatus, setJwtStatus] = useState<Partial<Record<Platform, { ok: boolean; text: string }>>>({})
   useEffect(() => {
     if (!showActivityOptions) return
     let cancelled = false
@@ -89,13 +89,13 @@ export function ConnectionSettings({
     setJwtBusy((current) => ({ ...current, [platform]: true }))
     try {
       const error = await onJwtChange?.(platform, value)
-      if (error) setJwtError((current) => ({ ...current, [platform]: error }))
+      if (error) setJwtStatus((current) => ({ ...current, [platform]: { ok: false, text: error } }))
       else {
-        setJwtError((current) => ({ ...current, [platform]: '' }))
         setJwtDraft((current) => ({ ...current, [platform]: value }))
+        setJwtStatus((current) => ({ ...current, [platform]: { ok: true, text: value ? 'Saved' : 'Cleared' } }))
       }
     } catch {
-      setJwtError((current) => ({ ...current, [platform]: 'Could not save JWT' }))
+      setJwtStatus((current) => ({ ...current, [platform]: { ok: false, text: 'Could not save JWT' } }))
     } finally {
       setJwtBusy((current) => ({ ...current, [platform]: false }))
     }
@@ -158,7 +158,7 @@ export function ConnectionSettings({
                     onBlur={() => setJwtFocus((current) => current === platform ? null : current)}
                     onChange={(event) => {
                       setJwtDraft((current) => ({ ...current, [platform]: event.target.value }))
-                      if (jwtError[platform]) setJwtError((current) => ({ ...current, [platform]: '' }))
+                      if (jwtStatus[platform]) setJwtStatus((current) => ({ ...current, [platform]: undefined }))
                     }}
                     onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveJwt(platform) } }}
                   />
@@ -168,7 +168,7 @@ export function ConnectionSettings({
                     </button>
                   ) : null}
                 </div>
-                {jwtError[platform] ? <p className="settings-jwt-error">{jwtError[platform]}</p> : null}
+                {jwtStatus[platform] ? <p className={jwtStatus[platform].ok ? 'settings-jwt-ok' : 'settings-jwt-error'}>{jwtStatus[platform].text}</p> : null}
               </div>
             )
           })}
