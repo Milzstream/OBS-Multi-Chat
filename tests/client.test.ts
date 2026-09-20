@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
-import { activityDockFields, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
-import { ACTIVITY_FILTERS, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter } from '../src/dock-prefs.ts'
+import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
+import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
+import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
+import { virtualWindow } from '../src/virtualList.ts'
 
 describe('chat dock helpers', () => {
   it('proxies Kick CDN avatars through the local media route', () => {
@@ -124,6 +126,13 @@ describe('SSE seq gaps', () => {
     assert.equal(slice.activity?.length, 1)
     assert.deepEqual(slice.activityWarnings, ['Reconnect Twitch'])
     assert.equal(slice.streamelements, undefined)
+    assert.equal(slice.activityEvent, undefined)
+    const delta = activityDockFields({ seq: 10, activityEvent: { id: 'a2', kind: 'follow' } })
+    assert.equal(slice.activity?.length, 1)
+    assert.equal((delta.activityEvent as { id: string }).id, 'a2')
+    assert.equal(delta.activity, undefined)
+    assert.deepEqual(applyActivitySlice([{ id: 'a1' }], delta).map((item) => item.id), ['a2', 'a1'])
+    assert.deepEqual(applyActivitySlice([{ id: 'a1' }], slice), [{ id: 'a1' }])
     const snapshot = activityDockFields({
       seq: 1,
       streamelements: { connected: true, handle: 'Ada', missing: [] },
@@ -143,5 +152,44 @@ describe('dock UI prefs', () => {
     assert.equal(parseStoredFilter('Nope', CHAT_FILTERS, 'All'), 'All')
     assert.equal(parseStoredFilter('StreamElements', ACTIVITY_FILTERS, 'All'), 'StreamElements')
     assert.equal(parseStoredFilter('Twitch', ACTIVITY_FILTERS, 'All'), 'Twitch')
+    assert.deepEqual(parseStoredStringSet(null, ACTIVITY_KIND_GROUP_IDS), [...ACTIVITY_KIND_GROUP_IDS])
+    assert.deepEqual(parseStoredStringSet('[]', ACTIVITY_KIND_GROUP_IDS), [])
+    assert.deepEqual(parseStoredStringSet('["follow"]', ACTIVITY_KIND_GROUP_IDS), ['follow'])
+    assert.deepEqual(parseStoredStringSet('["nope"]', ACTIVITY_KIND_GROUP_IDS), [...ACTIVITY_KIND_GROUP_IDS])
+    assert.deepEqual(parseStoredStringSet('not-json', ACTIVITY_KIND_GROUP_IDS), [...ACTIVITY_KIND_GROUP_IDS])
+    assert.equal(ACTIVITY_KIND_FILTER_KEY, 'relay.activity.kindFilter')
+  })
+})
+
+describe('activity kind filters', () => {
+  it('combines platform and kind-group filters, newest first', () => {
+    const events = [
+      { id: '1', platform: 'Twitch', kind: 'follow', time: '2026-09-02T12:00:00.000Z' },
+      { id: '2', platform: 'Twitch', kind: 'subscription', time: '2026-09-02T12:01:00.000Z' },
+      { id: '3', platform: 'Kick', kind: 'gift', time: '2026-09-02T12:02:00.000Z' },
+      { id: '4', platform: 'StreamElements', kind: 'donation', time: '2026-09-02T12:03:00.000Z' },
+    ]
+    assert.deepEqual(visibleActivityEvents(events, 'All', ACTIVITY_KIND_GROUP_IDS).map((item) => item.id), ['4', '3', '2', '1'])
+    assert.deepEqual(visibleActivityEvents(events, 'Twitch', ['follow']).map((item) => item.id), ['1'])
+    assert.deepEqual(visibleActivityEvents(events, 'All', ['sub']).map((item) => item.id), ['3', '2'])
+    assert.equal(visibleActivityEvents(events, 'All', []).length, 0)
+  })
+})
+
+describe('virtual list window', () => {
+  it('windows from the live edge when pinned, and from scrollTop when paused', () => {
+    const liveBottom = virtualWindow({ count: 100, scrollTop: 0, viewportHeight: 320, estimate: 56, pin: 'bottom', live: true })
+    assert.equal(liveBottom.end, 100)
+    assert.ok(liveBottom.start < 100)
+    assert.equal(liveBottom.padBottom, 0)
+    const liveTop = virtualWindow({ count: 100, scrollTop: 0, viewportHeight: 320, estimate: 52, pin: 'top', live: true })
+    assert.equal(liveTop.start, 0)
+    assert.equal(liveTop.padTop, 0)
+    assert.ok(liveTop.end < 100)
+    const paused = virtualWindow({ count: 100, scrollTop: 1120, viewportHeight: 320, estimate: 56, pin: 'bottom', live: false })
+    assert.ok(paused.start > 0)
+    assert.ok(paused.end < 100)
+    assert.ok(paused.padTop > 0)
+    assert.ok(paused.padBottom > 0)
   })
 })

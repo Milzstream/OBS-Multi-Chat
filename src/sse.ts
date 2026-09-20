@@ -37,9 +37,18 @@ export function chatDockFields(remote: Record<string, unknown>) {
  * `undefined` so a chat/activity/settings slice cannot look like
  * “StreamElements disconnected” (#55).
  */
+export function applyActivitySlice<T extends { id: string }>(previous: T[], fields: { activity?: unknown; activityEvent?: unknown }) {
+  if (Array.isArray(fields.activity)) return fields.activity as T[]
+  const added = fields.activityEvent
+  if (!added || typeof added !== 'object' || Array.isArray(added) || !('id' in added)) return previous
+  const event = added as T
+  return [event, ...previous.filter((item) => item.id !== event.id)]
+}
+
 export function activityDockFields(remote: Record<string, unknown>) {
   return {
     activity: Array.isArray(remote.activity) ? remote.activity : undefined,
+    activityEvent: remote.activityEvent && typeof remote.activityEvent === 'object' && !Array.isArray(remote.activityEvent) ? remote.activityEvent : undefined,
     activityWarnings: Array.isArray(remote.activityWarnings) ? remote.activityWarnings : undefined,
     streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
     accounts: Array.isArray(remote.accounts) ? remote.accounts : undefined,

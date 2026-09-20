@@ -9,6 +9,7 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
+import { resolveEnvFilePath, resolveEnvTemplatePath, syncEnvFile } from './env-file.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
@@ -40,7 +41,9 @@ import {
   oauthAuthorizeUrl,
   pacificDate,
   parseAppSettings,
+  parseActivityMax,
   parseChatMax,
+  activitySseFields,
   parseKickParts,
   parseTranslatedText,
   parseTwitchChatLine,
@@ -115,9 +118,17 @@ process.on('warning', (warning) => {
 
 const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
 const runtimeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
-const envPath = process.env.DOTENV_CONFIG_PATH || (fs.existsSync(path.join(runtimeDir, 'production.env')) ? path.join(runtimeDir, 'production.env') : path.join(runtimeDir, '.env'))
+const envPath = resolveEnvFilePath(runtimeDir)
+const envTemplatePath = resolveEnvTemplatePath(runtimeDir)
+let envKeysAdded: string[] = []
+try {
+  if (fs.existsSync(envPath) || isPackaged) envKeysAdded = syncEnvFile(envPath, envTemplatePath).added
+} catch (error) {
+  console.error('Could not merge .env.example into the env file:', error instanceof Error ? error.message : error)
+}
 dotenv.config({ path: envPath })
 const chatMax = parseChatMax()
+const activityMax = parseActivityMax()
 
 type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
@@ -136,7 +147,7 @@ const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
 const settings = loadSettings()
-const activityStore = createActivityStore(path.join(dataDir, 'activity.json'))
+const activityStore = createActivityStore(path.join(dataDir, 'activity.json'), activityMax)
 if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `http://localhost:${port}/oauth/callback`
 const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
@@ -521,6 +532,8 @@ httpServer.listen(port, bindHost, () => {
     console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
   }
   console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
+  console.log(`  Activity history ${activityMax.toLocaleString()} events (RELAY_ACTIVITY_MAX) — how many alerts are stored and loaded on launch.`)
+  if (envKeysAdded.length) console.log(`  Env file      added ${envKeysAdded.join(', ')} to ${path.basename(envPath)} (existing values kept).`)
   console.log('')
   console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
   console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
@@ -2221,6 +2234,7 @@ function writeSse(client: express.Response, chunk: string) {
 
 let sseSeq = 0
 let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+let lastActivityEvents: ActivityEvent[] = []
 
 function ssePresence() {
   return {
@@ -2250,6 +2264,8 @@ function pushSse(chunk: string) {
 // Slice the sub-slices so each dock only receives and re-broadcasts what it renders
 function broadcast() {
   state.activity = activityStore.list()
+  const activityFields = activitySseFields(lastActivityEvents, state.activity, state.activityWarnings)
+  lastActivityEvents = state.activity
   const next = {
     chat: JSON.stringify(state.messages),
     activity: JSON.stringify({ activity: state.activity, activityWarnings: state.activityWarnings }),
@@ -2267,7 +2283,7 @@ function broadcast() {
   for (const key of changed) {
     sseSeq += 1
     if (key === 'chat') pushSse(sseNamedEvent('chat', { seq: sseSeq, messages: state.messages }))
-    else if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, activity: state.activity, activityWarnings: state.activityWarnings }))
+    else if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, ...activityFields }))
     else if (key === 'presence') pushSse(sseNamedEvent('presence', { seq: sseSeq, ...ssePresence() }))
     else pushSse(sseNamedEvent('settings', { seq: sseSeq, ...sseSettings() }))
   }

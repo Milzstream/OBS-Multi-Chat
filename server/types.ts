@@ -28,10 +28,12 @@ export type YoutubeQuotaStatus = { used: number; limit: number }
 export type AppSettings = { activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; streamInfo: StreamInfoMap; youtubeQuota: YoutubeQuota }
 
 // Chat-history cap: `CHAT_MAX` is the default, `RELAY_CHAT_MAX` may pull it
-// down to `CHAT_MAX_MIN` or up to `CHAT_MAX_HARD`.
+// down to `CHAT_MAX_MIN` or up to `CHAT_MAX_HARD`. Activity uses the same
+// bounds via `RELAY_ACTIVITY_MAX` / `ACTIVITY_MAX`.
 export const CHAT_MAX = 5000
 export const CHAT_MAX_MIN = 100
 export const CHAT_MAX_HARD = 1_000_000
+export const ACTIVITY_MAX = 5000
 export const STREAM_TAG_MAX = 10
 export const TWITCH_TAG_MAX_LENGTH = 25
 // YouTube's free daily Data API budget in quota units.

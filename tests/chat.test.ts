@@ -7,6 +7,9 @@ import {
   looksLikePlaceholder,
   needsTranslation,
   normalizeAvatar,
+  activityAppendedEvent,
+  activitySseFields,
+  parseActivityMax,
   parseChatMax,
   parseKickParts,
   parseTranslatedText,
@@ -250,6 +253,28 @@ describe('chat history cap', () => {
     assert.equal(parseChatMax({ RELAY_CHAT_MAX: '1' }), 100)
     assert.equal(parseChatMax({ RELAY_CHAT_MAX: '99999999' }), 1_000_000)
     assert.equal(parseChatMax({ RELAY_CHAT_MAX: 'nope' }), 5000)
+  })
+})
+
+describe('activity history cap and SSE deltas', () => {
+  it('defaults to 5000 and clamps RELAY_ACTIVITY_MAX', () => {
+    assert.equal(parseActivityMax({}), 5000)
+    assert.equal(parseActivityMax({ RELAY_ACTIVITY_MAX: '20000' }), 20_000)
+    assert.equal(parseActivityMax({ RELAY_ACTIVITY_MAX: '1' }), 100)
+    assert.equal(parseActivityMax({ RELAY_ACTIVITY_MAX: '99999999' }), 1_000_000)
+    assert.equal(parseActivityMax({ RELAY_ACTIVITY_MAX: 'nope' }), 5000)
+  })
+
+  it('sends one new event, warnings only, or a full replace', () => {
+    const a = { id: 'a' }
+    const b = { id: 'b' }
+    const c = { id: 'c' }
+    assert.equal(activityAppendedEvent([a, b], [c, a, b])?.id, 'c')
+    assert.equal(activityAppendedEvent([a, b], [c, a])?.id, 'c')
+    assert.equal(activityAppendedEvent([a, b], [c, b]), undefined)
+    assert.deepEqual(activitySseFields([a], [b, a], ['w']), { activityEvent: b, activityWarnings: ['w'] })
+    assert.deepEqual(activitySseFields([a], [a], ['w']), { activityWarnings: ['w'] })
+    assert.deepEqual(activitySseFields([a], [c, b], []), { activity: [c, b], activityWarnings: [] })
   })
 })
 

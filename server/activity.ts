@@ -1,4 +1,5 @@
 import { readJsonFile, writeJsonAtomic } from './persist.js'
+import { ACTIVITY_MAX } from './types.js'
 
 /**
  * Activity dock store: in-memory array backed by an atomic JSON file. Feed
@@ -72,7 +73,6 @@ function newestFirst(events: ActivityEvent[]) {
   return [...events].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
 }
 
-const MAX_EVENTS = 300
 /** Live events older than this are pruned from the file store so it can't grow without bound. */
 export const ACTIVITY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -85,7 +85,7 @@ function isTestEvent(event: ActivityEvent) {
   return event.id.startsWith('test-') || event.user === 'TestUser'
 }
 
-function prune(events: ActivityEvent[], maxAgeMs = 0) {
+function prune(events: ActivityEvent[], maxAgeMs = 0, maxEvents = ACTIVITY_MAX) {
   const cutoff = maxAgeMs ? Date.now() - maxAgeMs : 0
   return events.filter((event) => {
     if (isTestEvent(event)) return false
@@ -93,7 +93,7 @@ function prune(events: ActivityEvent[], maxAgeMs = 0) {
     if (!Number.isFinite(at)) return false
     if (cutoff && at < cutoff) return false
     return true
-  }).slice(0, MAX_EVENTS)
+  }).slice(0, maxEvents)
 }
 
 /**
@@ -101,12 +101,13 @@ function prune(events: ActivityEvent[], maxAgeMs = 0) {
  * single JSON file via `persist.ts`, and prunes both by age and count.
  * Test events stay in memory only — they never touch the file.
  */
-export function createActivityStore(filePath: string) {
+export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) {
+  const cap = Math.max(1, Math.floor(maxEvents) || ACTIVITY_MAX)
   let events: ActivityEvent[] = []
   let maxAgeMs = 0
 
   function persistable() {
-    return prune(events.filter((event) => !isTestEvent(event)), maxAgeMs)
+    return prune(events.filter((event) => !isTestEvent(event)), maxAgeMs, cap)
   }
 
   function save() {
@@ -120,7 +121,7 @@ export function createActivityStore(filePath: string) {
       return
     }
     const incoming = parsed as ActivityEvent[]
-    events = newestFirst(prune(incoming, maxAgeMs).map((event) => {
+        events = newestFirst(prune(incoming, maxAgeMs, cap).map((event) => {
       const source = event.source || (event.profileUrl?.includes('youtube.com') ? 'YouTube' : event.profileUrl?.includes('kick.com') ? 'Kick' : event.profileUrl?.includes('twitch.tv') ? 'Twitch' : event.platform)
       return {
         ...event,
@@ -138,13 +139,13 @@ export function createActivityStore(filePath: string) {
     setMaxAge(ms: number) {
       maxAgeMs = ms > 0 ? ms : 0
       const tests = events.filter(isTestEvent)
-      const real = prune(events, maxAgeMs)
+      const real = prune(events, maxAgeMs, cap)
       events = newestFirst([...tests, ...real])
       try { save() } catch { /* ignore */ }
     },
     list: () => {
       const tests = events.filter(isTestEvent)
-      const real = prune(events, maxAgeMs)
+      const real = prune(events, maxAgeMs, cap)
       if (real.length !== events.length - tests.length) {
         events = newestFirst([...tests, ...real])
         try { save() } catch { /* ignore */ }
@@ -167,7 +168,10 @@ export function createActivityStore(filePath: string) {
       if (events.some((item) => item.id === event.id)) return false
       const at = Date.parse(event.time) || Date.now()
       if (events.some((item) => item.platform === event.platform && item.kind === event.kind && item.user.toLowerCase() === event.user.toLowerCase() && Math.abs((Date.parse(item.time) || 0) - at) < 15_000 && (item.amount || '') === (event.amount || ''))) return false
-      events = newestFirst([event, ...events]).slice(0, MAX_EVENTS)
+      const next = [event, ...events]
+      const tests = next.filter(isTestEvent)
+      const real = newestFirst(next.filter((item) => !isTestEvent(item))).slice(0, cap)
+      events = newestFirst([...tests, ...real])
       if (!isTestEvent(event)) {
         try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
       }

@@ -14,7 +14,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env` with your API credentials and StreamElements JWTs
-3. Keep `package.json` beside `relay-chat-dock.exe` (it is in the zip). The app reads its version from that file to check GitHub for updates
+3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe` (they are in the zip). The app reads its version from `package.json` to check GitHub for updates. On launch it appends any new keys from `.env.example` onto `production.env` without changing your existing values. When updating, replace the exe and `.env.example`; keep your filled `production.env`.
 4. Run `relay-chat-dock.exe` and copy the two dock URLs printed at the top of the console
 5. In OBS, add custom browser docks for chat and activity
 
@@ -26,6 +26,7 @@ GitHub Actions builds that zip and attaches it to the GitHub Release when `main`
 - OAuth callback server for Twitch, Kick, and YouTube
 - Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
 - Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default) so a backend restart does not empty the dock
+- Activity history persistence in `data/activity.json` (the most recent `RELAY_ACTIVITY_MAX` events, 5000 by default)
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
 - Kick chat over Kick's public chat WebSocket
@@ -177,7 +178,9 @@ If a JWT is missing, the console and Activity dock warn you until you add it and
 | SE | Donations, merch, and other non-platform StreamElements events |
 | All | Everything |
 
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's profile in your default browser (not inside the OBS dock).
+The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
+
+Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's profile in your default browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
@@ -187,7 +190,7 @@ Hiding or skipping an event in the StreamElements dashboard does **not** remove 
 
 Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
 
-Activity history is stored locally in `data/activity.json` (last 300 real events or 30 days). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. The number is the trade-off: memory and the size of `chat.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
+Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Packaged runs keep the `data` folder beside `relay-chat-dock.exe`; development runs keep it under the project directory. `RELAY_DATA_DIR` overrides either. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 
@@ -203,13 +206,15 @@ Prefer the [prebuilt Windows zip](https://github.com/Milzstream/OBS-Multi-Chat/r
 npm run package:win
 ```
 
-This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` beside the executable, then run:
+This creates `relay-chat-dock.exe` using the Node 18 Windows x64 runtime supported by the packaging tool. Keep `production.env` and `.env.example` beside the executable, then run:
 
 ```powershell
 .\relay-chat-dock.exe
 ```
 
 The same command also creates a ready-to-copy `deploy` folder containing the latest executable and frontend `dist` files. Existing values in `deploy/production.env` (including StreamElements JWTs) are preserved; the packager only adds missing keys. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`.
+
+On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Keep `.env.example` beside the exe when you update so that merge can run.
 
 The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
 
