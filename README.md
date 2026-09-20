@@ -8,6 +8,8 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
 
+![Companion console with dock URLs and configuration path](docs/console.png)
+
 ## Download
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
