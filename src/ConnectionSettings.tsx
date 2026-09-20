@@ -1,11 +1,9 @@
-import { useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Bell } from 'lucide-react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
 type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
-type JwtPreview = { configured: boolean; last4: string }
-
 const platformMeta: Record<Platform, { color: string }> = {
   Twitch: { color: '#a970ff' },
   Kick: { color: '#62c554' },
@@ -29,7 +27,6 @@ export function ConnectionSettings({
   translateChat,
   translateError,
   showActivityOptions,
-  jwtSlots,
   platformIcon,
   onClose,
   onConnect,
@@ -50,7 +47,6 @@ export function ConnectionSettings({
   translateChat: boolean
   translateError?: string
   showActivityOptions: boolean
-  jwtSlots?: Record<string, JwtPreview>
   platformIcon: (platform: Platform, size?: number) => ReactNode
   onClose: () => void
   onConnect: (platform: Platform) => void
@@ -60,30 +56,36 @@ export function ConnectionSettings({
   onToggleIgnoreMissing: () => void
   onToggleDropOld: () => void
   onToggleTranslateChat: () => void
-  onJwtChange?: (platform: Platform, jwt: string) => void
+  onJwtChange?: (platform: Platform, jwt: string) => Promise<string | void> | void
   note?: string
 }) {
   const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
-  const jwtTimers = useRef<Partial<Record<Platform, number>>>({})
-  const jwtDirty = useRef<Partial<Record<Platform, boolean>>>({})
+  const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
+  const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
+  const [jwtError, setJwtError] = useState<Partial<Record<Platform, string>>>({})
   const checkLive = async (platform: Platform) => {
     if (checking[platform]) return
     setChecking((current) => ({ ...current, [platform]: true }))
     try { await onCheckLive(platform) } finally { setChecking((current) => ({ ...current, [platform]: false })) }
   }
-  const commitJwt = (platform: Platform, value: string) => {
-    if (!jwtDirty.current[platform]) return
-    jwtDirty.current[platform] = false
-    onJwtChange?.(platform, value.trim())
-    setJwtDraft((current) => ({ ...current, [platform]: '' }))
-  }
-  const queueJwt = (platform: Platform, value: string) => {
-    jwtDirty.current[platform] = true
-    setJwtDraft((current) => ({ ...current, [platform]: value }))
-    if (jwtTimers.current[platform]) window.clearTimeout(jwtTimers.current[platform])
-    jwtTimers.current[platform] = window.setTimeout(() => commitJwt(platform, value), 700)
+  const saveJwt = async (platform: Platform) => {
+    const value = jwtDraft[platform].trim()
+    if (!value || jwtBusy[platform]) return
+    setJwtBusy((current) => ({ ...current, [platform]: true }))
+    try {
+      const error = await onJwtChange?.(platform, value)
+      if (error) setJwtError((current) => ({ ...current, [platform]: error }))
+      else {
+        setJwtError((current) => ({ ...current, [platform]: '' }))
+        setJwtDraft((current) => ({ ...current, [platform]: '' }))
+      }
+    } catch {
+      setJwtError((current) => ({ ...current, [platform]: 'Could not save JWT' }))
+    } finally {
+      setJwtBusy((current) => ({ ...current, [platform]: false }))
+    }
   }
   return (
     <aside className="settings-popover">
@@ -127,23 +129,34 @@ export function ConnectionSettings({
             </div>
           </div>
           {JWT_PLATFORMS.map((platform) => {
-            const slot = jwtSlots?.[platform]
-            const placeholder = slot?.configured ? `Configured · ${slot.last4}` : 'Paste JWT'
+            const draft = jwtDraft[platform] || ''
+            const showSave = jwtFocus === platform && Boolean(draft.trim())
             return (
-              <label key={platform} className="settings-jwt">
+              <div key={platform} className="settings-jwt">
                 <span>{platform} JWT</span>
-                <input
-                  value={jwtDraft[platform] || ''}
-                  placeholder={placeholder}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => queueJwt(platform, event.target.value)}
-                  onBlur={(event) => {
-                    if (jwtTimers.current[platform]) window.clearTimeout(jwtTimers.current[platform])
-                    commitJwt(platform, event.target.value)
-                  }}
-                />
-              </label>
+                <div className="settings-jwt-field">
+                  <input
+                    type="password"
+                    value={draft}
+                    placeholder="Paste JWT"
+                    autoComplete="off"
+                    spellCheck={false}
+                    onFocus={() => setJwtFocus(platform)}
+                    onBlur={() => setJwtFocus((current) => current === platform ? null : current)}
+                    onChange={(event) => {
+                      setJwtDraft((current) => ({ ...current, [platform]: event.target.value }))
+                      if (jwtError[platform]) setJwtError((current) => ({ ...current, [platform]: '' }))
+                    }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveJwt(platform) } }}
+                  />
+                  {showSave ? (
+                    <button type="button" disabled={Boolean(jwtBusy[platform])} onMouseDown={(event) => event.preventDefault()} onClick={() => void saveJwt(platform)}>
+                      {jwtBusy[platform] ? '…' : 'Save'}
+                    </button>
+                  ) : null}
+                </div>
+                {jwtError[platform] ? <p className="settings-jwt-error">{jwtError[platform]}</p> : null}
+              </div>
             )
           })}
           <label className="settings-toggle">

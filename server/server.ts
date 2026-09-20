@@ -140,10 +140,8 @@ process.on('unhandledRejection', (error) => {
   holdConsoleAndExit(1)
 })
 
-try {
-  fs.mkdirSync(filesDir, { recursive: true })
-  fs.appendFileSync(path.join(filesDir, 'launch.log'), `${new Date().toISOString()} start exe=${process.execPath} files=${filesDir}\n`)
-} catch { /* ignore */ }
+try { fs.mkdirSync(filesDir, { recursive: true }) } catch { /* ignore */ }
+try { fs.unlinkSync(path.join(filesDir, 'launch.log')) } catch { /* ignore */ }
 const envPath = resolveEnvFilePath(filesDir)
 const envTemplatePath = resolveEnvTemplatePath(exeDir)
 let envKeysAdded: string[] = []
@@ -498,22 +496,28 @@ app.post('/api/jwts', async (request, response) => {
     try { syncEnvFile(envPath, envTemplatePath) } catch { /* ignore */ }
     text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
   }
-  let changed = false
+  const saved: Array<'Twitch' | 'Kick' | 'YouTube'> = []
   for (const platform of platforms) {
     if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
-    const key = STREAMELEMENTS_JWT_KEYS[platform]
     const value = String(body[platform] ?? '').trim()
+    if (!value) continue
+    const key = STREAMELEMENTS_JWT_KEYS[platform]
     text = setEnvKey(text, key, value, true)
     process.env[key] = value
-    changed = true
+    saved.push(platform)
   }
-  if (changed) {
+  let failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
+  if (saved.length) {
     fs.mkdirSync(path.dirname(envPath), { recursive: true })
     fs.writeFileSync(envPath, text, { encoding: 'utf8' })
-    await startStreamElements(false)
+    failed = await startStreamElements(false)
   }
   const slots = streamElementsJwtSlots()
-  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])))
+  const error = failed.filter((item) => saved.includes(item.platform)).map((item) => item.message).join(' ')
+  response.json({
+    tokens: Object.fromEntries(slots.map((slot) => [slot.platform, jwtPreview(slot.jwt)])),
+    error: error || undefined,
+  })
 })
 app.post('/api/open', createOpenHandler(openInDefaultBrowser))
 app.post('/api/activity/test', (request, response) => {
@@ -1633,9 +1637,9 @@ function addNativeActivity(event: ActivityEvent) {
 
 function streamElementsJwtSlots() {
   return [
-    { platform: 'Twitch', jwt: String(process.env.STREAMELEMENTS_JWT_TWITCH || '').trim() },
-    { platform: 'Kick', jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
-    { platform: 'YouTube', jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
+    { platform: 'Twitch' as const, jwt: String(process.env.STREAMELEMENTS_JWT_TWITCH || '').trim() },
+    { platform: 'Kick' as const, jwt: String(process.env.STREAMELEMENTS_JWT_KICK || '').trim() },
+    { platform: 'YouTube' as const, jwt: String(process.env.STREAMELEMENTS_JWT_YOUTUBE || '').trim() },
   ]
 }
 
@@ -1661,26 +1665,37 @@ async function startStreamElements(backfill = false) {
   await streamElements.stop()
   const slots = streamElementsJwtSlots()
   const missing = slots.filter((slot) => !slot.jwt).map((slot) => slot.platform)
-  const jwts = [...new Set(slots.map((slot) => slot.jwt).filter(Boolean))]
   const missingNote = missingStreamElementsMessage(missing)
-  if (!jwts.length) {
+  const failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
+  if (!slots.some((slot) => slot.jwt)) {
     state.streamelements = { connected: false, handle: '', missing }
     setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
-    return
+    return failed
   }
   const channels = []
-  for (const jwt of jwts) {
+  const seen = new Map<string, Awaited<ReturnType<typeof hydrateStreamElements>>>()
+  for (const slot of slots) {
+    if (!slot.jwt) continue
+    const cached = seen.get(slot.jwt)
+    if (cached) {
+      channels.push(cached)
+      continue
+    }
     try {
-      channels.push(await hydrateStreamElements(jwt))
+      const channel = await hydrateStreamElements(slot.jwt)
+      seen.set(slot.jwt, channel)
+      channels.push(channel)
     } catch (error) {
-      console.error('StreamElements JWT failed:', error instanceof Error ? error.message : error)
+      const message = error instanceof Error ? error.message : String(error)
+      console.error(`StreamElements ${slot.platform} JWT failed:`, message)
+      failed.push({ platform: slot.platform, message })
     }
   }
   if (!channels.length) {
     state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
     setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check Activity settings or production.env.')
     console.error('StreamElements JWTs failed to load. Check Activity settings or production.env.')
-    return
+    return failed
   }
   const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')
   state.streamelements = { connected: true, handle, missing }
@@ -1693,6 +1708,7 @@ async function startStreamElements(backfill = false) {
       for (const event of events) addActivity(event)
     }
   }
+  return failed
 }
 
 function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {

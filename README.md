@@ -17,7 +17,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 **Installer (recommended)**
 
 1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
-2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist (the installer skips the question when the URLs are already in OBS)
+2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. After OBS starts, open **Docks** and check **Relay Chat** and **Relay Activity** — OBS lists installer-added docks but leaves them hidden until you enable them
 3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
 4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the console prints that path on every launch
 5. Start **Relay Chat Dock** from the Start Menu
@@ -58,7 +58,7 @@ http://localhost:4173
 http://localhost:4173/activity
 ```
 
-Add both as **Docks → Custom Browser Docks**. Chat is for messages and sending. Activity is the alert feed.
+Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Activity is the alert feed.
 
 Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
 

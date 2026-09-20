@@ -111,7 +111,6 @@ export default function ActivityApp() {
   const [showSettings, setShowSettings] = useState(false)
   const [showKinds, setShowKinds] = useState(false)
   const [testStatus, setTestStatus] = useState('')
-  const [jwtSlots, setJwtSlots] = useState<Record<string, { configured: boolean; last4: string }>>({})
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -125,11 +124,6 @@ export default function ActivityApp() {
   useEffect(() => {
     writeLocalPref(ACTIVITY_KIND_FILTER_KEY, JSON.stringify(kindFilter))
   }, [kindFilter])
-
-  useEffect(() => {
-    if (!showSettings) return
-    void fetch('/api/jwts').then((response) => response.ok ? response.json() : null).then((slots) => { if (slots) setJwtSlots(slots as Record<string, { configured: boolean; last4: string }>) }).catch(() => undefined)
-  }, [showSettings])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
@@ -264,7 +258,6 @@ export default function ActivityApp() {
         translateChat={translateChat}
         translateError={translateError}
         showActivityOptions
-        jwtSlots={jwtSlots}
         platformIcon={platformIcon}
         onClose={() => setShowSettings(false)}
         onConnect={connectPlatform}
@@ -274,8 +267,15 @@ export default function ActivityApp() {
         onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
         onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
         onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
-        onJwtChange={(platform, jwt) => {
-          void fetch('/api/jwts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: jwt }) }).then((response) => response.ok ? response.json() : null).then((slots) => { if (slots) setJwtSlots(slots as Record<string, { configured: boolean; last4: string }>) }).catch(() => undefined)
+        onJwtChange={async (platform, jwt) => {
+          try {
+            const response = await fetch('/api/jwts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: jwt }) })
+            const data = await response.json() as { error?: string }
+            if (!response.ok) return data.error || 'Could not save JWT'
+            return data.error
+          } catch {
+            return 'Could not save JWT'
+          }
         }}
         note="Connect accounts here for backup or chat."
       />}
