@@ -61,7 +61,6 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Command ""$s=(New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Relay Chat Dock.lnk'); $s.TargetPath='{app}\{#MyAppExeName}'; $s.WorkingDirectory='{app}'; $s.Save()"""; Description: "Create a desktop shortcut"; Flags: postinstall skipifsilent runhidden
 Filename: "{win}\explorer.exe"; Parameters: "/select,""{localappdata}\{#MyAppName}\production.env"""; Description: "Open production.env location"; Flags: postinstall nowait skipifsilent
 Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "Launch Relay Chat Dock"; Flags: postinstall nowait skipifsilent runasoriginaluser
-Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Flags: postinstall nowait skipifnotsilent runasoriginaluser
 
 [UninstallDelete]
 Type: files; Name: "{app}\installed.origin"
@@ -386,7 +385,9 @@ begin
   if Step = ssPostInstall then
   begin
     ApplyGuidedEnv;
-    if WizardIsTaskSelected('addobsdocks') then
+    if WizardSilent then
+      ShellExecAsOriginalUser('open', ExpandConstant('{app}\{#MyAppExeName}'), '', ExpandConstant('{app}'), SW_SHOWNORMAL, ewNoWait, ResultCode)
+    else if WizardIsTaskSelected('addobsdocks') then
     begin
       Args := '--add-obs-docks --port 4173 --obs-config "' + GetObsConfig('') + '"';
       Exec(ExpandConstant('{app}\{#MyAppExeName}'), Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);

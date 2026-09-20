@@ -108,7 +108,7 @@ async function downloadFile(url: string, dest: string) {
 }
 
 function startInstaller(setupPath: string) {
-  spawn(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/FORCECLOSEAPPLICATIONS'], {
+  spawn(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/FORCECLOSEAPPLICATIONS', '/TASKS=!addobsdocks'], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
