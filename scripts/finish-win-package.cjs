@@ -105,7 +105,6 @@ function mergeEnvFile(srcPath, destPath) {
 }
 
 fs.mkdirSync('deploy', { recursive: true })
-copyReplace(built, path.resolve('relay-chat-dock.exe'))
 copyReplace(built, path.resolve('deploy', 'relay-chat-dock.exe'))
 fs.rmSync(path.resolve('deploy', 'dist'), { recursive: true, force: true })
 fs.cpSync('dist', path.resolve('deploy', 'dist'), { recursive: true })
@@ -117,7 +116,6 @@ fs.writeFileSync(path.resolve('deploy', 'package.json'), `${JSON.stringify({ nam
 fs.rmSync(built, { force: true })
 
 Promise.resolve()
-  .then(() => stampIcon(path.resolve('relay-chat-dock.exe')))
   .then(() => stampIcon(path.resolve('deploy', 'relay-chat-dock.exe')))
   .then(() => {
     if (!process.exitCode) console.log('Created deploy\\relay-chat-dock.exe')
