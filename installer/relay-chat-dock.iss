@@ -67,7 +67,7 @@ var
   KickPage: TInputQueryWizardPage;
   YouTubePage: TInputQueryWizardPage;
   SePage: TInputQueryWizardPage;
-  FirstInstall: Boolean;
+  OfferCredentialGuide: Boolean;
 
 function EnvFilePath: String;
 begin
@@ -90,9 +90,38 @@ begin
     Result := ExpandConstant('{userappdata}\obs-studio');
 end;
 
+function LineHasValue(const Line, Key: String): Boolean;
+begin
+  Result := (Copy(Line, 1, Length(Key) + 1) = Key + '=') and (Length(Line) > Length(Key) + 1);
+end;
+
+function EnvNeedsSetup: Boolean;
+var
+  Lines: TArrayOfString;
+  i: Integer;
+  Line: String;
+begin
+  Result := True;
+  if not FileExists(EnvFilePath) then
+    Exit;
+  if not LoadStringsFromFile(EnvFilePath, Lines) then
+    Exit;
+  for i := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Line := Trim(Lines[i]);
+    if (Length(Line) = 0) or (Line[1] = '#') then
+      Continue;
+    if LineHasValue(Line, 'TWITCH_CLIENT_ID') or LineHasValue(Line, 'KICK_CLIENT_ID') or LineHasValue(Line, 'YOUTUBE_CLIENT_ID') or LineHasValue(Line, 'STREAMELEMENTS_JWT_TWITCH') or LineHasValue(Line, 'STREAMELEMENTS_JWT_KICK') or LineHasValue(Line, 'STREAMELEMENTS_JWT_YOUTUBE') then
+    begin
+      Result := False;
+      Exit;
+    end;
+  end;
+end;
+
 function GuideCredentials: Boolean;
 begin
-  Result := FirstInstall and Assigned(CredsIntro) and CredsIntro.Values[0];
+  Result := Assigned(CredsIntro) and CredsIntro.Values[0];
 end;
 
 procedure OpenHintUrl(Sender: TObject);
@@ -168,7 +197,7 @@ end;
 
 procedure InitializeWizard;
 begin
-  FirstInstall := not FileExists(EnvFilePath);
+  OfferCredentialGuide := EnvNeedsSetup;
 
   ObsDirPage := CreateInputDirPage(wpSelectTasks,
     'OBS settings folder',
@@ -181,12 +210,13 @@ begin
 
   CredsIntro := CreateInputOptionPage(wpSelectTasks,
     'API credentials',
-    'Optional guided setup for a first install.',
-    'Relay needs a client ID and secret per platform (Twitch, Kick, YouTube) and StreamElements JWTs for the Activity dock. Skip if you would rather paste them into production.env yourself. The finish page always shows where that file is.',
+    'Optional guided setup.',
+    'Relay needs a client ID and secret per platform (Twitch, Kick, YouTube) and StreamElements JWTs for the Activity dock. Skip if you would rather paste them into production.env yourself. Empty fields are left unchanged. The finish page always shows where that file is.',
     True, False);
   CredsIntro.Add('Guide me through each provider (opens their developer page)');
   CredsIntro.Add('Skip - I will edit production.env myself');
-  CredsIntro.Values[0] := True;
+  CredsIntro.Values[0] := OfferCredentialGuide;
+  CredsIntro.Values[1] := not OfferCredentialGuide;
 
   TwitchPage := CreateInputQueryPage(CredsIntro.ID, 'Twitch', 'https://dev.twitch.tv/console/apps',
     'Create a Confidential/Private application. Set the OAuth redirect to http://localhost:4173/oauth/callback then paste the client ID and secret.');
@@ -219,8 +249,6 @@ begin
   Result := False;
   if Assigned(ObsDirPage) and (PageID = ObsDirPage.ID) then
     Result := (not WizardIsTaskSelected('addobsdocks')) or DocksAlreadyPresent or DirExists(ExpandConstant('{userappdata}\obs-studio'));
-  if Assigned(CredsIntro) and (PageID = CredsIntro.ID) then
-    Result := not FirstInstall;
   if Assigned(TwitchPage) and ((PageID = TwitchPage.ID) or (PageID = KickPage.ID) or (PageID = YouTubePage.ID) or (PageID = SePage.ID)) then
     Result := not GuideCredentials;
 end;
