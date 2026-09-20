@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Bell } from 'lucide-react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
@@ -63,7 +63,19 @@ export function ConnectionSettings({
   const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
   const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
   const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
-  const [jwtStatus, setJwtStatus] = useState<Partial<Record<Platform, { ok: boolean; text: string }>>>({})
+  const [jwtStatus, setJwtStatus] = useState<Partial<Record<Platform, { ok: boolean; text: string; id: number }>>>({})
+  const jwtStatusTimers = useRef<Partial<Record<Platform, number>>>({})
+  const showJwtStatus = (platform: Platform, next: { ok: boolean; text: string }) => {
+    const id = Date.now()
+    if (jwtStatusTimers.current[platform]) window.clearTimeout(jwtStatusTimers.current[platform])
+    setJwtStatus((current) => ({ ...current, [platform]: { ...next, id } }))
+    if (next.ok) jwtStatusTimers.current[platform] = window.setTimeout(() => {
+      setJwtStatus((current) => current[platform]?.id === id ? { ...current, [platform]: undefined } : current)
+    }, 2400)
+  }
+  useEffect(() => () => {
+    for (const timer of Object.values(jwtStatusTimers.current)) if (timer) window.clearTimeout(timer)
+  }, [])
   useEffect(() => {
     if (!showActivityOptions) return
     let cancelled = false
@@ -89,13 +101,13 @@ export function ConnectionSettings({
     setJwtBusy((current) => ({ ...current, [platform]: true }))
     try {
       const error = await onJwtChange?.(platform, value)
-      if (error) setJwtStatus((current) => ({ ...current, [platform]: { ok: false, text: error } }))
+      if (error) showJwtStatus(platform, { ok: false, text: error })
       else {
         setJwtDraft((current) => ({ ...current, [platform]: value }))
-        setJwtStatus((current) => ({ ...current, [platform]: { ok: true, text: value ? 'Saved' : 'Cleared' } }))
+        showJwtStatus(platform, { ok: true, text: value ? 'Saved' : 'Cleared' })
       }
     } catch {
-      setJwtStatus((current) => ({ ...current, [platform]: { ok: false, text: 'Could not save JWT' } }))
+      showJwtStatus(platform, { ok: false, text: 'Could not save JWT' })
     } finally {
       setJwtBusy((current) => ({ ...current, [platform]: false }))
     }
@@ -168,7 +180,7 @@ export function ConnectionSettings({
                     </button>
                   ) : null}
                 </div>
-                {jwtStatus[platform] ? <p className={jwtStatus[platform].ok ? 'settings-jwt-ok' : 'settings-jwt-error'}>{jwtStatus[platform].text}</p> : null}
+                {jwtStatus[platform] ? <p key={jwtStatus[platform].id} className={jwtStatus[platform].ok ? 'settings-jwt-ok' : 'settings-jwt-error'}>{jwtStatus[platform].text}</p> : null}
               </div>
             )
           })}

@@ -105,7 +105,8 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .settings-jwt-field button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); padding: 3px 7px; border-radius: 3px; background: var(--teal); color: #10201d; font: 9px 'DM Mono', monospace; }
 .settings-jwt-field button:disabled { opacity: .55; cursor: wait; }
 .settings-jwt-error { margin: 0; color: #ff8b7a; font-size: 10px; line-height: 1.35; }
-.settings-jwt-ok { margin: 0; color: var(--teal); font-size: 10px; line-height: 1.35; }
+.settings-jwt-ok { margin: 0; color: var(--teal); font-size: 10px; line-height: 1.35; animation: jwt-status-fade 2.4s ease forwards; }
+@keyframes jwt-status-fade { 0%, 65% { opacity: 1; } 100% { opacity: 0; } }
 
 .activity-app { position: relative; height: 100vh; min-height: 0; display: flex; flex-direction: column; background: #101317; color: #eef1f0; }
 .activity-topbar { height: 42px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; border-bottom: 1px solid var(--line); background: rgba(23,27,30,.96); color: #f3af61; font: 700 12px 'DM Mono', monospace; letter-spacing: .14em; }
