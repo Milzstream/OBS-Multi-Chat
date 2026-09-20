@@ -7,7 +7,7 @@ import { isInstallerInstall } from './obs-docks.js'
 /**
  * Startup update check: compares the local `package.json` version against the
  * latest GitHub release. Portable copies log the download URL. Installer
- * copies can prompt, download the setup exe, run it, and relaunch.
+ * copies can prompt, download the setup exe, exit, and let Setup replace the files.
  */
 
 interface GitHubRelease {
@@ -21,8 +21,7 @@ interface GitHubRelease {
 export type UpdateHooks = {
   confirm?: (message: string) => boolean
   download?: (url: string, dest: string) => Promise<void>
-  runInstaller?: (setupPath: string) => number | null
-  relaunch?: (exePath: string) => void
+  startInstaller?: (setupPath: string) => void
 }
 
 function parseVersion(version: string): number[] {
@@ -108,18 +107,17 @@ async function downloadFile(url: string, dest: string) {
   fs.writeFileSync(dest, Buffer.from(await response.arrayBuffer()))
 }
 
-function runInstaller(setupPath: string) {
-  const result = spawnSync(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES'], { windowsHide: true })
-  return result.status
-}
-
-function relaunch(exePath: string) {
-  spawn(exePath, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref()
+function startInstaller(setupPath: string) {
+  spawn(setupPath, ['/SILENT', '/NORESTART', '/SUPPRESSMSGBOXES', '/FORCECLOSEAPPLICATIONS'], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  }).unref()
 }
 
 /**
  * Checks if an update is available. Portable copies log the GitHub URL.
- * Installer copies prompt once, then download/run setup and relaunch.
+ * Installer copies prompt once, then download setup, exit, and let Setup relaunch.
  */
 export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
   try {
@@ -146,15 +144,10 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
 
     const dest = path.join(os.tmpdir(), `obs-multi-chat-${latestVersion.replace(/^v/i, '')}-setup.exe`)
     await (hooks.download || downloadFile)(setupUrl, dest)
-    const status = (hooks.runInstaller || runInstaller)(dest)
-    if (status !== 0 && status != null) {
-      console.error(`  Installer exited ${status}. Download: ${latestRelease.html_url}`)
-      return
-    }
-    const exePath = process.execPath
-    if (hooks.relaunch) hooks.relaunch(exePath)
+    console.log('  Closing so Setup can replace the exe…')
+    if (hooks.startInstaller) hooks.startInstaller(dest)
     else {
-      relaunch(exePath)
+      startInstaller(dest)
       process.exit(0)
     }
   } catch {
