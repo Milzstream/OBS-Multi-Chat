@@ -100,7 +100,7 @@ If translation fails, Connection Settings shows why and messages stay in the ori
 6. Add the callback URL above as an authorized redirect URI.
 7. Copy the client ID and client secret.
 
-The app requests YouTube read access and YouTube live metadata/chat access.
+The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes, edits, or uploads videos.
 
 YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
 
