@@ -74,25 +74,33 @@ export function rememberKickProfilePic(slug: string, payload: any) {
   if (key && pic) kickProfilePicCache.set(key, pic)
 }
 
-/** Resolve a channel's public chatroom id, trying plain Node fetch (v2 then v1 endpoints) before falling back to a real browser when Cloudflare blocks it. */
+/** Resolve a channel's public chatroom id. Node fetch is often Cloudflare-blocked; Windows PowerShell then a real browser are the fallbacks. */
 export async function resolveKickChatroomId(slug: string, cached?: number): Promise<number> {
   if (cached && cached > 0) return cached
+  const key = slug.trim().toLowerCase()
+  if (!isKickSlug(key)) throw new Error(`Could not resolve Kick chatroom id for ${slug}`)
   for (const url of [
-    `https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`,
-    `https://kick.com/api/v1/channels/${encodeURIComponent(slug)}`,
+    `https://kick.com/api/v2/channels/${encodeURIComponent(key)}`,
+    `https://kick.com/api/v1/channels/${encodeURIComponent(key)}`,
   ]) {
     try {
-      const response = await fetch(url, { headers: BROWSER_HEADERS })
+      const response = await fetch(url, { headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` } })
       if (!response.ok) continue
       const payload = await response.json()
-      rememberKickProfilePic(slug, payload)
+      rememberKickProfilePic(key, payload)
       const id = chatroomIdFrom(payload)
       if (id) return id
     } catch { /* Cloudflare often blocks Node fetch; fall through */ }
   }
-  const fromBrowser = await resolveChatroomIdWithBrowser(slug)
+  try {
+    const payload = await fetchKickChannelPayloadWindows(key)
+    rememberKickProfilePic(key, payload)
+    const id = chatroomIdFrom(payload)
+    if (id) return id
+  } catch { /* powershell missing or blocked */ }
+  const fromBrowser = await resolveChatroomIdWithBrowser(key)
   if (fromBrowser) return fromBrowser
-  throw new Error(`Could not resolve Kick chatroom id for ${slug}`)
+  throw new Error(`Could not resolve Kick chatroom id for ${key}`)
 }
 
 async function fetchKickChannelPayloadWindows(slug: string) {

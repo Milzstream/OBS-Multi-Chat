@@ -132,7 +132,7 @@ export function ConnectionSettings({
                 <button type="button" className="disconnect" onClick={() => onDisconnect(connection.platform)}>Disconnect</button>
               </div>
             )
-            : <button type="button" className="connect" onClick={() => onConnect(connection.platform)}>Connect</button>}
+            : <button type="button" className="connect" title={connection.platform === 'YouTube' ? 'Google lists video delete on this permission. Relay only sends and moderates live chat.' : undefined} onClick={() => onConnect(connection.platform)}>Connect</button>}
         </div>
       ))}
       <div className="settings-divider" />
