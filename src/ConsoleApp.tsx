@@ -4,7 +4,7 @@ import { ConnectionSettings } from './ConnectionSettings'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
-type ConsoleInfo = { version: string; envPath: string; chatUrl: string; activityUrl: string }
+type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string }
 type Settings = {
   translateChat: boolean
   translateError: string
@@ -27,12 +27,6 @@ function platformIcon(platform: Platform, size = 14) {
   if (platform === 'Twitch') return <Twitch size={size} strokeWidth={2.5} />
   if (platform === 'YouTube') return <Youtube size={size} strokeWidth={2.5} />
   return <span className="kick-mark">K</span>
-}
-
-function clock(iso: string) {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 function platformMark(platform: Platform) {
@@ -58,6 +52,7 @@ export default function ConsoleApp() {
   const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
   const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
   const [jwtStatus, setJwtStatus] = useState<Partial<Record<Platform, { ok: boolean; text: string }>>>({})
+  const [showQuota, setShowQuota] = useState(false)
   const [quotaDraft, setQuotaDraft] = useState('')
   const [quotaStatus, setQuotaStatus] = useState('')
   const [copied, setCopied] = useState('')
@@ -198,6 +193,10 @@ export default function ConsoleApp() {
       </header>
       <section className="console-meta">
         <div>
+          <span>Data</span>
+          <code>{info?.dataDir || '…'}</code>
+        </div>
+        <div>
           <span>Configuration</span>
           <code>{info?.envPath || '…'}</code>
         </div>
@@ -221,12 +220,9 @@ export default function ConsoleApp() {
             stickRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48
           }}
         >
-          {lines.length ? lines.map((line) => (
-            <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}>
-              <time>{clock(line.time)}</time>
-              <span>{line.text || ' '}</span>
-            </p>
-          )) : <p className="console-line"><span>Waiting for output…</span></p>}
+          {lines.some((line) => line.text.trim()) ? lines.filter((line) => line.text.trim()).map((line) => (
+            <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}>{line.text}</p>
+          )) : <p className="console-line">Waiting for output…</p>}
         </div>
         <aside className="console-settings">
           <ConnectionSettings
@@ -245,15 +241,21 @@ export default function ConsoleApp() {
           </label>
           {settings.translateChat && settings.translateError ? <p className="settings-note">{settings.translateError}</p> : null}
           <div className="settings-divider" />
-          <span className="settings-section-title">YOUTUBE QUOTA</span>
-          <p className="settings-note">Queries per day current usage, for example 35 or 35/10000. Ignore the All quotas card.</p>
-          <p className="console-quota">{settings.youtubeQuota.used.toLocaleString()} / {settings.youtubeQuota.limit.toLocaleString()}</p>
-          <div className="settings-jwt-field">
-            <input value={quotaDraft} placeholder="35 or 35/10000" onChange={(event) => { setQuotaDraft(event.target.value); setQuotaStatus('') }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveQuota() } }} />
-            <button type="button" onClick={() => void saveQuota()}>Save</button>
-          </div>
-          {quotaStatus ? <p className={quotaStatus === 'Saved' ? 'settings-jwt-ok' : 'settings-jwt-error'}>{quotaStatus}</p> : null}
-          <button type="button" className="console-link" onClick={() => void fetch('/api/console/quota-page', { method: 'POST' })}>Open quotas page</button>
+          <button type="button" className="console-optional" onClick={() => setShowQuota((open) => !open)}>
+            <span>YouTube quota</span>
+            <small>{settings.youtubeQuota.used.toLocaleString()} / {settings.youtubeQuota.limit.toLocaleString()}</small>
+          </button>
+          {showQuota ? (
+            <>
+              <p className="settings-note">Optional. Queries per day current usage, for example 35 or 35/10000. Ignore the All quotas card.</p>
+              <div className="settings-jwt-field">
+                <input value={quotaDraft} placeholder="35 or 35/10000" onChange={(event) => { setQuotaDraft(event.target.value); setQuotaStatus('') }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveQuota() } }} />
+                <button type="button" onClick={() => void saveQuota()}>Save</button>
+              </div>
+              {quotaStatus ? <p className={quotaStatus === 'Saved' ? 'settings-jwt-ok' : 'settings-jwt-error'}>{quotaStatus}</p> : null}
+              <button type="button" className="console-link" onClick={() => void fetch('/api/console/quota-page', { method: 'POST' })}>Open quotas page</button>
+            </>
+          ) : null}
           <div className="settings-divider" />
           <span className="settings-section-title">STREAMELEMENTS</span>
           <p className="settings-note">{settings.streamelements.connected ? settings.streamelements.handle : 'Not configured'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}</p>

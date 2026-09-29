@@ -12,9 +12,16 @@ if (!fs.existsSync(exe)) {
 const deploy = path.resolve('deploy')
 const savedEnv = path.join(deploy, 'production.env')
 const keptEnv = fs.existsSync(savedEnv) ? fs.readFileSync(savedEnv) : null
+const dataDir = path.join(deploy, 'data')
+const keptData = path.join(require('os').tmpdir(), `relay-deploy-data-${process.pid}`)
+if (fs.existsSync(dataDir)) fs.cpSync(dataDir, keptData, { recursive: true })
 fs.rmSync(deploy, { recursive: true, force: true })
 fs.cpSync(unpacked, deploy, { recursive: true })
 if (keptEnv) fs.writeFileSync(savedEnv, keptEnv)
+if (fs.existsSync(keptData)) {
+  fs.cpSync(keptData, dataDir, { recursive: true })
+  fs.rmSync(keptData, { recursive: true, force: true })
+}
 
 function envValues(text) {
   const values = {}

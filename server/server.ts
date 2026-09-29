@@ -369,7 +369,7 @@ function localCompanionOnly(request: express.Request, response: express.Response
 app.get('/api/console', (request, response) => {
   if (localCompanionOnly(request, response)) return
   const base = `http://127.0.0.1:${port}`
-  response.json({ version: getCurrentVersion(), envPath, chatUrl: base, activityUrl: `${base}/activity` })
+  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity` })
 })
 app.get('/api/logs', (request, response) => {
   if (localCompanionOnly(request, response)) return
@@ -689,30 +689,15 @@ httpServer.listen(port, bindHost, () => {
   collapseYouTubeHydrationDuplicates()
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
-  console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
-  console.log(`  Configuration:  ${envPath}`)
-  console.log('')
-  console.log(`  Chat dock      ${base}`)
-  console.log(`  Activity dock  ${base}/activity`)
-  console.log('')
-  console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
-  if (lanEnabled) {
-    console.log(`  Listening on ${bindHost}:${port} (LAN). Docks on this PC still use the URLs above.`)
-    console.log(apiToken ? '  Non-browser LAN clients must send x-relay-token or Authorization: Bearer.' : '  Warning: LAN clients can use the docks. Set RELAY_API_TOKEN to require a secret from non-loopback tools.')
-  } else {
-    console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
+  console.log(`Data  ${dataDir}`)
+  if (process.env.RELAY_ELECTRON !== '1') {
+    console.log(`Chat dock      ${base}`)
+    console.log(`Activity dock  ${base}/activity`)
   }
-  console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
-  console.log(`  Activity history ${activityMax.toLocaleString()} events (RELAY_ACTIVITY_MAX) — how many alerts are stored and loaded on launch.`)
-  if (envKeysAdded.length) console.log(`  Env file      added ${envKeysAdded.join(', ')} to ${path.basename(envPath)} (existing values kept).`)
-  console.log('')
-  console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
-  console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
-  console.log('  Ignore the All quotas & system limits card (e.g. 1247) — that counts quota rows on the page, not units you used.')
-  if (youtubeQuotaUsed) console.log(`  Estimated today ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (Pacific)`)
-  console.log('  Optional: set today\'s usage in this window (35 or 35/10000). A terminal can still type it and press Enter.')
-  console.log('')
+  if (lanEnabled) console.log(apiToken ? `Listening on ${bindHost}:${port} (LAN).` : `Listening on ${bindHost}:${port} (LAN, no token).`)
+  if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
+  if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)
   listenForYouTubeQuotaInput()
   void checkForUpdates()
   if (missing.length && !settings.ignoreMissingJwt) {
