@@ -23,6 +23,12 @@ const emptyConnections: Connection[] = [
   { platform: 'YouTube', viewers: 0, handle: '', connected: false, live: false },
 ]
 
+function clock(iso: string) {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 function platformIcon(platform: Platform, size = 14) {
   if (platform === 'Twitch') return <Twitch size={size} strokeWidth={2.5} />
   if (platform === 'YouTube') return <Youtube size={size} strokeWidth={2.5} />
@@ -221,7 +227,7 @@ export default function ConsoleApp() {
           }}
         >
           {lines.some((line) => line.text.trim()) ? lines.filter((line) => line.text.trim()).map((line) => (
-            <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}>{line.text}</p>
+            <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}><time>{clock(line.time)}</time><span>{line.text}</span></p>
           )) : <p className="console-line">Waiting for output…</p>}
         </div>
         <aside className="console-settings">
