@@ -153,3 +153,28 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
   .activity-title { display: none; }
 }
 .activity-empty { min-height: 160px; }
+.console-app { height: 100vh; display: flex; flex-direction: column; background: #111416; color: #eef1f0; }
+.console-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: #171b1e; }
+.console-top strong { display: block; font-size: 14px; letter-spacing: .04em; }
+.console-top span { color: #8b969a; font-size: 11px; }
+.console-quit { padding: 6px 10px; border-radius: 4px; background: #382726; color: #dfaaa1; font: 10px 'DM Mono', monospace; }
+.console-meta { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.console-meta div { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.console-meta span { flex-shrink: 0; color: var(--teal); font: 9px 'DM Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
+.console-meta code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c9d1cf; font: 11px 'DM Mono', monospace; }
+.console-meta button, .console-link { flex-shrink: 0; padding: 3px 7px; border-radius: 3px; background: #1c2f2c; color: var(--teal); font: 9px 'DM Mono', monospace; }
+.console-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
+.console-log { min-height: 0; overflow: auto; padding: 10px 14px 16px; background: #0e1214; font: 12px/1.45 'DM Mono', monospace; scrollbar-color: #374044 transparent; scrollbar-width: thin; }
+.console-line { display: flex; gap: 10px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #c5cfcc; }
+.console-line time { flex-shrink: 0; color: #5f6b6d; }
+.console-line.warn { color: #f3af61; }
+.console-line.error { color: #ff8b7a; }
+.console-settings { min-height: 0; overflow: auto; padding: 14px 14px 20px; border-left: 1px solid var(--line); background: #171b1e; }
+.console-connections { position: static; padding: 0 0 8px; border: 0; background: transparent; box-shadow: none; }
+.console-quota { margin: 0 0 8px; color: #d8e0dd; font: 12px 'DM Mono', monospace; }
+.console-jwt-label { display: flex; align-items: center; gap: 6px; }
+.console-link { margin-top: 8px; }
+@media (max-width: 860px) {
+  .console-meta, .console-body { grid-template-columns: 1fr; }
+  .console-settings { border-left: 0; border-top: 1px solid var(--line); }
+}

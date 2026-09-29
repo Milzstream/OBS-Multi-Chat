@@ -105,6 +105,8 @@ describe('StreamElements activity', () => {
   it('explains missing JWTs', () => {
     assert.match(missingStreamElementsMessage(['Twitch', 'Kick', 'YouTube']) || '', /STREAMELEMENTS_JWT_TWITCH/)
     assert.match(missingStreamElementsMessage(['Kick']) || '', /STREAMELEMENTS_JWT_KICK/)
+    assert.match(missingStreamElementsMessage(['Kick']) || '', /Relay Chat Dock window/)
+    assert.doesNotMatch(missingStreamElementsMessage(['Kick']) || '', /Activity settings/)
     assert.equal(missingStreamElementsMessage([]), undefined)
   })
 })
@@ -127,5 +129,7 @@ describe('activity display', () => {
     const markup = renderToStaticMarkup(createElement(ActivityWarningBanner, { messages: [], missingJwts: ['Twitch'], seConnected: false, onDismiss: () => undefined }))
     assert.match(markup, /StreamElements not configured/)
     assert.match(markup, /STREAMELEMENTS_JWT_TWITCH/)
+    assert.match(markup, /Relay Chat Dock window/)
+    assert.doesNotMatch(markup, /Activity settings/)
   })
 })

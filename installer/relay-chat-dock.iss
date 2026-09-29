@@ -42,9 +42,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks (enable them under Docks in OBS after install)"; GroupDescription: "OBS:";
 
 [Files]
-Source: "..\deploy\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\deploy\dist\*"; DestDir: "{app}\dist"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\deploy\package.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\deploy\*"; DestDir: "{app}"; Excludes: "production.env"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "..\.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "installed.origin"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\.env.example"; DestDir: "{localappdata}\{#MyAppName}"; DestName: "production.env"; Flags: onlyifdoesntexist
@@ -286,7 +284,7 @@ begin
       'In OBS, open Docks and check Relay Chat and Relay Activity. OBS lists installer-added docks but leaves them hidden until you enable them.'#13#10#13#10 +
       'Your environment file is:'#13#10 +
       EnvFilePath + #13#10#13#10 +
-      'Edit that file if a client ID, secret, or StreamElements JWT needs to change. The same path is printed in the companion console every launch.';
+      'Edit that file if a client ID or secret needs to change. The Relay Chat Dock window shows the log, translate, and StreamElements JWTs. Closing that window stops the docks.';
 end;
 
 function LooksLikeJwt(const Value: String): Boolean;

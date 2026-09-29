@@ -5,21 +5,24 @@ const version = require('../package.json').version
 const icon = path.resolve('assets/app-icon.ico')
 
 async function stampIcon(exePath) {
-  if (!fs.existsSync(icon) || !fs.existsSync(exePath)) return
+  if (!fs.existsSync(exePath)) return
   const { load } = require('resedit/cjs')
   const ResEdit = await load()
   const exe = ResEdit.NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true })
+  exe.newHeader.optionalHeader.subsystem = 2
   const res = ResEdit.NtExecutableResource.from(exe)
-  const iconFile = ResEdit.Data.IconFile.from(fs.readFileSync(icon))
-  const groups = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
-  const groupId = groups[0] ? groups[0].id : 1
-  const lang = groups[0] ? groups[0].lang : 1033
-  ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
-    res.entries,
-    groupId,
-    lang,
-    iconFile.icons.map((item) => item.data),
-  )
+  if (fs.existsSync(icon)) {
+    const iconFile = ResEdit.Data.IconFile.from(fs.readFileSync(icon))
+    const groups = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
+    const groupId = groups[0] ? groups[0].id : 1
+    const lang = groups[0] ? groups[0].lang : 1033
+    ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
+      res.entries,
+      groupId,
+      lang,
+      iconFile.icons.map((item) => item.data),
+    )
+  }
   const [major, minor, patch] = String(version).split('.').map((part) => Number(part) || 0)
   const versionInfo = ResEdit.Resource.VersionInfo.fromEntries(res.entries)[0]
   if (versionInfo) {
