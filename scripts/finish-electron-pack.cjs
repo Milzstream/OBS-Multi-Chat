@@ -2,6 +2,31 @@ const fs = require('fs')
 const path = require('path')
 
 const version = require('../package.json').version
+const icon = path.resolve('assets/app-icon.ico')
+
+async function stampExeIcon(exePath) {
+  if (!fs.existsSync(exePath) || !fs.existsSync(icon)) return
+  const { load } = require('resedit/cjs')
+  const ResEdit = await load()
+  const exe = ResEdit.NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true })
+  const res = ResEdit.NtExecutableResource.from(exe)
+  const iconFile = ResEdit.Data.IconFile.from(fs.readFileSync(icon))
+  const groups = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
+  const groupId = groups[0] ? groups[0].id : 1
+  const lang = groups[0] ? groups[0].lang : 1033
+  ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
+    res.entries,
+    groupId,
+    lang,
+    iconFile.icons.map((item) => item.data),
+  )
+  res.outputResource(exe)
+  const stamped = `${exePath}.stamped`
+  fs.writeFileSync(stamped, Buffer.from(exe.generate()))
+  fs.copyFileSync(stamped, exePath)
+  fs.rmSync(stamped, { force: true })
+}
+
 const unpacked = path.resolve('deploy-electron', 'win-unpacked')
 const exe = path.join(unpacked, 'relay-chat-dock.exe')
 if (!fs.existsSync(exe)) {
@@ -71,4 +96,9 @@ if (fs.existsSync('production.env')) mergeEnvFile('production.env', deployEnv)
 else if (!fs.existsSync(deployEnv) && fs.existsSync('.env.example')) fs.copyFileSync('.env.example', deployEnv)
 else if (fs.existsSync('.env.example')) mergeEnvFile('.env.example', deployEnv)
 fs.writeFileSync(path.join(deploy, 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
-console.log('Created deploy\\relay-chat-dock.exe')
+stampExeIcon(path.join(deploy, 'relay-chat-dock.exe')).then(() => {
+  console.log('Created deploy\\relay-chat-dock.exe')
+}).catch((error) => {
+  console.error('Could not stamp the executable icon:', error instanceof Error ? error.message : error)
+  process.exitCode = 1
+})
