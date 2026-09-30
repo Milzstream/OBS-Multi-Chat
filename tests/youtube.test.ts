@@ -22,6 +22,11 @@ import {
   youtubeOfficialToActivity,
   youtubeQuotaCost,
   youtubeQuotaHealthStatus,
+  youtubePrivacyMessage,
+  youtubePrivacyNotices,
+  youtubePrivacyRecheckIds,
+  youtubePublicVideoBody,
+  nextYoutubePrivacyWatch,
   youtubeQuotaLabel,
   youtubeSameAuthor,
   youtubeSameChatFor,
@@ -99,6 +104,7 @@ describe('YouTube quota', () => {
     assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'DELETE'), 50)
     assert.equal(youtubeQuotaCost('/channels?mine=true'), 1)
     assert.equal(youtubeQuotaCost('/videos?id=abc'), 1)
+    assert.equal(youtubeQuotaCost('/videos?part=status', 'PUT'), 50)
     assert.equal(youtubeQuotaCost('/unmapped-endpoint', 'GET'), 1)
   })
 
@@ -108,6 +114,7 @@ describe('YouTube quota', () => {
     assert.equal(youtubeQuotaLabel('/liveChat/messages?id=x', 'DELETE'), 'liveChatMessages.delete')
     assert.equal(youtubeQuotaLabel('/liveChat/bans?part=snippet', 'POST'), 'liveChatBans.insert')
     assert.equal(youtubeQuotaLabel('/videos?chart=mostPopular', 'GET'), 'videos.list')
+    assert.equal(youtubeQuotaLabel('/videos?part=status', 'PUT'), 'videos.update')
     assert.equal(youtubeQuotaLabel('/liveBroadcasts?status=active', 'GET'), 'liveBroadcasts.list')
     assert.equal(youtubeQuotaLabel('/liveBroadcasts?part=snippet', 'PUT'), 'liveBroadcasts.update')
     assert.equal(youtubeQuotaLabel('/playlists', 'PATCH'), 'playlists PATCH')
@@ -135,6 +142,40 @@ describe('YouTube quota', () => {
     assert.equal(isEndedYouTubeChat('live chat is no longer live'), true)
     assert.equal(isEndedYouTubeChat(new Error('liveChatNotFound')), true)
     assert.equal(isEndedYouTubeChat('quotaExceeded'), false)
+  })
+})
+
+describe('YouTube privacy warnings', () => {
+  it('warns for unlisted and private broadcasts and skips public ones', () => {
+    const notices = youtubePrivacyNotices([
+      { videoId: 'abcdefghijk', title: 'Horizontal', privacyStatus: 'public' },
+      { videoId: 'shortsid123', title: 'Vertical', privacyStatus: 'unlisted' },
+      { videoId: 'privatesid1', title: '', privacyStatus: 'private' },
+      { videoId: 'not-an-id', privacyStatus: 'unlisted' },
+    ])
+    assert.deepEqual(notices, [
+      { videoId: 'shortsid123', title: 'Vertical', privacy: 'unlisted' },
+      { videoId: 'privatesid1', title: 'privatesid1', privacy: 'private' },
+    ])
+    assert.equal(youtubePrivacyMessage(notices[0]), 'YouTube “Vertical” is unlisted.')
+  })
+
+  it('keeps ended broadcasts on the watch list and rechecks them after the interval', () => {
+    const now = 1_000_000
+    const watched = nextYoutubePrivacyWatch(now, [], [{ videoId: 'abcdefghijk', title: 'Horizontal' }])
+    assert.equal(watched[0].until, now + 30 * 60_000)
+    assert.deepEqual(youtubePrivacyRecheckIds(now, 0, watched, ['abcdefghijk']), [])
+    assert.deepEqual(youtubePrivacyRecheckIds(now + 60_000, now, watched, []), [])
+    assert.deepEqual(youtubePrivacyRecheckIds(now + 3 * 60_000, now, watched, []), ['abcdefghijk'])
+    const kept = nextYoutubePrivacyWatch(now + 31 * 60_000, watched, [])
+    assert.deepEqual(kept, [])
+  })
+
+  it('sends public privacy and keeps made-for-kids when YouTube already listed it', () => {
+    assert.deepEqual(youtubePublicVideoBody('abcdefghijk', { madeForKids: false, privacyStatus: 'unlisted' }), {
+      id: 'abcdefghijk',
+      status: { privacyStatus: 'public', madeForKids: false },
+    })
   })
 })
 

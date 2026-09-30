@@ -66,7 +66,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen. Click a chat username to open that person's Twitch viewer card for your channel, Kick profile, or YouTube channel page in the system browser. The viewer card needs your connected Twitch login in the path (`/popout/<you>/viewercard/<them>`). YouTube's community tab is often disabled, so that click opens the channel instead.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). Hover a tile to see that platform's stream title. If YouTube has more than one live broadcast, the hover lists each title. The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen. Click a chat username to open that person's Twitch viewer card for your channel, Kick profile, or YouTube channel page in the system browser. The viewer card needs your connected Twitch login in the path (`/popout/<you>/viewercard/<them>`). YouTube's community tab is often disabled, so that click opens the channel instead.
 
 ## API setup
 
@@ -106,7 +106,7 @@ If translation fails, Connection Settings shows why and messages stay in the ori
 6. Add the callback URL above as an authorized redirect URI.
 7. Copy the client ID and client secret.
 
-The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes, edits, or uploads videos.
+The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes or uploads videos. The only video edit is setting a broadcast or archive to **public** when you confirm the privacy prompt.
 
 YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
 
@@ -117,6 +117,8 @@ Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
+
+If a YouTube broadcast is unlisted or private, the companion window and the chat dock each show that broadcast's title (`YouTube “Night stream” is unlisted.`). That can be intentional, or a leftover from reusing an unlisted stream. **Make public** sets only that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that video's warning until the app restarts; the next broadcast still warns. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
 
 Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
 
@@ -248,6 +250,7 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `POST /api/messages` - send a message to selected platforms
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
+- `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
 - `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories

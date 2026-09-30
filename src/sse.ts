@@ -26,6 +26,7 @@ export function chatDockFields(remote: Record<string, unknown>) {
     accounts: Array.isArray(remote.accounts) ? remote.accounts : undefined,
     health: remote.health && typeof remote.health === 'object' ? remote.health : undefined,
     chatWarnings: Array.isArray(remote.chatWarnings) ? remote.chatWarnings : undefined,
+    youtubePrivacy: Array.isArray(remote.youtubePrivacy) ? remote.youtubePrivacy : undefined,
     youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : undefined,
     streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
     streamInfo: remote.streamInfo && typeof remote.streamInfo === 'object' ? remote.streamInfo : undefined,
