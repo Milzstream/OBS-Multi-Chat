@@ -22,20 +22,21 @@ describe('activity time and profiles', () => {
   })
 
   it('builds platform profile URLs and skips test users', () => {
-    assert.equal(profileUrl('Twitch', 'Ada'), 'https://www.twitch.tv/popout/viewercard/ada?popout=')
+    assert.equal(profileUrl('Twitch', 'Ada'), 'https://www.twitch.tv/ada')
     assert.equal(profileUrl('Kick', 'superiogame_tyle88'), 'https://kick.com/superiogame-tyle88')
     assert.equal(profileUrl('Kick', 'SuperIOgame_Tyle88', undefined, 'superiogame-tyle88'), 'https://kick.com/superiogame-tyle88')
     assert.equal(profileUrl('Kick', 'ada'), 'https://kick.com/ada')
-    assert.equal(profileUrl('YouTube', 'Ada', 'UC1234567890123456789012'), 'https://www.youtube.com/channel/UC1234567890123456789012/community')
-    assert.equal(profileUrl('YouTube', '@Ada'), 'https://www.youtube.com/@ada/community')
+    assert.equal(profileUrl('YouTube', 'Ada', 'UC1234567890123456789012'), 'https://www.youtube.com/channel/UC1234567890123456789012')
+    assert.equal(profileUrl('YouTube', '@Ada'), 'https://www.youtube.com/@ada')
     assert.equal(profileUrl('Twitch', 'TestUser'), undefined)
     assert.equal(profileUrl('Twitch', 'Anonymous'), undefined)
   })
 
   it('prefers the mod view over a stored public profile URL', () => {
     const base = { id: '1', kind: 'follow' as const, user: 'Ada', time: '2026-09-02T12:00:00.000Z', profileUrl: 'https://www.twitch.tv/ada' }
-    assert.equal(profileHref({ ...base, platform: 'Twitch' }), 'https://www.twitch.tv/popout/viewercard/ada?popout=')
-    assert.equal(profileHref({ ...base, platform: 'StreamElements', source: 'YouTube', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012/community')
+    assert.equal(profileHref({ ...base, platform: 'Twitch' }, 'milz'), 'https://www.twitch.tv/popout/milz/viewercard/ada')
+    assert.equal(profileHref({ ...base, platform: 'Twitch' }), 'https://www.twitch.tv/ada')
+    assert.equal(profileHref({ ...base, platform: 'StreamElements', source: 'YouTube', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012')
     assert.equal(profileHref({ ...base, platform: 'StreamElements', kind: 'merch', profileUrl: 'https://www.twitch.tv/ada' }), 'https://www.twitch.tv/ada')
   })
 })
@@ -59,12 +60,12 @@ describe('activity store', () => {
     }
   })
 
-  it('rewrites a stored public Twitch profile to the viewer card', () => {
+  it('rewrites a dead viewer-card URL back to the public profile', () => {
     const file = path.join(os.tmpdir(), `relay-activity-card-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
     try {
-      fs.writeFileSync(file, JSON.stringify([{ id: 'follow-1', platform: 'Twitch', kind: 'follow', user: 'Ada', time: '2026-09-02T12:00:00.000Z', profileUrl: 'https://www.twitch.tv/ada' }]))
+      fs.writeFileSync(file, JSON.stringify([{ id: 'follow-1', platform: 'Twitch', kind: 'follow', user: 'Ada', time: '2026-09-02T12:00:00.000Z', profileUrl: 'https://www.twitch.tv/popout/viewercard/ada?popout=' }]))
       const store = createActivityStore(file)
-      assert.equal(store.list()[0]?.profileUrl, 'https://www.twitch.tv/popout/viewercard/ada?popout=')
+      assert.equal(store.list()[0]?.profileUrl, 'https://www.twitch.tv/ada')
     } finally {
       try { fs.unlinkSync(file) } catch { /* ignore */ }
     }

@@ -60,23 +60,21 @@ function KindIcon({ kind }: { kind: ActivityKind }) {
 }
 
 /**
-/**
- * Derive the profile URL a row links out to. Prefers the mod view (Twitch
- * viewer card, YouTube community) over a stored public profile URL so older
- * activity rows still open the right page. StreamElements events with no
- * linked platform fall back to whatever URL was stored.
+ * Derive the profile URL a row links out to. Twitch uses the viewer card when
+ * the broadcaster login is known, otherwise the public profile. YouTube is the
+ * channel page. A stored URL is only a fallback for events we cannot rebuild.
  */
-export function profileHref(event: ActivityEvent) {
+export function profileHref(event: ActivityEvent, channelLogin?: string) {
   const source = event.source || event.platform
-  return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }) || event.profileUrl
+  return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }, channelLogin) || event.profileUrl
 }
 
-export function ActivityRow({ event, age }: { event: ActivityEvent; age: string }) {
+export function ActivityRow({ event, age, channelLogin }: { event: ActivityEvent; age: string; channelLogin?: string }) {
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
   const detail = activitySubtitle(event)
-  const href = profileHref(event)
+  const href = profileHref(event, source === 'Twitch' ? channelLogin : undefined)
   const openProfile = () => {
     if (!href) return
     openDockUrl(href)

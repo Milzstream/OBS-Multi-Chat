@@ -48,13 +48,15 @@ describe('chat dock helpers', () => {
     assert.equal(nextOptionIndex(3, 0, 1), 0)
   })
 
-  it('opens the Twitch viewer card and YouTube community page, and leaves Kick on the profile', () => {
-    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'Ada' }), 'https://www.twitch.tv/popout/viewercard/ada?popout=')
+  it('opens the channel-scoped Twitch viewer card and the YouTube channel page', () => {
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'Ada' }, 'Milz'), 'https://www.twitch.tv/popout/milz/viewercard/ada')
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'Ada Lovelace', handle: 'ada' }, 'Milz'), 'https://www.twitch.tv/popout/milz/viewercard/ada')
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'Ada' }), 'https://www.twitch.tv/ada')
     assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'not a login' }), undefined)
     assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'TestUser' }), undefined)
     assert.equal(chatProfileUrl({ platform: 'Kick', user: 'SuperIOgame_Tyle88', handle: 'superiogame-tyle88' }), 'https://kick.com/superiogame-tyle88')
-    assert.equal(chatProfileUrl({ platform: 'YouTube', user: 'Ada', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012/community')
-    assert.equal(chatProfileUrl({ platform: 'YouTube', user: '@Ada' }), 'https://www.youtube.com/@ada/community')
+    assert.equal(chatProfileUrl({ platform: 'YouTube', user: 'Ada', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012')
+    assert.equal(chatProfileUrl({ platform: 'YouTube', user: '@Ada' }), 'https://www.youtube.com/@ada')
     assert.equal(moderationAcceptsReason('Twitch'), true)
     assert.equal(moderationAcceptsReason('Kick'), true)
     assert.equal(moderationAcceptsReason('YouTube'), false)

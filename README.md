@@ -66,7 +66,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen. Click a chat username to open that person's Twitch viewer card, Kick profile, or YouTube channel community page in the system browser.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen. Click a chat username to open that person's Twitch viewer card for your channel, Kick profile, or YouTube channel page in the system browser. The viewer card needs your connected Twitch login in the path (`/popout/<you>/viewercard/<them>`). YouTube's community tab is often disabled, so that click opens the channel instead.
 
 ## API setup
 
@@ -202,7 +202,7 @@ If a JWT is missing, the companion window and Activity dock warn you. Use **Igno
 
 The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
 
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's Twitch viewer card, Kick profile, or YouTube community page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
+Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
@@ -248,7 +248,7 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `POST /api/messages` - send a message to selected platforms
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
-- `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and viewer cards (`?popout=` only), Kick profiles, YouTube channel or `@handle` pages including `/community`, creator dashboards, and YouTube Studio
+- `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category/tags to one platform

@@ -846,6 +846,7 @@ export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: 
     id: tags.id || crypto.randomUUID(),
     platform: 'Twitch',
     user: tags['display-name'] || match[2],
+    handle: match[2],
     userId,
     color: tags.color || undefined,
     badges: twitchBadgesFromTag(tags.badges, options.urls),

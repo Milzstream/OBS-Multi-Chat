@@ -31,6 +31,7 @@ const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind; am
 type BackendState = {
   activity?: ActivityEvent[]
   activityWarnings?: string[]
+  accounts?: { platform: string; handle?: string; connected?: boolean }[]
   streamelements?: { connected: boolean; handle: string; missing?: string[] }
   activityFallback?: boolean
   ignoreMissingJwt?: boolean
@@ -92,6 +93,7 @@ export default function ActivityApp() {
   const [showTests, setShowTests] = useState(false)
   const [showKinds, setShowKinds] = useState(false)
   const [testStatus, setTestStatus] = useState('')
+  const [twitchChannel, setTwitchChannel] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -118,6 +120,11 @@ export default function ActivityApp() {
       const fields = activityDockFields(remote as unknown as Record<string, unknown>)
       if (fields.activity || fields.activityEvent) setEvents((previous) => applyActivitySlice(previous, fields) as ActivityEvent[])
       if (fields.activityWarnings) setActivityWarnings(fields.activityWarnings as string[])
+      if (fields.accounts) {
+        const accounts = fields.accounts as { platform?: string; handle?: string; connected?: boolean }[]
+        const twitch = accounts.find((account) => account.platform === 'Twitch' && account.connected)
+        setTwitchChannel(twitch?.handle || '')
+      }
       if (fields.streamelements) {
         const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[] }
         setMissingJwts(streamelements.missing || [])
@@ -211,7 +218,7 @@ export default function ActivityApp() {
             <>
               <div className="virtual-spacer" style={{ height: padTop }} aria-hidden="true" />
               {visible.slice(start, end).map((event) => (
-                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} />
+                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} channelLogin={twitchChannel} />
               ))}
               <div className="virtual-spacer" style={{ height: padBottom }} aria-hidden="true" />
             </>

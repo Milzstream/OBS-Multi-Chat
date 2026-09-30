@@ -1323,6 +1323,7 @@ function handleTwitchEventSub(payload: any) {
       id: event?.message_id || crypto.randomUUID(),
       platform: 'Twitch',
       user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
+      handle: event?.chatter_user_login || undefined,
       userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
       color: event?.color || undefined,
       badges: twitchBadgesFromList(event?.badges, twitchBadgeUrls),

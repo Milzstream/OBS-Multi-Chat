@@ -150,30 +150,40 @@ export function streamDashboardUrl(platform: ChatPlatform, account: { handle?: s
   return youtubeStudioUrl(account.channelId)
 }
 
+/** Twitch login, not a display name. Viewer cards and profile URLs both require this shape. */
+export function twitchLogin(raw?: string) {
+  const handle = String(raw || '').replace(/^@+/, '').trim().toLowerCase()
+  if (!/^[a-z0-9_]{1,25}$/.test(handle)) return
+  return handle
+}
+
 /**
- * Moderator profile link. Twitch opens the viewer card (`?popout=` is the only
- * query the local allowlist accepts). YouTube opens the channel community
- * page, which is the history YouTube's own mod UI links to. Kick has no
- * equivalent route, so it stays the public profile. Must match
- * `profileUrl` in server/activity.ts and `isSafeExternalUrl`.
+ * Moderator profile link. Twitch viewer cards only load at
+ * `/popout/<channel>/viewercard/<login>` — the channel-less `?popout=` route
+ * 404s. Without a connected channel login, fall back to the public profile.
+ * YouTube's `/community` tab is often disabled, so this opens the channel page.
+ * Kick has no viewer-card route. Must stay on the `isSafeExternalUrl` allowlist.
  */
-export function chatProfileUrl(message: { platform: string; user: string; userId?: string; handle?: string }) {
+export function chatProfileUrl(message: { platform: string; user: string; userId?: string; handle?: string }, channelLogin?: string) {
   const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   if (message.platform === 'Twitch') {
-    if (!/^[a-z0-9_]{1,25}$/.test(handle)) return
-    return `https://www.twitch.tv/popout/viewercard/${handle}?popout=`
+    const login = twitchLogin(message.handle) || twitchLogin(handle)
+    if (!login) return
+    const channel = twitchLogin(channelLogin)
+    if (channel) return `https://www.twitch.tv/popout/${channel}/viewercard/${login}`
+    return `https://www.twitch.tv/${login}`
   }
   if (message.platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(message.user, message.handle))}`
   if (message.platform === 'YouTube') {
-    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}/community`
-    return `https://www.youtube.com/@${encodeURIComponent(handle)}/community`
+    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
+    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
   }
 }
 
 export function profileLinkTitle(platform: string) {
   if (platform === 'Twitch') return 'Open Twitch viewer card'
-  if (platform === 'YouTube') return 'Open YouTube channel history'
+  if (platform === 'YouTube') return 'Open YouTube channel'
   if (platform === 'Kick') return 'Open Kick profile'
   return 'Open profile'
 }

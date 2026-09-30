@@ -48,6 +48,7 @@ describe('Twitch IRC', () => {
     assert.notEqual(parsed, 'ping')
     assert.ok(parsed && parsed !== 'ping')
     assert.equal(parsed.user, 'Ada')
+    assert.equal(parsed.handle, 'ada')
     assert.equal(parsed.userId, '99')
     assert.equal(parsed.color, '#FF0000')
     assert.equal(parsed.text, 'hello Kappa there')

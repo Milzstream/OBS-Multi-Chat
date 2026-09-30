@@ -58,21 +58,21 @@ export function parseActivityTime(value: unknown) {
 }
 
 /**
- * Build a clickable profile link per platform. Anonymous/test users get none.
- * Twitch is the viewer card and YouTube is the community page — same shape as
- * `chatProfileUrl` in src/chat-helpers.ts, which the dock allowlist accepts.
+ * Stored profile link. Twitch stays the public profile here because the viewer
+ * card needs the broadcaster login, which the dock adds at click time. YouTube
+ * is the channel page, not `/community`, which many channels leave disabled.
  */
 export function profileUrl(platform: ActivityPlatform, user: string, userId?: string, slug?: string) {
   const handle = String(user || '').replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
   if (platform === 'Twitch') {
     if (!/^[a-z0-9_]{1,25}$/.test(handle)) return
-    return `https://www.twitch.tv/popout/viewercard/${handle}?popout=`
+    return `https://www.twitch.tv/${handle}`
   }
   if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(user, slug))}`
   if (platform === 'YouTube') {
-    if (userId && /^UC[\w-]{20,}$/i.test(userId)) return `https://www.youtube.com/channel/${encodeURIComponent(userId)}/community`
-    return `https://www.youtube.com/@${encodeURIComponent(handle)}/community`
+    if (userId && /^UC[\w-]{20,}$/i.test(userId)) return `https://www.youtube.com/channel/${encodeURIComponent(userId)}`
+    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
   }
 }
 
