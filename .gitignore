@@ -11,12 +11,18 @@ dist/
 dist-server/
 dist-package/
 deploy/
+deploy-electron/
 release-staging/
 
 # Packaged binaries and release zips
 *.exe
 *.lnk
 *.zip
+companion/*.user
+companion/bin/
+companion/obj/
+companion/publish/
+console-profile/
 
 # TypeScript incremental
 *.tsbuildinfo

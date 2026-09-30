@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createActivityStore } from '../server/activity.js'
-import { compareVersions, pickInstallerAsset, versionManifestPaths } from '../server/check-update.js'
+import { compareVersions, getCurrentVersion, isDesktopPackaged, pickInstallerAsset, versionManifestPaths } from '../server/check-update.js'
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
 
 function tempDir() {
@@ -32,6 +32,44 @@ describe('packaged version manifest', () => {
       path.join(os.tmpdir(), 'relay-install', 'package.json'),
       path.join(os.tmpdir(), 'relay-install', 'package.json'),
     ])
+  })
+
+  it('treats pkg, electron, and RELAY_PACKAGED as a desktop build', () => {
+    const previousPackaged = process.env.RELAY_PACKAGED
+    const previousElectron = process.versions.electron
+    const previousDefaultApp = process.defaultApp
+    delete process.env.RELAY_PACKAGED
+    delete process.versions.electron
+    delete process.defaultApp
+    assert.equal(isDesktopPackaged(), Boolean(process.pkg))
+    process.env.RELAY_PACKAGED = '1'
+    assert.equal(isDesktopPackaged(), true)
+    delete process.env.RELAY_PACKAGED
+    process.versions.electron = '33.0.0'
+    process.defaultApp = true
+    assert.equal(isDesktopPackaged(), Boolean(process.pkg))
+    delete process.defaultApp
+    assert.equal(isDesktopPackaged(), true)
+    if (previousPackaged == null) delete process.env.RELAY_PACKAGED
+    else process.env.RELAY_PACKAGED = previousPackaged
+    if (previousElectron == null) delete process.versions.electron
+    else process.versions.electron = previousElectron
+    if (previousDefaultApp == null) delete process.defaultApp
+    else process.defaultApp = previousDefaultApp
+  })
+
+  it('reads the electron app root package.json first', () => {
+    const dir = tempDir()
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ version: '9.9.9' }))
+    const previous = process.env.RELAY_APP_ROOT
+    process.env.RELAY_APP_ROOT = dir
+    try {
+      assert.equal(getCurrentVersion(), '9.9.9')
+    } finally {
+      if (previous == null) delete process.env.RELAY_APP_ROOT
+      else process.env.RELAY_APP_ROOT = previous
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -8,7 +8,7 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
 
-![Companion console with dock URLs and configuration path](docs/console.png)
+![Relay Chat Dock window with the log, account connections, and settings](docs/app.png)
 
 ## Download
 
@@ -19,7 +19,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
 2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. After OBS starts, open **Docks** and check **Relay Chat** and **Relay Activity** — OBS lists installer-added docks but leaves them hidden until you enable them
 3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
-4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the console prints that path on every launch
+4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the Relay Chat Dock window shows that path on every launch
 5. Start **Relay Chat Dock** from the Start Menu
 
 The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen.
@@ -28,7 +28,7 @@ The app itself installs under Program Files. `production.env` and `data\` stay i
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env`
-3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe`
+3. Keep the unzipped folder together. `relay-chat-dock.exe` needs the files beside it
 4. Run `relay-chat-dock.exe` and add the two dock URLs in OBS if you did not use the installer
 
 GitHub Actions attaches both the zip and the setup exe when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
@@ -47,11 +47,17 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
 
 - Activity dock (StreamElements as source of truth, optional native backup)
-- Windows background executable packaging
+- Windows app window for the log, account connections, translate, and StreamElements JWTs. Closing that window stops the docks
+
+## Windows app
+
+Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Chat filters, activity filters, and stream controls stay in the OBS docks.
+
+Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env` and `data\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
 
 ## OBS docks
 
-The console prints both URLs on launch:
+The companion window shows both URLs on launch:
 
 ```text
 http://localhost:4173
@@ -104,7 +110,7 @@ The app requests YouTube read access and the live-chat scope needed to send and 
 
 YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
 
-The console prints a link to the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). To enter your current usage, open the **YouTube Data API v3** group and read the **Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the **All quotas & system limits** card near the top of the page (for example `1,247`) — that is a count of how many quota rows exist, not units you have used. Optionally type `35` or `35/10000` and press Enter at any time; logging does not block on your input. After that, the app estimates forward from its own official API calls and warns near 80% and when the daily cap is reached. InnerTube site chat does not count against the quota.
+The companion window links to the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). To enter your current usage, open the **YouTube Data API v3** group and read the **Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the **All quotas & system limits** card near the top of the page (for example `1,247`) — that is a count of how many quota rows exist, not units you have used. Type `35` or `35/10000` in the window; logging does not block on your input. After that, the app estimates forward from its own official API calls and warns near 80% and when the daily cap is reached. InnerTube site chat does not count against the quota.
 
 Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection on a slow interval (about 3 minutes while offline, much less often while live), a one-shot history seed when a new live chat appears, sending and deleting messages, and a slow official chat fallback only if InnerTube fails. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
 
@@ -184,9 +190,9 @@ Right-click a chat row to delete that message, or timeout/ban the chatter on tha
 
 ### Activity dock
 
-StreamElements is the source of truth. Paste one JWT per linked platform in Activity dock **Connection Settings** (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT in settings reconnects StreamElements without restarting the companion.
+StreamElements is the source of truth. Paste one JWT per linked platform in the Relay Chat Dock window (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT reconnects StreamElements without restarting the companion.
 
-If a JWT is missing, the console and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
+If a JWT is missing, the companion window and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** in the window if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
 
 | Filter | What you see |
 | --- | --- |
@@ -214,16 +220,16 @@ Activity history is stored locally in `data/activity.json` (last 5000 real event
 2. With JWTs in `production.env`, replay an event from the SE dashboard activity feed. Overlay **Emulate** usually only hits the overlay iframe, not this dock.
 3. Native backup (if the settings checkbox is on): reconnect Twitch so follow/sub/bits EventSub is granted, then follow from an alt. Kick follows/subs appear on the public chat socket. YouTube Super Chats/memberships appear in live chat. YouTube subscribers are SE-only.
 
-## Run as a Windows background app
+## Run the Windows app
 
-Prefer the [prebuilt Windows installer](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. To build the executable locally:
+Prefer the [prebuilt Windows installer](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. Double-click `easy.bat`, or from a terminal:
 
 ```powershell
 npm run package:win
 npm run installer:win
 ```
 
-`package:win` creates `deploy\relay-chat-dock.exe`. `installer:win` needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and writes `obs-multi-chat-v*-windows-x64-setup.exe`. For a portable run, keep `production.env` and `.env.example` beside the executable, then run:
+`easy.bat` and `package:win` fill `deploy\` with the Electron app and `deploy\relay-chat-dock.exe`. Closing that window stops the relay and the OBS docks. It does not need Edge or Chrome installed. `installer:win` needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and writes `obs-multi-chat-v*-windows-x64-setup.exe`. For a portable run, keep `production.env` and `.env.example` beside the executable, then run:
 
 ```powershell
 .\relay-chat-dock.exe
@@ -233,7 +239,7 @@ The same command also creates a ready-to-copy `deploy` folder containing the lat
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
+The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
 
 ## Backend endpoints
 

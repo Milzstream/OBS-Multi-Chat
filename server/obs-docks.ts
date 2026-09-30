@@ -206,10 +206,15 @@ export function isProtectedInstallDir(execPath: string) {
   return /[\\/]Program Files( \(x86\))?[\\/]/i.test(execPath)
 }
 
+export function profileHasAccounts(dir: string, exists: (file: string) => boolean = fs.existsSync) {
+  return exists(path.join(dir, 'data', 'tokens.json'))
+}
+
 export function operatorFilesDir(input: { packaged: boolean; execPath: string; cwd: string; env?: NodeJS.ProcessEnv }) {
   const env = input.env ?? process.env
-  if (input.packaged && env.LOCALAPPDATA && (isInstallerInstall(input.execPath) || isProtectedInstallDir(input.execPath))) {
-    return path.join(env.LOCALAPPDATA, APP_FOLDER_NAME)
-  }
-  return input.packaged ? path.dirname(input.execPath) : input.cwd
+  const beside = input.packaged ? path.dirname(input.execPath) : input.cwd
+  const local = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, APP_FOLDER_NAME) : ''
+  if (input.packaged && local && (isInstallerInstall(input.execPath) || isProtectedInstallDir(input.execPath))) return local
+  if (input.packaged && local && profileHasAccounts(local) && !profileHasAccounts(beside)) return local
+  return beside
 }

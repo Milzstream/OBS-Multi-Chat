@@ -1,7 +1,8 @@
+import { createRequire } from 'node:module'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import dotenv from 'dotenv'
 import express from 'express'
 import cors from 'cors'
@@ -14,9 +15,11 @@ import { resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_J
 
 import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
+import { corsOriginDelegate, createControlGuard, createOpenHandler, isLoopbackAddress, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
+import { createLogBuffer } from './log-buffer.js'
+import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
-import { checkForUpdates, getCurrentVersion } from './check-update.js'
+import { checkForUpdates, getCurrentVersion, isDesktopPackaged } from './check-update.js'
 import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
@@ -113,31 +116,54 @@ import type {
  * The pure parsers it calls live in logic.ts; the readers for unofficial platform
  * payloads (Kick Pusher, YouTube InnerTube) live in kick-chat.ts and youtube-chat.ts.
  */
+const relayLogs = createLogBuffer()
+relayLogs.capture()
+const YOUTUBE_QUOTA_PAGE = 'https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com'
+
 process.removeAllListeners('warning')
 process.on('warning', (warning) => {
   if (warning.name === 'ExperimentalWarning' && /Fetch API|fetch/i.test(warning.message)) return
   console.warn(warning.stack || warning.message)
 })
 
-const isPackaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
-const exeDir = isPackaged ? path.dirname(process.execPath) : process.cwd()
+const isPackaged = isDesktopPackaged()
+const exeDir = process.env.RELAY_APP_ROOT || (isPackaged ? path.dirname(process.execPath) : process.cwd())
 const filesDir = operatorFilesDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd() })
-
-function holdConsoleAndExit(code = 1): never {
-  process.exitCode = code
-  if (isPackaged && process.platform === 'win32') {
-    try { spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'pause'], { stdio: 'inherit', windowsHide: false }) } catch { /* ignore */ }
+let companionChild: ChildProcess | undefined
+let companionShutdown = false
+const companionHost = createHostSession(() => shutdownCompanion())
+function shutdownCompanion(): never {
+  if (!companionShutdown) {
+    companionShutdown = true
+    try { persistChat() } catch { /* ignore */ }
+    try { companionChild?.kill() } catch { /* ignore */ }
   }
+  process.exit(0)
+}
+process.on('exit', () => {
+  try { persistChat() } catch { /* ignore */ }
+  try { companionChild?.kill() } catch { /* ignore */ }
+})
+
+function holdConsoleAndExit(code = 1, message?: string): never {
+  process.exitCode = code
+  const text = message || 'Relay Chat Dock failed to start.'
+  if (process.versions.electron) {
+    try {
+      const { dialog } = createRequire(import.meta.url)('electron')
+      dialog.showMessageBoxSync({ type: 'error', title: 'Relay Chat Dock', message: text })
+    } catch { /* ignore */ }
+  } else if (isPackaged && process.platform === 'win32') windowsMessageBox(text, 'Relay Chat Dock')
   process.exit(code)
 }
 
 process.on('uncaughtException', (error) => {
   console.error(error)
-  holdConsoleAndExit(1)
+  holdConsoleAndExit(1, error instanceof Error ? error.stack || error.message : String(error))
 })
 process.on('unhandledRejection', (error) => {
   console.error(error)
-  holdConsoleAndExit(1)
+  holdConsoleAndExit(1, error instanceof Error ? error.stack || error.message : String(error))
 })
 
 try { fs.mkdirSync(filesDir, { recursive: true }) } catch { /* ignore */ }
@@ -334,6 +360,54 @@ app.use(createControlGuard(localApi))
 app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
   response.json({ seq: sseSeq, ...state })
+})
+function localCompanionOnly(request: express.Request, response: express.Response) {
+  if (isLoopbackAddress(request.socket.remoteAddress)) return false
+  response.status(403).json({ error: 'Companion stays on this computer' })
+  return true
+}
+app.get('/api/console', (request, response) => {
+  if (localCompanionOnly(request, response)) return
+  const base = `http://127.0.0.1:${port}`
+  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity` })
+})
+app.get('/api/logs', (request, response) => {
+  if (localCompanionOnly(request, response)) return
+  const after = Number(request.query.after || 0)
+  response.json({ lines: Number.isFinite(after) && after > 0 ? relayLogs.since(after) : relayLogs.lines() })
+})
+app.get('/events/logs', (request, response) => {
+  if (!isLoopbackAddress(request.socket.remoteAddress)) return response.status(403).end()
+  const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
+  response.writeHead(200, headers)
+  const write = (line: { id: number }) => {
+    if (!response.writableEnded) response.write(`data: ${JSON.stringify(line)}\n\n`)
+  }
+  const unsubscribe = relayLogs.subscribe(write)
+  for (const line of relayLogs.lines()) write(line)
+  request.on('close', () => unsubscribe())
+})
+app.post('/api/console/host', (_request, response) => {
+  companionHost.hello()
+  response.json({ ok: true })
+})
+app.post('/api/console/bye', (_request, response) => {
+  response.json({ ok: true, scheduled: companionHost.bye() })
+})
+app.post('/api/shutdown', (_request, response) => {
+  response.json({ ok: true })
+  response.on('finish', () => shutdownCompanion())
+})
+app.post('/api/youtube-quota', (request, response) => {
+  const input = String((request.body as { input?: string } | undefined)?.input || '').trim()
+  const parsed = parseYouTubeQuotaInput(input)
+  if (!parsed || parsed.kind === 'help') return response.status(400).json({ error: 'Type usage like 35 or 35/10000' })
+  applyManualYouTubeQuota(input)
+  response.json({ ok: true, youtubeQuota: state.youtubeQuota })
+})
+app.post('/api/console/quota-page', (_request, response) => {
+  openInDefaultBrowser(YOUTUBE_QUOTA_PAGE)
+  response.json({ ok: true })
 })
 app.get('/api/media', async (request, response) => {
   const raw = String(request.query.u || '')
@@ -594,54 +668,68 @@ app.get('/oauth/:platform', (request, response) => {
   response.redirect(url)
 })
 
-const distPath = path.resolve(isPackaged ? path.join(path.dirname(process.execPath), 'dist') : './dist')
+const distPath = path.resolve(process.env.RELAY_APP_ROOT ? path.join(process.env.RELAY_APP_ROOT, 'dist') : isPackaged ? path.join(path.dirname(process.execPath), 'dist') : './dist')
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath))
   app.get('*', (_request, response) => response.sendFile(path.join(distPath, 'index.html')))
 }
 httpServer.on('error', (error: NodeJS.ErrnoException) => {
-  if (error.code === 'EADDRINUSE') console.error(`Relay is already running on port ${port}. Close the existing relay-chat-dock.exe before starting another copy.`)
-  else console.error('Relay backend failed to start:', error)
-  holdConsoleAndExit(1)
+  const message = error.code === 'EADDRINUSE'
+    ? `Relay Chat Dock is already running on port ${port}. Use the window that is already open.`
+    : `Relay backend failed to start: ${error.message}`
+  console.error(message)
+  holdConsoleAndExit(1, message)
+})
+export const relayReady = new Promise<number>((resolve, reject) => {
+  httpServer.once('listening', () => resolve(port))
+  httpServer.once('error', reject)
 })
 httpServer.listen(port, bindHost, () => {
   ensureYouTubeQuotaDay()
   collapseYouTubeHydrationDuplicates()
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
-  console.log('')
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
-  console.log(`  Configuration:  ${envPath}`)
-  console.log('')
-  console.log(`  Chat dock      ${base}`)
-  console.log(`  Activity dock  ${base}/activity`)
-  console.log('')
-  console.log('Add both as OBS custom browser docks (Docks → Custom Browser Docks).')
-  if (lanEnabled) {
-    console.log(`  Listening on ${bindHost}:${port} (LAN). Docks on this PC still use the URLs above.`)
-    console.log(apiToken ? '  Non-browser LAN clients must send x-relay-token or Authorization: Bearer.' : '  Warning: LAN clients can use the docks. Set RELAY_API_TOKEN to require a secret from non-loopback tools.')
-  } else {
-    console.log(`  Bound to ${bindHost}:${port} (this computer only). Set RELAY_BIND=0.0.0.0 for LAN access.`)
+  console.log(`Data  ${dataDir}`)
+  if (process.env.RELAY_ELECTRON !== '1') {
+    console.log(`Chat dock      ${base}`)
+    console.log(`Activity dock  ${base}/activity`)
   }
-  console.log(`  Chat history   ${chatMax.toLocaleString()} messages (RELAY_CHAT_MAX) — how many messages are stored and loaded on launch.`)
-  console.log(`  Activity history ${activityMax.toLocaleString()} events (RELAY_ACTIVITY_MAX) — how many alerts are stored and loaded on launch.`)
-  if (envKeysAdded.length) console.log(`  Env file      added ${envKeysAdded.join(', ')} to ${path.basename(envPath)} (existing values kept).`)
-  console.log('')
-  console.log('  YouTube quota  https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com')
-  console.log('  Open the YouTube Data API v3 group and read the Queries per day row: Current usage (e.g. 35) and Value (your daily limit, usually 10000).')
-  console.log('  Ignore the All quotas & system limits card (e.g. 1247) — that counts quota rows on the page, not units you used.')
-  if (youtubeQuotaUsed) console.log(`  Estimated today ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (Pacific)`)
-  console.log('  Optional: type 35 or 35/10000 and press Enter anytime. Logging will not wait.')
-  console.log('')
+  if (lanEnabled) console.log(apiToken ? `Listening on ${bindHost}:${port} (LAN).` : `Listening on ${bindHost}:${port} (LAN, no token).`)
+  if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
+  if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)
   listenForYouTubeQuotaInput()
   void checkForUpdates()
   if (missing.length && !settings.ignoreMissingJwt) {
     const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
     console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
-    console.error(`  Add ${keys} in Activity settings or production.env.`)
+    console.error(`  Add ${keys} in the Relay Chat Dock window or production.env.`)
     console.error('')
   }
+  openCompanionWindow()
 })
+function openCompanionWindow() {
+  if (!serverShouldOpenWindow({ packaged: isPackaged, platform: process.platform, argv: process.argv, env: process.env })) return
+  const native = findCompanionExe([exeDir, path.join(exeDir, 'deploy')], fs.existsSync)
+  if (native) {
+    const plan = nativeWindowPlan(native, `http://127.0.0.1:${port}/console`)
+    const child = spawn(plan.command, plan.args, plan.options)
+    companionChild = child
+    child.on('exit', (code) => {
+      companionChild = undefined
+      if (code === 2 || companionShutdown) return
+      shutdownCompanion()
+    })
+    child.on('error', (error) => {
+      console.error('Companion window:', error.message)
+      windowsMessageBox('Relay Chat Dock is running, but the companion window failed to open. OBS docks can still use the usual URLs.', 'Relay Chat Dock')
+    })
+    console.log('  Companion window  opening')
+    return
+  }
+  windowsMessageBox(`Relay Chat Dock is running, but relay-chat-dock-window.exe was not found beside the app.\n\nOBS docks still use http://127.0.0.1:${port}`, 'Relay Chat Dock')
+}
+
 for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
 void startStreamElements(true)
 void pollLiveState()
@@ -1692,8 +1780,8 @@ async function startStreamElements(backfill = false) {
   }
   if (!channels.length) {
     state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
-    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check Activity settings or production.env.')
-    console.error('StreamElements JWTs failed to load. Check Activity settings or production.env.')
+    setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check the Relay Chat Dock window or production.env.')
+    console.error('StreamElements JWTs failed to load. Check the Relay Chat Dock window or production.env.')
     return failed
   }
   const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')

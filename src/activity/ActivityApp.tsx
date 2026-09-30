@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, Filter, FlaskConical, Hash, Radio, Settings2, Twitch, Youtube } from 'lucide-react'
+import { Bell, Filter, FlaskConical, Hash, Radio, Twitch, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
-import { ConnectionSettings } from '../ConnectionSettings'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
 import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, parseStoredFilter, parseStoredStringSet, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
 import { ACTIVITY_KIND_GROUP_IDS, ACTIVITY_KIND_GROUPS, visibleActivityEvents } from './format'
@@ -16,8 +15,6 @@ import { ACTIVITY_ROW_ESTIMATE, useVirtualWindow } from '../virtualList'
  */
 
 type Filter = ActivityFilter
-type Platform = 'Twitch' | 'Kick' | 'YouTube'
-type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
 
 const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind; amount?: string; viewers?: number; message: string; source?: ActivityPlatform }[] = [
   { label: 'Twitch follow', platform: 'Twitch', kind: 'follow', message: 'Test follow' },
@@ -31,16 +28,7 @@ const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind; am
   { label: 'SE merch', platform: 'StreamElements', kind: 'merch', amount: 'Hoodie', message: 'Test shop sale' },
 ]
 
-const initialConnections: Connection[] = [
-  { platform: 'Twitch', viewers: 0, handle: '', connected: false, live: false },
-  { platform: 'Kick', viewers: 0, handle: '', connected: false, live: false },
-  { platform: 'YouTube', viewers: 0, handle: '', connected: false, live: false },
-]
-
-const platformRoutes: Record<Platform, string> = { Twitch: 'twitch', Kick: 'kick', YouTube: 'youtube' }
-
 type BackendState = {
-  accounts?: Connection[]
   activity?: ActivityEvent[]
   activityWarnings?: string[]
   streamelements?: { connected: boolean; handle: string; missing?: string[] }
@@ -61,7 +49,7 @@ function relativeTime(iso: string, now: number) {
   return `${Math.floor(hours / 24)}d`
 }
 
-function platformIcon(platform: Platform | ActivityPlatform, size = 13) {
+function platformIcon(platform: ActivityPlatform, size = 13) {
   if (platform === 'Twitch') return <Twitch size={size} strokeWidth={2.5} />
   if (platform === 'YouTube') return <Youtube size={size} strokeWidth={2.5} />
   if (platform === 'StreamElements') return <Bell size={size} strokeWidth={2.5} />
@@ -81,8 +69,8 @@ export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDi
       ) : (
         <>
           <strong>{seConnected ? 'StreamElements JWTs missing' : 'StreamElements not configured'}</strong>
-          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in Activity settings or production.env.` : 'Add StreamElements JWTs in Activity settings or production.env.'}</span>
-          <span>Paste a JWT in settings. No restart needed.</span>
+          <span>{missingJwts.length ? `Add STREAMELEMENTS_JWT_${missingJwts.map((item) => item.toUpperCase()).join(', STREAMELEMENTS_JWT_')} in the Relay Chat Dock window or production.env.` : 'Add StreamElements JWTs in the Relay Chat Dock window or production.env.'}</span>
+          <span>Paste a JWT in the Relay Chat Dock window. No restart needed.</span>
         </>
       )}
     </div>
@@ -95,20 +83,13 @@ export default function ActivityApp() {
   const [missingJwts, setMissingJwts] = useState<string[]>([])
   const [seConnected, setSeConnected] = useState(false)
   const [seReady, setSeReady] = useState(false)
-  const [streamelements, setStreamelements] = useState({ connected: false, handle: '', missing: [] as string[] })
-  const [connections, setConnections] = useState(initialConnections)
-  const [activityFallback, setActivityFallback] = useState(true)
   const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
-  const [dropOldAlerts, setDropOldAlerts] = useState(false)
-  const [translateChat, setTranslateChat] = useState(true)
-  const [translateError, setTranslateError] = useState('')
   const [dismissedWarning, setDismissedWarning] = useState(false)
   const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
   const [kindFilter, setKindFilter] = useState<string[]>(() => parseStoredStringSet(readLocalPref(ACTIVITY_KIND_FILTER_KEY), ACTIVITY_KIND_GROUP_IDS))
   const [now, setNow] = useState(Date.now())
   const [backendOnline, setBackendOnline] = useState(false)
   const [showTests, setShowTests] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
   const [showKinds, setShowKinds] = useState(false)
   const [testStatus, setTestStatus] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -141,15 +122,9 @@ export default function ActivityApp() {
         const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[] }
         setMissingJwts(streamelements.missing || [])
         setSeConnected(Boolean(streamelements.connected))
-        setStreamelements({ connected: streamelements.connected, handle: streamelements.handle, missing: streamelements.missing || [] })
         setSeReady(true)
       }
-      if (fields.accounts?.length) setConnections(fields.accounts as Connection[])
-      if (typeof fields.activityFallback === 'boolean') setActivityFallback(fields.activityFallback)
       if (typeof fields.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(fields.ignoreMissingJwt)
-      if (typeof fields.dropOldAlerts === 'boolean') setDropOldAlerts(fields.dropOldAlerts)
-      if (typeof fields.translateChat === 'boolean') setTranslateChat(fields.translateChat)
-      if (typeof fields.translateError === 'string') setTranslateError(fields.translateError)
       setBackendOnline(true)
     }
     const asState = (data: Record<string, unknown>) => data as unknown as BackendState
@@ -181,25 +156,6 @@ export default function ActivityApp() {
     }).catch(() => setTestStatus('Test failed'))
   }
 
-  const connectPlatform = (platform: Platform) => {
-    window.open(`/oauth/${platformRoutes[platform]}`, '_blank', 'width=640,height=760,noopener,noreferrer')
-  }
-  const disconnectPlatform = (platform: Platform) => {
-    setConnections((current) => current.map((connection) => connection.platform === platform ? { ...connection, connected: false, live: false, viewers: 0, handle: '' } : connection))
-    void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
-  }
-  const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
-  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }) => {
-    if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
-    if (typeof body.ignoreMissingJwt === 'boolean') {
-      setIgnoreMissingJwt(body.ignoreMissingJwt)
-      if (body.ignoreMissingJwt) setDismissedWarning(true)
-    }
-    if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
-    if (typeof body.translateChat === 'boolean') setTranslateChat(body.translateChat)
-    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  }
-
   return (
     <main className="activity-app">
       <header className="activity-topbar">
@@ -214,14 +170,11 @@ export default function ActivityApp() {
         </nav>
         <div className="activity-top-actions">
           {!backendOnline ? <small>offline</small> : testStatus ? <small className="activity-test-status">{testStatus}</small> : null}
-          <button type="button" className={showKinds || kindsRestricted ? 'activity-test-toggle active' : 'activity-test-toggle'} aria-label="Filter activity kinds" title="Filter by kind" aria-expanded={showKinds} onClick={() => { setShowTests(false); setShowSettings(false); setShowKinds((open) => !open) }}>
+          <button type="button" className={showKinds || kindsRestricted ? 'activity-test-toggle active' : 'activity-test-toggle'} aria-label="Filter activity kinds" title="Filter by kind" aria-expanded={showKinds} onClick={() => { setShowTests(false); setShowKinds((open) => !open) }}>
             <Filter size={14} />
           </button>
-          <button type="button" className="activity-test-toggle" aria-label="Send test alerts" disabled={!backendOnline} onClick={() => { setShowSettings(false); setShowKinds(false); setShowTests((open) => !open) }}>
+          <button type="button" className="activity-test-toggle" aria-label="Send test alerts" disabled={!backendOnline} onClick={() => { setShowKinds(false); setShowTests((open) => !open) }}>
             <FlaskConical size={14} />
-          </button>
-          <button type="button" className="activity-test-toggle" aria-label="Open settings" onClick={() => { setShowTests(false); setShowKinds(false); setShowSettings((open) => !open) }}>
-            <Settings2 size={15} />
           </button>
         </div>
       </header>
@@ -249,36 +202,6 @@ export default function ActivityApp() {
           ))}
         </div>
       ) : null}
-      {showSettings && <ConnectionSettings
-        connections={connections}
-        streamelements={streamelements}
-        activityFallback={activityFallback}
-        ignoreMissingJwt={ignoreMissingJwt}
-        dropOldAlerts={dropOldAlerts}
-        translateChat={translateChat}
-        translateError={translateError}
-        showActivityOptions
-        platformIcon={platformIcon}
-        onClose={() => setShowSettings(false)}
-        onConnect={connectPlatform}
-        onDisconnect={disconnectPlatform}
-        onCheckLive={checkLive}
-        onToggleFallback={() => patchSettings({ activityFallback: !activityFallback })}
-        onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
-        onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
-        onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
-        onJwtChange={async (platform, jwt) => {
-          try {
-            const response = await fetch('/api/jwts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [platform]: jwt }) })
-            const data = await response.json() as { error?: string }
-            if (!response.ok) return data.error || 'Could not save JWT'
-            return data.error
-          } catch {
-            return 'Could not save JWT'
-          }
-        }}
-        note="Connect accounts here for backup or chat."
-      />}
       {showSetup ? (
         <ActivityWarningBanner messages={warningMessages} missingJwts={missingJwts} seConnected={seConnected} onDismiss={() => setDismissedWarning(true)} />
       ) : null}

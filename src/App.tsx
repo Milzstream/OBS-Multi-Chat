@@ -1,6 +1,5 @@
 import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } from 'react'
-import { Check, Gamepad2, Hash, Link2, Radio, Send, Settings2, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
-import { ConnectionSettings } from './ConnectionSettings'
+import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from './virtualList'
 import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory, type TagAssignment, type TagPlatform } from './chat-helpers'
@@ -24,9 +23,8 @@ type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: strin
 type ChatBadge = { title: string; url?: string; label?: string }
 type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
-type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
 type YoutubeQuotaStatus = { used: number; limit: number }
-type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; streamelements?: StreamElementsStatus; activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; translateError?: string; youtubeQuota?: YoutubeQuotaStatus }
+type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; translateChat?: boolean; youtubeQuota?: YoutubeQuotaStatus }
 
 const platformMeta: Record<Platform, { color: string; route: string }> = {
   Twitch: { color: '#a970ff', route: 'twitch' },
@@ -53,7 +51,6 @@ function App() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([])
   const sendOptOutRef = useRef<Set<Platform>>(new Set())
   const [composer, setComposer] = useState('')
-  const [showSettings, setShowSettings] = useState(false)
   const [compactMode, setCompactMode] = useState(() => parseStoredBoolean(readLocalPref(CHAT_COMPACT_KEY), true))
   const [showControls, setShowControls] = useState(false)
   const [streamDetails, setStreamDetails] = useState(initialStreamDetails)
@@ -64,12 +61,7 @@ function App() {
   const [health, setHealth] = useState(initialHealth)
   const [chatWarnings, setChatWarnings] = useState<string[]>([])
   const [youtubeQuota, setYoutubeQuota] = useState<YoutubeQuotaStatus>({ used: 0, limit: 10_000 })
-  const [streamelements, setStreamelements] = useState<StreamElementsStatus>({ connected: false, handle: '' })
-  const [activityFallback, setActivityFallback] = useState(true)
-  const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
-  const [dropOldAlerts, setDropOldAlerts] = useState(false)
   const [translateChat, setTranslateChat] = useState(true)
-  const [translateError, setTranslateError] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
   const connectedAccounts = connections.filter((connection) => connection.connected)
@@ -123,29 +115,9 @@ function App() {
         const youtubeQuota = fields.youtubeQuota as YoutubeQuotaStatus
         setYoutubeQuota((prev) => JSON.stringify(prev) !== JSON.stringify(youtubeQuota) ? youtubeQuota : prev)
       }
-      if (fields.streamelements) {
-        const streamelements = fields.streamelements as StreamElementsStatus
-        setStreamelements((prev) => JSON.stringify(prev) !== JSON.stringify(streamelements) ? streamelements : prev)
-      }
-      if (typeof remote.activityFallback === 'boolean') {
-        const activityFallback = remote.activityFallback
-        setActivityFallback((prev) => prev !== activityFallback ? activityFallback : prev)
-      }
-      if (typeof remote.ignoreMissingJwt === 'boolean') {
-        const ignoreMissingJwt = remote.ignoreMissingJwt
-        setIgnoreMissingJwt((prev) => prev !== ignoreMissingJwt ? ignoreMissingJwt : prev)
-      }
-      if (typeof remote.dropOldAlerts === 'boolean') {
-        const dropOldAlerts = remote.dropOldAlerts
-        setDropOldAlerts((prev) => prev !== dropOldAlerts ? dropOldAlerts : prev)
-      }
       if (typeof remote.translateChat === 'boolean') {
         const translateChat = remote.translateChat
         setTranslateChat((prev) => prev !== translateChat ? translateChat : prev)
-      }
-      if (typeof remote.translateError === 'string') {
-        const translateError = remote.translateError
-        setTranslateError((prev) => prev !== translateError ? translateError : prev)
       }
       setBackendOnline(true)
       if (fields.streamInfo) {
@@ -171,23 +143,6 @@ function App() {
     })
   }, [])
 
-  const connectPlatform = (platform: Platform) => {
-    window.open(`/oauth/${platformMeta[platform].route}`, '_blank', 'width=640,height=760,noopener,noreferrer')
-  }
-  const disconnectPlatform = (platform: Platform) => {
-    setConnections((current) => current.map((connection) => connection.platform === platform ? { ...connection, connected: false, live: false, viewers: 0, handle: '' } : connection))
-    sendOptOutRef.current.delete(platform)
-    setSelectedPlatforms((current) => current.filter((item) => item !== platform))
-    void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
-  }
-  const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() }).catch(() => undefined)
-  const patchSettings = (body: { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }) => {
-    if (typeof body.activityFallback === 'boolean') setActivityFallback(body.activityFallback)
-    if (typeof body.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(body.ignoreMissingJwt)
-    if (typeof body.dropOldAlerts === 'boolean') setDropOldAlerts(body.dropOldAlerts)
-    if (typeof body.translateChat === 'boolean') setTranslateChat(body.translateChat)
-    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  }
   const togglePlatform = (platform: Platform) => {
     if (!connections.find((connection) => connection.platform === platform)?.connected) return
     setSelectedPlatforms((current) => {
@@ -246,38 +201,18 @@ function App() {
     <main className={compactMode ? 'app compact' : 'app'}>
       <header className="topbar"><button type="button" className="stream-ref" title={headerTip} onClick={() => {
         void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://studio.youtube.com/livestreaming' }) }).catch((error) => console.error('Failed to open dashboard:', error))
-      }}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => { setShowSettings(false); setShowControls((open) => !open) }}><Gamepad2 size={16} /></button><button className="settings-button" onClick={() => { setShowControls(false); setShowSettings((open) => !open) }} aria-label="Open settings"><Settings2 size={17} /></button></div></header>
-      <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} health={health[connection.platform]} quota={connection.platform === 'YouTube' ? youtubeQuota : undefined} onConnect={() => connectPlatform(connection.platform)} onOpenDashboard={() => { void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: streamDashboardUrl(connection.platform, connection) }) }).catch((error) => console.error('Failed to open dashboard:', error)) }} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const item = health[platform]; return item.status !== 'ok' && item.message ? <div key={platform} className={`health-banner ${item.status}`}>{item.message}</div> : null })}{chatWarnings.map((message) => <div key={message} className="health-banner warn">{message}</div>)}</section>
-      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message) => <MessageItem key={message.id} message={message} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Open settings to connect an account.'}</span><button onClick={() => { setShowControls(false); setShowSettings(true) }}>Open connection settings</button></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
+      }}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => setShowControls((open) => !open)}><Gamepad2 size={16} /></button></div></header>
+      <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} health={health[connection.platform]} quota={connection.platform === 'YouTube' ? youtubeQuota : undefined} onOpenDashboard={() => { void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: streamDashboardUrl(connection.platform, connection) }) }).catch((error) => console.error('Failed to open dashboard:', error)) }} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const item = health[platform]; return item.status !== 'ok' && item.message ? <div key={platform} className={`health-banner ${item.status}`}>{item.message}</div> : null })}{chatWarnings.map((message) => <div key={message} className="health-banner warn">{message}</div>)}</section>
+      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message) => <MessageItem key={message.id} message={message} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
-      {showSettings && <ConnectionSettings
-        connections={connections}
-        streamelements={streamelements}
-        activityFallback={activityFallback}
-        ignoreMissingJwt={ignoreMissingJwt}
-        dropOldAlerts={dropOldAlerts}
-        translateChat={translateChat}
-        translateError={translateError}
-        showActivityOptions={false}
-        platformIcon={platformIcon}
-        onClose={() => setShowSettings(false)}
-        onConnect={connectPlatform}
-        onDisconnect={disconnectPlatform}
-        onCheckLive={checkLive}
-        onToggleFallback={() => patchSettings({ activityFallback: !activityFallback })}
-        onToggleIgnoreMissing={() => patchSettings({ ignoreMissingJwt: !ignoreMissingJwt })}
-        onToggleDropOld={() => patchSettings({ dropOldAlerts: !dropOldAlerts })}
-        onToggleTranslateChat={() => patchSettings({ translateChat: !translateChat })}
-        note="Connect accounts here for backup or chat."
-      />}
       {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - (menu.message.deleted ? 90 : 190))) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div>{menu.message.deleted ? <button type="button" onClick={() => moderate('unban')}>Unban / untimeout</button> : <><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></>}</div>}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
   )
 }
 
-function PlatformStat({ connection, health, quota, onConnect, onOpenDashboard }: { connection: Connection; health?: Health; quota?: YoutubeQuotaStatus; onConnect: () => void; onOpenDashboard: () => void }) {
+function PlatformStat({ connection, health, quota, onOpenDashboard }: { connection: Connection; health?: Health; quota?: YoutubeQuotaStatus; onOpenDashboard: () => void }) {
   const meta = platformMeta[connection.platform]
   const handle = connection.connected && connection.handle && !['YouTube account', 'Kick account', 'YouTube', 'Kick', 'Twitch'].includes(connection.handle) ? connection.handle : connection.platform
   const status = !connection.connected ? '' : health?.status === 'down' ? 'down' : health?.status === 'warn' ? 'warn' : connection.live ? 'ok' : ''
@@ -286,9 +221,9 @@ function PlatformStat({ connection, health, quota, onConnect, onOpenDashboard }:
     connection.connected ? `${connection.viewers.toLocaleString()} viewers` : '',
     quota ? `Quota ${quota.used.toLocaleString()} / ${quota.limit.toLocaleString()}` : '',
     health?.message || (status === 'ok' ? 'Connected' : ''),
-    connection.connected ? `Open ${connection.platform} dashboard` : `Connect ${connection.platform}`,
+    connection.connected ? `Open ${connection.platform} dashboard` : 'Connect in the Relay Chat Dock window',
   ].filter(Boolean).join('\n')
-  return <button type="button" className={`platform-stat${connection.connected ? ' connected' : ''}${connection.live ? ' live' : ''}${status === 'down' ? ' down' : ''}`} style={{ color: meta.color, borderColor: status === 'down' ? '#ff5b62' : connection.live ? meta.color : `${meta.color}66`, background: `${meta.color}18` }} title={tip} onClick={() => { if (connection.connected) onOpenDashboard(); else onConnect() }} aria-label={tip.replace(/\n/g, ' ')}><span className="platform-stat-top">{platformIcon(connection.platform, 13)}<span className="platform-stat-name">{handle}</span>{status ? <span className={`status-dot ${status}`} /> : null}</span><strong>{connection.connected ? connection.viewers.toLocaleString() : '—'}</strong></button>
+  return <button type="button" className={`platform-stat${connection.connected ? ' connected' : ''}${connection.live ? ' live' : ''}${status === 'down' ? ' down' : ''}`} style={{ color: meta.color, borderColor: status === 'down' ? '#ff5b62' : connection.live ? meta.color : `${meta.color}66`, background: `${meta.color}18` }} title={tip} onClick={() => { if (connection.connected) onOpenDashboard() }} aria-label={tip.replace(/\n/g, ' ')}><span className="platform-stat-top">{platformIcon(connection.platform, 13)}<span className="platform-stat-name">{handle}</span>{status ? <span className={`status-dot ${status}`} /> : null}</span><strong>{connection.connected ? connection.viewers.toLocaleString() : '—'}</strong></button>
 }
 
 function displayLetter(name: string) {

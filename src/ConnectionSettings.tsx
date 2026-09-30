@@ -1,120 +1,46 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Bell } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
-type StreamElementsStatus = { connected: boolean; handle: string; missing?: string[] }
 const platformMeta: Record<Platform, { color: string }> = {
   Twitch: { color: '#a970ff' },
   Kick: { color: '#62c554' },
   YouTube: { color: '#ff5b62' },
 }
 
-const JWT_PLATFORMS: Platform[] = ['Twitch', 'Kick', 'YouTube']
-
 /**
- * The connection settings popover: per-platform connect/disconnect and live
- * checks, plus Chat / Activity sections. JWT fields stay masked until focused.
+ * Dock connection popover: connect, disconnect, and live checks.
+ * Translate, JWTs, and alert options live in the companion window.
  */
 
 export function ConnectionSettings({
   connections,
-  streamelements,
-  activityFallback,
-  ignoreMissingJwt,
-  dropOldAlerts,
-  translateChat,
-  translateError,
-  showActivityOptions,
   platformIcon,
   onClose,
   onConnect,
   onDisconnect,
   onCheckLive,
-  onToggleFallback,
-  onToggleIgnoreMissing,
-  onToggleDropOld,
-  onToggleTranslateChat,
-  onJwtChange,
   note,
+  embedded,
 }: {
   connections: Connection[]
-  streamelements: StreamElementsStatus
-  activityFallback: boolean
-  ignoreMissingJwt: boolean
-  dropOldAlerts: boolean
-  translateChat: boolean
-  translateError?: string
-  showActivityOptions: boolean
   platformIcon: (platform: Platform, size?: number) => ReactNode
-  onClose: () => void
+  onClose?: () => void
   onConnect: (platform: Platform) => void
   onDisconnect: (platform: Platform) => void
   onCheckLive: (platform: Platform) => Promise<void> | void
-  onToggleFallback: () => void
-  onToggleIgnoreMissing: () => void
-  onToggleDropOld: () => void
-  onToggleTranslateChat: () => void
-  onJwtChange?: (platform: Platform, jwt: string) => Promise<string | void> | void
   note?: string
+  embedded?: boolean
 }) {
-  const missing = streamelements.missing || []
   const [checking, setChecking] = useState<Partial<Record<Platform, boolean>>>({})
-  const [jwtDraft, setJwtDraft] = useState<Record<string, string>>({ Twitch: '', Kick: '', YouTube: '' })
-  const [jwtFocus, setJwtFocus] = useState<Platform | null>(null)
-  const [jwtBusy, setJwtBusy] = useState<Partial<Record<Platform, boolean>>>({})
-  const [jwtStatus, setJwtStatus] = useState<Partial<Record<Platform, { ok: boolean; text: string; id: number }>>>({})
-  const jwtStatusTimers = useRef<Partial<Record<Platform, number>>>({})
-  const showJwtStatus = (platform: Platform, next: { ok: boolean; text: string }) => {
-    const id = Date.now()
-    if (jwtStatusTimers.current[platform]) window.clearTimeout(jwtStatusTimers.current[platform])
-    setJwtStatus((current) => ({ ...current, [platform]: { ...next, id } }))
-    if (next.ok) jwtStatusTimers.current[platform] = window.setTimeout(() => {
-      setJwtStatus((current) => current[platform]?.id === id ? { ...current, [platform]: undefined } : current)
-    }, 2400)
-  }
-  useEffect(() => () => {
-    for (const timer of Object.values(jwtStatusTimers.current)) if (timer) window.clearTimeout(timer)
-  }, [])
-  useEffect(() => {
-    if (!showActivityOptions) return
-    let cancelled = false
-    void fetch('/api/jwts').then((response) => response.ok ? response.json() : null).then((tokens) => {
-      if (cancelled || !tokens || typeof tokens !== 'object') return
-      const next = {
-        Twitch: String((tokens as Record<string, unknown>).Twitch || ''),
-        Kick: String((tokens as Record<string, unknown>).Kick || ''),
-        YouTube: String((tokens as Record<string, unknown>).YouTube || ''),
-      }
-      setJwtDraft(next)
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [showActivityOptions])
   const checkLive = async (platform: Platform) => {
     if (checking[platform]) return
     setChecking((current) => ({ ...current, [platform]: true }))
     try { await onCheckLive(platform) } finally { setChecking((current) => ({ ...current, [platform]: false })) }
   }
-  const saveJwt = async (platform: Platform) => {
-    const value = jwtDraft[platform].trim()
-    if (jwtBusy[platform]) return
-    setJwtBusy((current) => ({ ...current, [platform]: true }))
-    try {
-      const error = await onJwtChange?.(platform, value)
-      if (error) showJwtStatus(platform, { ok: false, text: error })
-      else {
-        setJwtDraft((current) => ({ ...current, [platform]: value }))
-        showJwtStatus(platform, { ok: true, text: value ? 'Saved' : 'Cleared' })
-      }
-    } catch {
-      showJwtStatus(platform, { ok: false, text: 'Could not save JWT' })
-    } finally {
-      setJwtBusy((current) => ({ ...current, [platform]: false }))
-    }
-  }
   return (
-    <aside className="settings-popover">
-      <div className="popover-title"><span>CONNECTION SETTINGS</span><button type="button" onClick={onClose} aria-label="Close settings">×</button></div>
+    <aside className={embedded ? 'console-connections' : 'settings-popover'}>
+      <div className="popover-title"><span>{embedded ? 'ACCOUNTS' : 'CONNECTION SETTINGS'}</span>{onClose ? <button type="button" onClick={onClose} aria-label="Close settings">×</button> : null}</div>
       {note ? <p className="settings-note">{note}</p> : null}
       {connections.map((connection) => (
         <div className="connection-row" key={connection.platform}>
@@ -135,69 +61,6 @@ export function ConnectionSettings({
             : <button type="button" className="connect" title={connection.platform === 'YouTube' ? 'Google lists video delete on this permission. Relay only sends and moderates live chat.' : undefined} onClick={() => onConnect(connection.platform)}>Connect</button>}
         </div>
       ))}
-      <div className="settings-divider" />
-      <span className="settings-section-title">CHAT</span>
-      <label className="settings-toggle">
-        <span>Translate non-English chat to English</span>
-        <input type="checkbox" checked={translateChat} onChange={onToggleTranslateChat} />
-      </label>
-      {translateChat && translateError ? <p className="settings-note">{translateError}</p> : null}
-      {showActivityOptions ? (
-        <>
-          <div className="settings-divider" />
-          <span className="settings-section-title">ACTIVITY ALERTS</span>
-          <div className="connection-row">
-            <span style={{ color: '#f3af61' }}><Bell size={14} /></span>
-            <div>
-              <strong>StreamElements</strong>
-              <small>{streamelements.connected ? streamelements.handle : 'Not configured'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}</small>
-            </div>
-          </div>
-          {JWT_PLATFORMS.map((platform) => {
-            const draft = jwtDraft[platform] || ''
-            const showSave = jwtFocus === platform
-            return (
-              <div key={platform} className="settings-jwt">
-                <span>{platform} JWT</span>
-                <div className="settings-jwt-field">
-                  <input
-                    type={jwtFocus === platform ? 'text' : 'password'}
-                    value={draft}
-                    placeholder="Paste JWT"
-                    autoComplete="off"
-                    spellCheck={false}
-                    onFocus={() => setJwtFocus(platform)}
-                    onBlur={() => setJwtFocus((current) => current === platform ? null : current)}
-                    onChange={(event) => {
-                      setJwtDraft((current) => ({ ...current, [platform]: event.target.value }))
-                      if (jwtStatus[platform]) setJwtStatus((current) => ({ ...current, [platform]: undefined }))
-                    }}
-                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void saveJwt(platform) } }}
-                  />
-                  {showSave ? (
-                    <button type="button" disabled={Boolean(jwtBusy[platform])} onMouseDown={(event) => event.preventDefault()} onClick={() => void saveJwt(platform)}>
-                      {jwtBusy[platform] ? '…' : 'Save'}
-                    </button>
-                  ) : null}
-                </div>
-                {jwtStatus[platform] ? <p key={jwtStatus[platform].id} className={jwtStatus[platform].ok ? 'settings-jwt-ok' : 'settings-jwt-error'}>{jwtStatus[platform].text}</p> : null}
-              </div>
-            )
-          })}
-          <label className="settings-toggle">
-            <span>Use connected accounts as backup for StreamElements</span>
-            <input type="checkbox" checked={activityFallback} onChange={onToggleFallback} />
-          </label>
-          <label className="settings-toggle">
-            <span>Ignore missing StreamElements JWT alerts</span>
-            <input type="checkbox" checked={ignoreMissingJwt} onChange={onToggleIgnoreMissing} />
-          </label>
-          <label className="settings-toggle">
-            <span>Drop alerts older than 30 days</span>
-            <input type="checkbox" checked={dropOldAlerts} onChange={onToggleDropOld} />
-          </label>
-        </>
-      ) : null}
     </aside>
   )
 }

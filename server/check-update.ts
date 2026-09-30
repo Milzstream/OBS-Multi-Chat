@@ -73,9 +73,15 @@ export function versionManifestPaths(input: { packaged: boolean; cwd: string; ex
   ]
 }
 
+export function isDesktopPackaged() {
+  const proc = process as NodeJS.Process & { pkg?: unknown; defaultApp?: boolean }
+  return Boolean(proc.pkg) || process.env.RELAY_PACKAGED === '1' || (Boolean(process.versions?.electron) && !proc.defaultApp)
+}
+
 export function getCurrentVersion(): string {
-  const packaged = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
+  const packaged = isDesktopPackaged()
   const pathsToTry = versionManifestPaths({ packaged, cwd: process.cwd(), execPath: process.execPath })
+  if (process.env.RELAY_APP_ROOT) pathsToTry.unshift(path.join(process.env.RELAY_APP_ROOT, 'package.json'))
   for (const filePath of pathsToTry) {
     try {
       if (fs.existsSync(filePath)) {
@@ -142,7 +148,7 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     if (compareVersions(latestVersion, currentVersion) <= 0) return
 
     const setupUrl = pickInstallerAsset(latestRelease.assets)
-    const installerCopy = hooks.installerCopy ?? (Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg) && isInstallerInstall(process.execPath))
+    const installerCopy = hooks.installerCopy ?? (isDesktopPackaged() && isInstallerInstall(process.execPath))
 
     console.log('')
     console.log('  Update available!')

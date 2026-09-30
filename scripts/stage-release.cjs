@@ -8,13 +8,23 @@ const zipName = `obs-multi-chat-v${version}-windows-x64.zip`
 fs.rmSync(stage, { recursive: true, force: true })
 fs.mkdirSync(stage)
 
-const exe = ['relay-chat-dock.exe', path.join('deploy', 'relay-chat-dock.exe')].find((candidate) => fs.existsSync(candidate))
-if (!exe) {
-  console.error('Missing relay-chat-dock.exe. Run npm run package:win first.')
+const deploy = path.resolve('deploy')
+const exe = path.join(deploy, 'relay-chat-dock.exe')
+if (!fs.existsSync(exe)) {
+  console.error('Missing deploy\\relay-chat-dock.exe. Run npm run package:win or easy.bat first.')
   process.exit(1)
 }
 
-fs.copyFileSync(exe, path.join(stage, 'relay-chat-dock.exe'))
+if (fs.existsSync(path.join(deploy, 'resources'))) {
+  fs.cpSync(deploy, stage, {
+    recursive: true,
+    filter: (src) => path.basename(src) !== 'production.env',
+  })
+} else {
+  fs.copyFileSync(exe, path.join(stage, 'relay-chat-dock.exe'))
+  const dist = path.join(deploy, 'dist')
+  if (fs.existsSync(dist)) fs.cpSync(dist, path.join(stage, 'dist'), { recursive: true })
+}
 fs.copyFileSync('.env.example', path.join(stage, 'production.env'))
 fs.copyFileSync('.env.example', path.join(stage, '.env.example'))
 const versionManifest = path.join(stage, 'package.json')
@@ -35,7 +45,7 @@ fs.writeFileSync(
   `Relay Chat Dock v${version}
 
 1. Edit production.env and add your Twitch, Kick, and YouTube API credentials plus StreamElements JWTs (one per linked platform).
-2. Run relay-chat-dock.exe. The console prints both dock URLs.
+2. Run relay-chat-dock.exe. The window is the app. Closing it stops the docks.
 3. In OBS, add custom browser docks:
    Chat      http://localhost:4173
    Activity  http://localhost:4173/activity

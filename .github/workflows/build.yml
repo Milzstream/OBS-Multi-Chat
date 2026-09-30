@@ -113,6 +113,8 @@ jobs:
 
       - name: Package Windows executable
         if: steps.gate.outputs.publish == 'true'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
         run: npm run package:win
 
       - name: Install Inno Setup
@@ -149,9 +151,9 @@ jobs:
           body: |
             Windows x64 build of Relay Chat Dock.
 
-            **Installer (recommended):** run `obs-multi-chat-v*-windows-x64-setup.exe`. The companion goes in Program Files. Fill in `%LOCALAPPDATA%\Relay Chat Dock\production.env`. The installer can add the two OBS docks if those URLs are not already present.
+            **Installer (recommended):** run `obs-multi-chat-v*-windows-x64-setup.exe`. The app window goes in Program Files. Closing that window stops the OBS docks. Fill in `%LOCALAPPDATA%\Relay Chat Dock\production.env`. The installer can add the two OBS docks if those URLs are not already present.
 
-            **Portable:** unzip the archive, fill in `production.env`, keep `package.json` and `.env.example` beside the exe.
+            **Portable:** unzip the archive, fill in `production.env`, and run `relay-chat-dock.exe`. Keep the whole folder together.
 
             Dock URLs:
             - Chat      `http://127.0.0.1:4173/`

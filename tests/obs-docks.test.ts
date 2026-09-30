@@ -162,6 +162,24 @@ describe('installer vs portable file locations', () => {
       fs.rmSync(markerDir, { recursive: true, force: true })
     }
   })
+
+  it('reuses an existing LocalAppData profile when the exe folder has no accounts', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-profile-'))
+    const exeDir = path.join(root, 'deploy')
+    const local = path.join(root, 'local')
+    fs.mkdirSync(path.join(local, 'Relay Chat Dock', 'data'), { recursive: true })
+    fs.writeFileSync(path.join(local, 'Relay Chat Dock', 'data', 'tokens.json'), '{}')
+    fs.mkdirSync(exeDir, { recursive: true })
+    const exe = path.join(exeDir, 'relay-chat-dock.exe')
+    try {
+      assert.equal(operatorFilesDir({ packaged: true, execPath: exe, cwd: exeDir, env: { LOCALAPPDATA: local } }), path.join(local, 'Relay Chat Dock'))
+      fs.mkdirSync(path.join(exeDir, 'data'), { recursive: true })
+      fs.writeFileSync(path.join(exeDir, 'data', 'tokens.json'), '{}')
+      assert.equal(operatorFilesDir({ packaged: true, execPath: exe, cwd: exeDir, env: { LOCALAPPDATA: local } }), exeDir)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('ini writer', () => {
