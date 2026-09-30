@@ -8,7 +8,7 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
 
-![Companion console with dock URLs and configuration path](docs/console.png)
+![Relay Chat Dock window with the log, account connections, and settings](docs/app.png)
 
 ## Download
 
@@ -28,7 +28,7 @@ The app itself installs under Program Files. `production.env` and `data\` stay i
 
 1. Download `obs-multi-chat-v*-windows-x64.zip`
 2. Unzip it and fill in `production.env`
-3. Keep `package.json` and `.env.example` beside `relay-chat-dock.exe`
+3. Keep the unzipped folder together. `relay-chat-dock.exe` needs the files beside it
 4. Run `relay-chat-dock.exe` and add the two dock URLs in OBS if you did not use the installer
 
 GitHub Actions attaches both the zip and the setup exe when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
@@ -47,7 +47,13 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
 
 - Activity dock (StreamElements as source of truth, optional native backup)
-- Windows companion window for the log, translate, and StreamElements JWTs (no console window)
+- Windows app window for the log, account connections, translate, and StreamElements JWTs. Closing that window stops the docks
+
+## Windows app
+
+Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Chat filters, activity filters, and stream controls stay in the OBS docks.
+
+Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env` and `data\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
 
 ## OBS docks
 
@@ -233,7 +239,7 @@ The same command also creates a ready-to-copy `deploy` folder containing the lat
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The executable serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Tokens, settings, chat, and activity stay in a `data` folder beside the `.exe`. Start it before opening OBS.
+The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
 
 ## Backend endpoints
 
