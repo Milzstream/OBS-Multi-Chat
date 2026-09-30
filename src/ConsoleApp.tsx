@@ -182,9 +182,6 @@ export default function ConsoleApp() {
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() })
-  const quit = () => {
-    void fetch('/api/shutdown', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-  }
 
   const missing = settings.streamelements.missing || []
 
@@ -195,28 +192,13 @@ export default function ConsoleApp() {
           <strong>Relay Chat Dock{info?.version ? ` v${info.version}` : ''}</strong>
           <span>Closing this window stops the OBS docks.</span>
         </div>
-        <button type="button" className="console-quit" onClick={quit}>Quit</button>
+        <nav className="console-links">
+          <button type="button" title={info?.dataDir || 'Data folder'} disabled={!info?.dataDir} onClick={() => info?.dataDir && void copy('data', info.dataDir)}>{copied === 'data' ? 'Copied' : 'Data'}</button>
+          <button type="button" title={info?.envPath || 'Configuration file'} disabled={!info?.envPath} onClick={() => info?.envPath && void copy('config', info.envPath)}>{copied === 'config' ? 'Copied' : 'Config'}</button>
+          <button type="button" title={info?.chatUrl || 'Chat dock URL'} disabled={!info?.chatUrl} onClick={() => info?.chatUrl && void copy('chat', info.chatUrl)}>{copied === 'chat' ? 'Copied' : 'Chat dock'}</button>
+          <button type="button" title={info?.activityUrl || 'Activity dock URL'} disabled={!info?.activityUrl} onClick={() => info?.activityUrl && void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Activity dock'}</button>
+        </nav>
       </header>
-      <section className="console-meta">
-        <div>
-          <span>Data</span>
-          <code>{info?.dataDir || '…'}</code>
-        </div>
-        <div>
-          <span>Configuration</span>
-          <code>{info?.envPath || '…'}</code>
-        </div>
-        <div>
-          <span>Chat dock</span>
-          <code>{info?.chatUrl || '…'}</code>
-          {info?.chatUrl ? <button type="button" onClick={() => void copy('chat', info.chatUrl)}>{copied === 'chat' ? 'Copied' : 'Copy'}</button> : null}
-        </div>
-        <div>
-          <span>Activity dock</span>
-          <code>{info?.activityUrl || '…'}</code>
-          {info?.activityUrl ? <button type="button" onClick={() => void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Copy'}</button> : null}
-        </div>
-      </section>
       <div className="console-body">
         <div
           className="console-log"
