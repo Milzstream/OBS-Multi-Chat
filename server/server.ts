@@ -86,8 +86,17 @@ import {
   youtubeOfficialToActivity,
   youtubeQuotaCost,
   youtubeQuotaHealthStatus,
+  youtubePrivacyMessage,
+  youtubePrivacyNotices,
+  youtubePrivacyRecheckIds,
+  youtubePrivacyValue,
+  youtubePublicVideoBody,
   youtubeQuotaLabel,
   youtubeSendGuard,
+  youtubeVideoId,
+  nextYoutubePrivacyWatch,
+  type YoutubePrivacyNotice,
+  type YoutubePrivacyWatch,
 } from './logic.js'
 import type {
   Account,
@@ -207,7 +216,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -259,6 +268,10 @@ let lastYouTubeOfficialChatAt = 0
 let lastYouTubeViewersAt = 0
 let youtubeForceStatus = true
 let youtubeTargets: YouTubeChatTarget[] = []
+let youtubePrivacyWatch: Array<YoutubePrivacyWatch & { status?: Record<string, unknown> }> = []
+const youtubePrivacyDismissed = new Set<string>()
+const announcedYoutubePrivacy = new Set<string>()
+let lastYoutubePrivacyRecheck = 0
 const youtubeHistorySeeded = new Set<string>()
 const YOUTUBE_STATUS_SEEK_MS = 3 * 60_000
 const YOUTUBE_STATUS_LIVE_MS = 60 * 60_000
@@ -313,6 +326,7 @@ const state: State = {
   activity: activityStore.list(),
   activityWarnings: [],
   chatWarnings: [],
+  youtubePrivacy: [],
   streamelements: { connected: false, handle: '', missing: [] },
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
@@ -481,6 +495,44 @@ app.post('/api/moderate', async (request, response) => {
     response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
   }
 })
+app.post('/api/youtube/privacy', async (request, response) => {
+  const body = request.body as { videoIds?: unknown; action?: string }
+  const action = body.action === 'dismiss' ? 'dismiss' : 'public'
+  const requested = Array.isArray(body.videoIds) ? body.videoIds.map(youtubeVideoId).filter((id): id is string => Boolean(id)) : []
+  const allowed = new Set([...state.youtubePrivacy.map((item) => item.videoId), ...youtubePrivacyWatch.map((item) => item.videoId)])
+  const videoIds = [...new Set(requested.filter((id) => allowed.has(id)))].slice(0, 10)
+  if (!videoIds.length) return response.status(400).json({ ok: false, error: 'No YouTube broadcast to update' })
+  if (action === 'dismiss') {
+    for (const id of videoIds) youtubePrivacyDismissed.add(id)
+    setYoutubePrivacy(state.youtubePrivacy.filter((item) => !youtubePrivacyDismissed.has(item.videoId)))
+    return response.json({ ok: true, dismissed: videoIds })
+  }
+  if (youtubeQuotaBlocked()) return response.status(429).json({ ok: false, error: 'YouTube API quota exceeded until midnight Pacific' })
+  const token = await ensureToken('YouTube')
+  if (!token) return response.status(400).json({ ok: false, error: 'YouTube is not connected' })
+  const updated: string[] = []
+  const errors: string[] = []
+  for (const videoId of videoIds) {
+    const watched = youtubePrivacyWatch.find((item) => item.videoId === videoId)
+    try {
+      await youtubeApi('/videos?part=status', token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(youtubePublicVideoBody(videoId, watched?.status)),
+      })
+      updated.push(videoId)
+      youtubePrivacyDismissed.delete(videoId)
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error))
+    }
+  }
+  if (updated.length) {
+    setYoutubePrivacy(state.youtubePrivacy.filter((item) => !updated.includes(item.videoId)))
+    console.log(`YouTube privacy set to public: ${updated.join(', ')}`)
+  }
+  if (!updated.length) return response.status(502).json({ ok: false, error: errors[0] || 'Could not make the video public' })
+  response.json({ ok: true, updated, error: errors.length ? errors.join(' | ') : undefined })
+})
 app.get('/api/categories/:platform', async (request, response) => {
   const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
   const query = String(request.query.query || '').trim()
@@ -625,7 +677,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
   if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes'); setChatWarning('twitch-moderate') }
   if (platform === 'Kick') void kickChat.stop()
-  if (platform === 'YouTube') { setYouTubeTargets([]); void youtubeChat.stop() }
+  if (platform === 'YouTube') { setYouTubeTargets([]); youtubePrivacyWatch = []; youtubePrivacyDismissed.clear(); announcedYoutubePrivacy.clear(); setYoutubePrivacy([]); void youtubeChat.stop() }
   setHealth(platform, 'ok')
   broadcast()
   response.json({ ok: true })
@@ -1937,9 +1989,81 @@ async function pollYouTube() {
       }
     }
   }
+  await recheckEndedYoutubePrivacy(token)
   await syncYouTubeChat(token)
   await seedYouTubeHistory(token)
   await refreshYouTubeViewers()
+}
+
+function setYoutubePrivacy(notices: YoutubePrivacyNotice[]) {
+  const visible = notices.filter((item) => !youtubePrivacyDismissed.has(item.videoId))
+  const previous = state.youtubePrivacy
+  const same = previous.length === visible.length && previous.every((item, index) => item.videoId === visible[index]?.videoId && item.privacy === visible[index]?.privacy && item.title === visible[index]?.title)
+  for (const item of visible) {
+    if (announcedYoutubePrivacy.has(item.videoId)) continue
+    announcedYoutubePrivacy.add(item.videoId)
+    console.warn(youtubePrivacyMessage(item))
+  }
+  for (const id of [...announcedYoutubePrivacy]) {
+    if (!visible.some((item) => item.videoId === id)) announcedYoutubePrivacy.delete(id)
+  }
+  if (same) return
+  state.youtubePrivacy = visible
+  broadcast()
+}
+
+/** Remember live privacy from the broadcast list we already fetched, and keep those ids for a post-stream recheck. */
+function noteYouTubeLivePrivacy(liveItems: any[]) {
+  const now = Date.now()
+  const live = liveItems.map((item) => ({
+    videoId: String(item.id || ''),
+    title: String(item.snippet?.title || ''),
+    privacyStatus: item.status?.privacyStatus,
+  }))
+  youtubePrivacyWatch = nextYoutubePrivacyWatch(now, youtubePrivacyWatch, live).map((item) => {
+    const source = liveItems.find((entry) => String(entry.id || '') === item.videoId)
+    const previous = youtubePrivacyWatch.find((entry) => entry.videoId === item.videoId)
+    const status = source?.status && typeof source.status === 'object' ? source.status as Record<string, unknown> : previous?.status
+    return { ...item, status }
+  })
+  for (const item of live) {
+    if (youtubePrivacyValue(item.privacyStatus) === 'public') youtubePrivacyDismissed.delete(item.videoId)
+  }
+  const liveIds = new Set(live.map((item) => item.videoId))
+  const ended = state.youtubePrivacy.filter((item) => !liveIds.has(item.videoId))
+  setYoutubePrivacy([...youtubePrivacyNotices(live), ...ended])
+}
+
+/**
+ * After a stream ends, YouTube may set the archive (especially a Short) to
+ * unlisted. videos.list is 1 unit and only runs for ids that left the live list.
+ */
+async function recheckEndedYoutubePrivacy(token: Token) {
+  const ids = youtubePrivacyRecheckIds(Date.now(), lastYoutubePrivacyRecheck, youtubePrivacyWatch, youtubeTargets.map((item) => item.videoId), state.youtubePrivacy)
+  if (!ids.length || youtubeQuotaBlocked()) return
+  lastYoutubePrivacyRecheck = Date.now()
+  let listed: any
+  try {
+    listed = await youtubeApi(`/videos?part=status,snippet&id=${ids.map((id) => encodeURIComponent(id)).join(',')}`, token)
+  } catch (error) {
+    if (!noteYouTubeQuota(error)) console.error('YouTube privacy check:', error instanceof Error ? error.message : error)
+    return
+  }
+  const found = new Set<string>()
+  const endedNotices = youtubePrivacyNotices((listed.items || []).map((item: any) => {
+    const videoId = String(item.id || '')
+    found.add(videoId)
+    const watched = youtubePrivacyWatch.find((entry) => entry.videoId === videoId)
+    if (watched && item.status && typeof item.status === 'object') watched.status = item.status
+    if (watched && item.snippet?.title) watched.title = String(item.snippet.title)
+    if (youtubePrivacyValue(item.status?.privacyStatus) === 'public') youtubePrivacyDismissed.delete(videoId)
+    return { videoId, title: String(item.snippet?.title || watched?.title || ''), privacyStatus: item.status?.privacyStatus }
+  }))
+  const liveIds = new Set(youtubeTargets.map((item) => item.videoId))
+  const liveNotices = state.youtubePrivacy.filter((item) => liveIds.has(item.videoId))
+  const missing = ids.filter((id) => !found.has(id))
+  if (missing.length) youtubePrivacyWatch = youtubePrivacyWatch.filter((item) => !missing.includes(item.videoId))
+  setYoutubePrivacy([...liveNotices, ...endedNotices.filter((item) => !liveIds.has(item.videoId))])
 }
 
 /** Poll the official liveBroadcasts API for our live chats, and fall back to the site reader when quota blocks the official status check. */
@@ -1970,6 +2094,7 @@ async function pollYouTubeStatus(token: Token) {
     }
   }).filter((item: YouTubeChatTarget) => item.videoId)
   setYouTubeTargets(next)
+  noteYouTubeLivePrivacy(liveItems)
   restorePlatformConnection('YouTube')
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, channelId: token.channelId, ...(liveItems.length ? {} : { viewers: 0 }) })
   if (liveItems.length) {
@@ -2423,6 +2548,7 @@ function ssePresence() {
     streamInfo: state.streamInfo,
     health: state.health,
     chatWarnings: state.chatWarnings,
+    youtubePrivacy: state.youtubePrivacy,
     youtubeQuota: state.youtubeQuota,
     streamelements: state.streamelements,
   }

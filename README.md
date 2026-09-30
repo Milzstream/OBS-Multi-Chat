@@ -106,7 +106,7 @@ If translation fails, Connection Settings shows why and messages stay in the ori
 6. Add the callback URL above as an authorized redirect URI.
 7. Copy the client ID and client secret.
 
-The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes, edits, or uploads videos.
+The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes or uploads videos. The only video edit is setting a broadcast or archive to **public** when you confirm the privacy prompt.
 
 YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
 
@@ -117,6 +117,8 @@ Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
+
+If a YouTube broadcast is unlisted or private — including a Shorts archive YouTube flips to unlisted after the stream ends — the companion window and the chat dock both warn you. **Make public** sets that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that warning until the app restarts. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
 
 Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
 
@@ -248,6 +250,7 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `POST /api/messages` - send a message to selected platforms
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
+- `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
 - `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories

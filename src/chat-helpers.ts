@@ -202,6 +202,26 @@ export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban',
   return cleaned ? `${line}: ${cleaned}` : line
 }
 
+export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'unlisted' | 'private' }
+
+/** Same sentence the backend logs, so the dock and companion window match the console line. */
+export function youtubePrivacyMessage(notice: { title?: string; privacy: string }) {
+  const title = String(notice.title || '').trim() || 'stream'
+  return `YouTube “${title}” is ${notice.privacy}. Make it public so the archive stays on your channel.`
+}
+
+export function postYoutubePrivacy(videoIds: string[], action: 'public' | 'dismiss' = 'public') {
+  return fetch('/api/youtube/privacy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ videoIds, action }),
+  }).then(async (response) => {
+    const data = await response.json().catch(() => ({})) as { ok?: boolean; error?: string }
+    if (!response.ok || data.ok === false) throw new Error(data.error || 'Could not update YouTube privacy')
+    return data
+  })
+}
+
 /** Ask the local backend to open an allowlisted URL in the system browser. Docks must not navigate themselves. */
 export function openDockUrl(url: string) {
   void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }).catch((error) => console.error('Failed to open link:', error))

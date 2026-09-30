@@ -36,6 +36,11 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .health-banner { margin-top: 7px; padding: 5px 7px; border-radius: 5px; font: 10px 'DM Mono', monospace; line-height: 1.35; }
 .health-banner.warn { color: #f3af61; border: 1px solid #6a5130; background: rgba(243,175,97,.1); }
 .health-banner.down { color: #ff8b7a; border: 1px solid #6a3530; background: rgba(255,91,98,.12); }
+.youtube-privacy { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.youtube-privacy-actions { display: flex; gap: 4px; margin-left: auto; }
+.youtube-privacy button, .console-privacy button { padding: 3px 6px; border-radius: 4px; background: #3a3124; color: #f3af61; font: 9px 'DM Mono', monospace; }
+.youtube-privacy button:hover, .console-privacy button:hover { color: #fff; }
+.console-privacy { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 8px 16px; border-bottom: 1px solid #6a5130; background: rgba(243,175,97,.1); color: #f3af61; font: 11px 'DM Mono', monospace; }
 .mod-menu { position: fixed; z-index: 20; width: 160px; padding: 6px; border: 1px solid #40504e; border-radius: 7px; background: #202729; box-shadow: 0 12px 32px rgba(0,0,0,.4); }
 .mod-menu-user { padding: 4px 6px 6px; color: #8b969a; font: 9px 'DM Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mod-menu button { display: block; width: 100%; padding: 7px 8px; border-radius: 4px; background: transparent; color: #d8e0dd; font-size: 12px; text-align: left; }

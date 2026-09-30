@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Twitch, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
+import { postYoutubePrivacy, youtubePrivacyMessage, type YoutubePrivacyNotice } from './chat-helpers'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
@@ -62,6 +63,8 @@ export default function ConsoleApp() {
   const [quotaDraft, setQuotaDraft] = useState('')
   const [quotaStatus, setQuotaStatus] = useState('')
   const [copied, setCopied] = useState('')
+  const [youtubePrivacy, setYoutubePrivacy] = useState<YoutubePrivacyNotice[]>([])
+  const [privacyStatus, setPrivacyStatus] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
 
@@ -88,7 +91,7 @@ export default function ConsoleApp() {
     const loadSettings = () => {
       void fetch('/api/state').then((response) => response.ok ? response.json() : null).then((data) => {
         if (cancelled || !data || typeof data !== 'object') return
-        const remote = data as Partial<Settings> & { accounts?: Connection[] }
+        const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[] }
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
         setSettings((current) => ({
           translateChat: typeof remote.translateChat === 'boolean' ? remote.translateChat : current.translateChat,
@@ -99,6 +102,7 @@ export default function ConsoleApp() {
           streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : current.streamelements,
           youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : current.youtubeQuota,
         }))
+        if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
       }).catch(() => undefined)
     }
     const loadJwts = () => {
@@ -199,6 +203,16 @@ export default function ConsoleApp() {
           <button type="button" title={info?.activityUrl || 'Activity dock URL'} disabled={!info?.activityUrl} onClick={() => info?.activityUrl && void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Activity dock'}</button>
         </nav>
       </header>
+      {youtubePrivacy.map((item) => (
+        <div key={item.videoId} className="console-privacy" role="status">
+          <span>{youtubePrivacyMessage(item)}</span>
+          <span className="youtube-privacy-actions">
+            <button type="button" onClick={() => { void postYoutubePrivacy([item.videoId]).then(() => setPrivacyStatus('Set to public')).catch((error) => setPrivacyStatus(error instanceof Error ? error.message : 'Could not make the video public')) }}>Make public</button>
+            <button type="button" onClick={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setPrivacyStatus('Could not dismiss')) }}>Dismiss</button>
+          </span>
+          {privacyStatus ? <small>{privacyStatus}</small> : null}
+        </div>
+      ))}
       <div className="console-body">
         <div
           className="console-log"

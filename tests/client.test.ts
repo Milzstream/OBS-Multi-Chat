@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
@@ -63,6 +63,7 @@ describe('chat dock helpers', () => {
     assert.equal(moderationStatus('ban', 'Ada', 'spam'), 'Banned Ada: spam')
     assert.equal(moderationStatus('timeout', 'Ada'), 'Timed out Ada')
     assert.equal(moderationStatus('ban', 'Ada', '  '), 'Banned Ada')
+    assert.equal(youtubePrivacyMessage({ title: 'Vertical', privacy: 'unlisted' }), 'YouTube “Vertical” is unlisted. Make it public so the archive stays on your channel.')
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {
