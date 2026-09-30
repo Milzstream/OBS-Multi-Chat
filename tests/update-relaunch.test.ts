@@ -34,6 +34,7 @@ describe('installer script', () => {
     assert.match(iss, /else if WizardIsTaskSelected\('addobsdocks'\)/)
     assert.match(iss, /\[InstallDelete\]/)
     assert.match(iss, /\{app\}\\resources/)
+    assert.match(iss, /\{app\}\\dist/)
     assert.match(iss, /deploy\\\*/)
     assert.match(iss, /Excludes: "production\.env"/)
     assert.doesNotMatch(iss, /relay-chat-dock-window\.exe/)

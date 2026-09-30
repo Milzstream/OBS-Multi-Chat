@@ -44,6 +44,7 @@ Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS cust
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\resources"
 Type: filesandordirs; Name: "{app}\locales"
+Type: filesandordirs; Name: "{app}\dist"
 Type: files; Name: "{app}\{#MyAppExeName}"
 Type: files; Name: "{app}\*.dll"
 Type: files; Name: "{app}\*.pak"
