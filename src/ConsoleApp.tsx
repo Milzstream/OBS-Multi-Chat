@@ -13,7 +13,7 @@ type Settings = {
   activityFallback: boolean
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
-  streamelements: { connected: boolean; handle: string; missing?: string[] }
+  streamelements: { connected: boolean; handle: string; missing?: string[]; connecting?: boolean }
   youtubeQuota: { used: number; limit: number }
 }
 
@@ -52,7 +52,7 @@ export default function ConsoleApp() {
     activityFallback: true,
     ignoreMissingJwt: false,
     dropOldAlerts: false,
-    streamelements: { connected: false, handle: '' },
+    streamelements: { connected: false, handle: '', connecting: true },
     youtubeQuota: { used: 0, limit: 10000 },
   })
   const [lines, setLines] = useState<LogLine[]>([])
@@ -254,7 +254,7 @@ export default function ConsoleApp() {
           ) : null}
           <div className="settings-divider" />
           <span className="settings-section-title">STREAMELEMENTS</span>
-          <p className="settings-note">{settings.streamelements.connected ? settings.streamelements.handle : 'Not configured'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}</p>
+          <p className="settings-note">{settings.streamelements.connected ? settings.streamelements.handle : settings.streamelements.connecting ? 'Connecting…' : 'Not configured'}{missing.length ? ` · missing ${missing.join(', ')}` : ''}</p>
           {JWT_PLATFORMS.map((platform) => (
             <div key={platform} className="settings-jwt">
               <span className="console-jwt-label"><span style={{ color: platform === 'Twitch' ? '#a970ff' : platform === 'YouTube' ? '#ff5b62' : '#62c554' }}>{platformMark(platform)}</span>{platform} JWT</span>

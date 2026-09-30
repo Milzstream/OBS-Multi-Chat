@@ -32,7 +32,7 @@ type BackendState = {
   activity?: ActivityEvent[]
   activityWarnings?: string[]
   accounts?: { platform: string; handle?: string; connected?: boolean }[]
-  streamelements?: { connected: boolean; handle: string; missing?: string[] }
+  streamelements?: { connected: boolean; handle: string; missing?: string[]; connecting?: boolean }
   activityFallback?: boolean
   ignoreMissingJwt?: boolean
   dropOldAlerts?: boolean
@@ -78,11 +78,28 @@ export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDi
   )
 }
 
+export function shouldShowActivityWarning(state: {
+  warnings: string[]
+  missingJwts: string[]
+  seConnected: boolean
+  seConnecting: boolean
+  seReady: boolean
+  ignoreMissingJwt: boolean
+  dismissed: boolean
+}) {
+  if (state.dismissed) return false
+  if (state.warnings.length > 0) return true
+  if (!state.seReady || state.seConnecting) return false
+  if (state.ignoreMissingJwt) return false
+  return state.missingJwts.length > 0 || !state.seConnected
+}
+
 export default function ActivityApp() {
   const [events, setEvents] = useState<ActivityEvent[]>([])
   const [activityWarnings, setActivityWarnings] = useState<string[]>([])
   const [missingJwts, setMissingJwts] = useState<string[]>([])
   const [seConnected, setSeConnected] = useState(false)
+  const [seConnecting, setSeConnecting] = useState(true)
   const [seReady, setSeReady] = useState(false)
   const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
   const [dismissedWarning, setDismissedWarning] = useState(false)
@@ -126,9 +143,10 @@ export default function ActivityApp() {
         setTwitchChannel(twitch?.handle || '')
       }
       if (fields.streamelements) {
-        const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[] }
+        const streamelements = fields.streamelements as { connected: boolean; handle: string; missing?: string[]; connecting?: boolean }
         setMissingJwts(streamelements.missing || [])
         setSeConnected(Boolean(streamelements.connected))
+        setSeConnecting(Boolean(streamelements.connecting))
         setSeReady(true)
       }
       if (typeof fields.ignoreMissingJwt === 'boolean') setIgnoreMissingJwt(fields.ignoreMissingJwt)
@@ -149,7 +167,7 @@ export default function ActivityApp() {
   const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.length, ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
   const kindsRestricted = kindFilter.length !== ACTIVITY_KIND_GROUP_IDS.length
   const warningMessages = [...new Set(activityWarnings)]
-  const showSetup = !dismissedWarning && (warningMessages.length > 0 || (seReady && !ignoreMissingJwt && (missingJwts.length > 0 || !seConnected)))
+  const showSetup = shouldShowActivityWarning({ warnings: warningMessages, missingJwts, seConnected, seConnecting, seReady, ignoreMissingJwt, dismissed: dismissedWarning })
 
   const sendTest = (item: (typeof tests)[number]) => {
     setShowTests(false)

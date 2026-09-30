@@ -23,7 +23,10 @@ export type ChatModeration = { action: 'delete' | 'timeout' | 'ban' | 'unban'; p
 export type StreamDetails = { title: string; category: string; categoryId?: string; tags?: string[] }
 export type StreamInfoMap = Record<StreamInfoPlatform, StreamDetails>
 export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
-export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[] }
+// `connecting` covers the window where JWTs are hydrating or the Astro socket
+// is (re)subscribing. The docks stay quiet during it, so a restart or a saved
+// JWT does not flash a StreamElements alert that clears a second later.
+export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[]; connecting: boolean }
 export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
 export type AppSettings = {

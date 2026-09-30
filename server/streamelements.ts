@@ -13,8 +13,34 @@ export type StreamElementsChannel = { channelId: string; handle: string; jwt: st
 
 const ASTRO_URL = 'wss://astro.streamelements.com'
 const API_BASE = 'https://api.streamelements.com/kappa/v2'
+/**
+ * Astro cycles its own connections and the network blips, so a socket that is
+ * only down for a moment is not a problem worth alerting on. The disconnect
+ * warning waits this long and is dropped entirely if the subscription ack
+ * lands first.
+ */
+const DISCONNECT_GRACE_MS = 10_000
+const RECONNECT_BASE_MS = 1_000
+const RECONNECT_MAX_MS = 20_000
 /** Event types that belong to StreamElements (donations/merch) rather than the platform the stream is linked to. */
 const SE_ONLY_TYPES = new Set(['tip', 'merch', 'purchase', 'redemption', 'charitycampaigndonation', 'giveaway', 'elixir', 'stars'])
+
+/**
+ * Every StreamElements API call is bounded, so a hung request cannot leave the
+ * companion waiting on a JWT (and the dock on “Connecting…”) indefinitely.
+ */
+async function fetchApi(url: string, headers: Record<string, string>, ms = 8_000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { headers, signal: controller.signal })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw new Error(`StreamElements request timed out after ${ms}ms`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** Decode a JWT's claims without verifying the signature — only used to recover the channel id when the API is unreachable. */
 function decodeJwt(jwt: string) {
@@ -112,7 +138,7 @@ export async function hydrateStreamElements(jwt: string): Promise<StreamElements
   const headers = { Authorization: `Bearer ${jwt}`, Accept: 'application/json' }
   for (const path of ['/channels/me', '/users/current', '/users/me']) {
     try {
-      const response = await fetch(`${API_BASE}${path}`, { headers })
+      const response = await fetchApi(`${API_BASE}${path}`, headers)
       if (!response.ok) continue
       const json = await response.json() as any
       const channel = json?.channel || json?.channels?.[0] || json
@@ -140,7 +166,7 @@ export async function fetchRecentActivities(channel: StreamElementsChannel): Pro
   const events: ActivityEvent[] = []
   for (const url of urls) {
     try {
-      const response = await fetch(url, { headers })
+      const response = await fetchApi(url, headers)
       if (!response.ok) continue
       const json = await response.json() as any
       const rows = Array.isArray(json) ? json : Array.isArray(json?.docs) ? json.docs : Array.isArray(json?.data) ? json.data : []
@@ -156,18 +182,42 @@ export async function fetchRecentActivities(channel: StreamElementsChannel): Pro
   return events
 }
 
+/** The parts of a WebSocket the Astro client uses, so tests can drive it without a network. */
+type AstroSocket = Pick<WebSocket, 'on' | 'once' | 'close' | 'send' | 'ping' | 'readyState'>
+
+export type StreamElementsClientOptions = {
+  /** Socket factory; defaults to a real websocket to Astro. */
+  open?: (url: string) => AstroSocket
+  /** How long a dropped socket may stay down before the dock is warned. */
+  graceMs?: number
+  /** First reconnect delay; later attempts double it up to 20s. */
+  reconnectBaseMs?: number
+}
+
 export class StreamElementsClient {
-  private ws?: WebSocket
+  private ws?: AstroSocket
   private pingTimer?: NodeJS.Timeout
   private reconnectTimer?: NodeJS.Timeout
+  private warnTimer?: NodeJS.Timeout
   private connecting?: Promise<void>
   private channels: StreamElementsChannel[] = []
   private onActivity?: (event: ActivityEvent) => void
   private onStatus?: (message?: string) => void
   private closed = true
   private attempt = 0
+  /** True once Astro has acked the subscribe, i.e. alerts are actually flowing. */
+  private subscribed = false
+  private readonly open: (url: string) => AstroSocket
+  private readonly graceMs: number
+  private readonly reconnectBaseMs: number
 
-  get connected() { return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
+  constructor(options: StreamElementsClientOptions = {}) {
+    this.open = options.open || ((url) => new WebSocket(url))
+    this.graceMs = options.graceMs ?? DISCONNECT_GRACE_MS
+    this.reconnectBaseMs = options.reconnectBaseMs ?? RECONNECT_BASE_MS
+  }
+
+  get connected() { return this.subscribed && Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
 
   async start(channels: StreamElementsChannel[], onActivity: (event: ActivityEvent) => void, onStatus?: (message?: string) => void) {
     this.channels = channels
@@ -175,17 +225,25 @@ export class StreamElementsClient {
     this.onStatus = onStatus
     this.closed = false
     if (this.ws?.readyState === WebSocket.OPEN) return
+    this.subscribed = false
     await this.connect()
   }
 
   async stop() {
     this.closed = true
+    this.subscribed = false
     this.channels = []
     this.onActivity = undefined
     this.onStatus = undefined
+    this.clearTimers()
+    await this.disconnectSocket()
+  }
+
+  private clearTimers() {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = undefined
-    await this.disconnectSocket()
+    if (this.warnTimer) clearTimeout(this.warnTimer)
+    this.warnTimer = undefined
   }
 
   private async connect() {
@@ -197,13 +255,15 @@ export class StreamElementsClient {
 
   private async openSocket() {
     await this.disconnectSocket()
-    const socket = new WebSocket(ASTRO_URL)
+    this.subscribed = false
+    const socket = this.open(ASTRO_URL)
     this.ws = socket
     socket.on('open', () => { this.attempt = 0 })
     socket.on('message', (data) => this.handle(String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
       this.ws = undefined
+      this.subscribed = false
       this.scheduleReconnect()
     })
     socket.on('error', (error) => { console.error('StreamElements:', error.message); socket.close() })
@@ -222,9 +282,13 @@ export class StreamElementsClient {
       if (payload.error) {
         const message = String(payload.data?.message || payload.error)
         console.error('StreamElements subscribe:', message)
-        this.onStatus?.(`StreamElements: ${message}`)
+        this.subscribed = false
+        this.report(`StreamElements: ${message}`)
       } else {
-        this.onStatus?.()
+        // The ack proves alerts are flowing, so it is also what cancels a
+        // pending disconnect warning.
+        this.subscribed = true
+        this.report()
       }
       return
     }
@@ -270,27 +334,52 @@ export class StreamElementsClient {
   }
 
   private openReconnect(token: string) {
-    const socket = new WebSocket(`${ASTRO_URL}/?reconnect_token=${encodeURIComponent(token)}`)
+    const socket = this.open(`${ASTRO_URL}/?reconnect_token=${encodeURIComponent(token)}`)
     const previous = this.ws
     this.ws = socket
+    // Astro hands over a live session, so the socket carrying the token counts
+    // as subscribed: reset the backoff, re-arm the ping, and drop any warning.
+    socket.on('open', () => {
+      this.attempt = 0
+      this.startPing()
+      this.subscribed = true
+      this.report()
+    })
     socket.on('message', (data) => this.handle(String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
       this.ws = undefined
+      this.subscribed = false
       this.scheduleReconnect()
     })
     socket.on('error', () => socket.close())
     try { previous?.close() } catch { /* ignore */ }
   }
 
+  /** Post a StreamElements warning, or clear it when `message` is empty. */
+  private report(message?: string) {
+    if (this.warnTimer) {
+      clearTimeout(this.warnTimer)
+      this.warnTimer = undefined
+    }
+    this.onStatus?.(message)
+  }
+
   private scheduleReconnect() {
     if (this.closed || this.reconnectTimer) return
-    const delay = Math.min(20_000, 1_000 * 2 ** this.attempt++)
-    this.onStatus?.('StreamElements disconnected — retrying alerts')
+    const delay = Math.min(RECONNECT_MAX_MS, this.reconnectBaseMs * 2 ** this.attempt++)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined
       void this.connect()
     }, delay)
+    if (this.warnTimer) return
+    // Wait out the grace period before saying anything: a socket that is back
+    // and acked inside it never raises an alert at all.
+    this.warnTimer = setTimeout(() => {
+      this.warnTimer = undefined
+      if (this.closed || this.subscribed) return
+      this.onStatus?.('StreamElements disconnected — retrying alerts')
+    }, this.graceMs)
   }
 
   private async disconnectSocket() {

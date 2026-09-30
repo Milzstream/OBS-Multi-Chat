@@ -196,6 +196,8 @@ StreamElements is the source of truth. Paste one JWT per linked platform in the 
 
 If a JWT is missing, the companion window and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** in the window if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
 
+The banner waits before it complains. StreamElements hydrates its JWTs over the network on start and after every saved JWT, and it cycles its own websocket, so those windows read as `Connecting…` in the Relay Chat Dock window and raise no alert. A websocket that is back and streaming inside 10 seconds never warns at all; only a longer outage does.
+
 | Filter | What you see |
 | --- | --- |
 | Twitch / Kick / YouTube | Follows, subs, gifts, cheers, raids, Super Chats, memberships from that platform |
