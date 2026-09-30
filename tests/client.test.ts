@@ -63,7 +63,7 @@ describe('chat dock helpers', () => {
     assert.equal(moderationStatus('ban', 'Ada', 'spam'), 'Banned Ada: spam')
     assert.equal(moderationStatus('timeout', 'Ada'), 'Timed out Ada')
     assert.equal(moderationStatus('ban', 'Ada', '  '), 'Banned Ada')
-    assert.equal(youtubePrivacyMessage({ title: 'Vertical', privacy: 'unlisted' }), 'YouTube “Vertical” is unlisted. Make it public so the archive stays on your channel.')
+    assert.equal(youtubePrivacyMessage({ title: 'Night stream', privacy: 'unlisted' }), 'YouTube “Night stream” is unlisted.')
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {

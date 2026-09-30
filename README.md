@@ -118,7 +118,7 @@ If you run two **separate** live broadcasts at the same time — a normal 16:9 s
 
 We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
 
-If a YouTube broadcast is unlisted or private — including a Shorts archive YouTube flips to unlisted after the stream ends — the companion window and the chat dock both warn you. **Make public** sets that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that warning until the app restarts. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
+If a YouTube broadcast is unlisted or private, the companion window and the chat dock each show that broadcast's title (`YouTube “Night stream” is unlisted.`). That can be intentional, or a leftover from reusing an unlisted stream. **Make public** sets only that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that video's warning until the app restarts; the next broadcast still warns. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
 
 Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
 

@@ -2035,8 +2035,8 @@ function noteYouTubeLivePrivacy(liveItems: any[]) {
 }
 
 /**
- * After a stream ends, YouTube may set the archive (especially a Short) to
- * unlisted. videos.list is 1 unit and only runs for ids that left the live list.
+ * Recheck broadcasts that left the live list. videos.list is 1 unit and only
+ * runs for those ids, so a still-unlisted stream keeps its warning.
  */
 async function recheckEndedYoutubePrivacy(token: Token) {
   const ids = youtubePrivacyRecheckIds(Date.now(), lastYoutubePrivacyRecheck, youtubePrivacyWatch, youtubeTargets.map((item) => item.videoId), state.youtubePrivacy)

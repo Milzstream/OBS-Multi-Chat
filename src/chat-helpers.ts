@@ -207,7 +207,7 @@ export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'u
 /** Same sentence the backend logs, so the dock and companion window match the console line. */
 export function youtubePrivacyMessage(notice: { title?: string; privacy: string }) {
   const title = String(notice.title || '').trim() || 'stream'
-  return `YouTube “${title}” is ${notice.privacy}. Make it public so the archive stays on your channel.`
+  return `YouTube “${title}” is ${notice.privacy}.`
 }
 
 export function postYoutubePrivacy(videoIds: string[], action: 'public' | 'dismiss' = 'public') {

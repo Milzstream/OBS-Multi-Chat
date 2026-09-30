@@ -157,7 +157,7 @@ describe('YouTube privacy warnings', () => {
       { videoId: 'shortsid123', title: 'Vertical', privacy: 'unlisted' },
       { videoId: 'privatesid1', title: 'privatesid1', privacy: 'private' },
     ])
-    assert.equal(youtubePrivacyMessage(notices[0]), 'YouTube “Vertical” is unlisted. Make it public so the archive stays on your channel.')
+    assert.equal(youtubePrivacyMessage(notices[0]), 'YouTube “Vertical” is unlisted.')
   })
 
   it('keeps ended broadcasts on the watch list and rechecks them after the interval', () => {

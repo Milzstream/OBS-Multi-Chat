@@ -188,7 +188,7 @@ export type YoutubePrivacy = 'public' | 'unlisted' | 'private'
 export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'unlisted' | 'private' }
 export type YoutubePrivacyWatch = { videoId: string; title: string; until: number }
 
-/** How long to keep checking a broadcast after we last saw it live. YouTube often flips Shorts to unlisted after the stream ends. */
+/** How long to keep checking a broadcast after we last saw it live. */
 export const YOUTUBE_PRIVACY_WATCH_MS = 30 * 60_000
 /** videos.list cadence for ended broadcasts. Live privacy comes from the existing liveBroadcasts.list. */
 export const YOUTUBE_PRIVACY_RECHECK_MS = 3 * 60_000
@@ -223,7 +223,7 @@ export function youtubePrivacyNotices(items: { videoId?: string; title?: string;
 
 export function youtubePrivacyMessage(notice: { title?: string; privacy: string }) {
   const title = String(notice.title || '').trim() || 'stream'
-  return `YouTube “${title}” is ${notice.privacy}. Make it public so the archive stays on your channel.`
+  return `YouTube “${title}” is ${notice.privacy}.`
 }
 
 /**
