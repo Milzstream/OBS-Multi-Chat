@@ -268,6 +268,7 @@ let lastYouTubeOfficialChatAt = 0
 let lastYouTubeViewersAt = 0
 let youtubeForceStatus = true
 let youtubeTargets: YouTubeChatTarget[] = []
+const youtubeStreamViewers = new Map<string, number>()
 let youtubePrivacyWatch: Array<YoutubePrivacyWatch & { status?: Record<string, unknown> }> = []
 const youtubePrivacyDismissed = new Set<string>()
 const announcedYoutubePrivacy = new Set<string>()
@@ -677,7 +678,7 @@ app.post('/api/disconnect/:platform', (request, response) => {
   if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
   if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes'); setChatWarning('twitch-moderate') }
   if (platform === 'Kick') void kickChat.stop()
-  if (platform === 'YouTube') { setYouTubeTargets([]); youtubePrivacyWatch = []; youtubePrivacyDismissed.clear(); announcedYoutubePrivacy.clear(); setYoutubePrivacy([]); void youtubeChat.stop() }
+  if (platform === 'YouTube') { setYouTubeTargets([]); youtubeStreamViewers.clear(); publishYouTubeStreams(); youtubePrivacyWatch = []; youtubePrivacyDismissed.clear(); announcedYoutubePrivacy.clear(); setYoutubePrivacy([]); void youtubeChat.stop() }
   setHealth(platform, 'ok')
   broadcast()
   response.json({ ok: true })
@@ -1995,6 +1996,23 @@ async function pollYouTube() {
   await refreshYouTubeViewers()
 }
 
+/** Copy each live YouTube title onto the account so the tile tooltip can list them. Cleared when YouTube is offline. */
+function publishYouTubeStreams() {
+  const account = state.accounts.find((item) => item.platform === 'YouTube')
+  if (!account) return
+  const streams = account.live ? youtubeTargets.map((target) => {
+    const title = String(target.title || '').trim()
+    if (!title) return
+    const viewers = youtubeStreamViewers.get(target.videoId)
+    return { title, ...(target.label ? { label: target.label } : {}), ...(viewers != null ? { viewers } : {}) }
+  }).filter((item): item is { title: string; label?: string; viewers?: number } => Boolean(item)) : []
+  if (JSON.stringify(account.streams || []) === JSON.stringify(streams)) return
+  account.streams = streams
+  for (const id of [...youtubeStreamViewers.keys()]) {
+    if (!youtubeTargets.some((target) => target.videoId === id)) youtubeStreamViewers.delete(id)
+  }
+}
+
 function setYoutubePrivacy(notices: YoutubePrivacyNotice[]) {
   const visible = notices.filter((item) => !youtubePrivacyDismissed.has(item.videoId))
   const previous = state.youtubePrivacy
@@ -2097,6 +2115,7 @@ async function pollYouTubeStatus(token: Token) {
   noteYouTubeLivePrivacy(liveItems)
   restorePlatformConnection('YouTube')
   Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, channelId: token.channelId, ...(liveItems.length ? {} : { viewers: 0 }) })
+  publishYouTubeStreams()
   if (liveItems.length) {
     const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
     console.log(`YouTube lives: ${liveItems.length} chat(s)${labels.length ? ` (${labels.join(', ')})` : ''}`)
@@ -2116,13 +2135,14 @@ async function discoverYouTubeLive(token: Token) {
       setYouTubeTargets([])
       youtubeHistorySeeded.clear()
       await youtubeChat.stop()
-      Object.assign(account, { live: false, viewers: 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle })
+      Object.assign(account, { live: false, viewers: 0, streams: [], handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle })
     }
     return
   }
   const existing = youtubeTargets.find((item) => item.videoId === found.videoId)
   if (!existing) setYouTubeTargets([{ videoId: found.videoId, liveChatId: token.liveChatId, title: found.title }])
   Object.assign(account, { live: true, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(Number.isFinite(found.viewers) ? { viewers: found.viewers } : {}) })
+  publishYouTubeStreams()
   lastYouTubeViewersAt = 0
 }
 
@@ -2134,7 +2154,9 @@ async function refreshYouTubeViewers() {
   const previousLabels = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',')
   for (const { target, info } of pages) {
     if (info?.title) target.title = info.title
+    if (Number.isFinite(info?.viewers)) youtubeStreamViewers.set(target.videoId, info!.viewers as number)
   }
+  publishYouTubeStreams()
   relabelYouTubeTargets()
   const labelsChanged = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',') !== previousLabels
   if (labelsChanged) {

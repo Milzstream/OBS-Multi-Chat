@@ -202,6 +202,30 @@ export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban',
   return cleaned ? `${line}: ${cleaned}` : line
 }
 
+export type LiveStreamTip = { title: string; viewers?: number; label?: string }
+
+/** Tile tooltip. YouTube lists every live broadcast; Twitch and Kick show that platform's title. */
+export function platformStatTip(input: { platform: string; live: boolean; connected: boolean; viewers: number; title?: string; streams?: LiveStreamTip[]; quota?: { used: number; limit: number }; health?: string }) {
+  const lines = [`${input.platform} · ${input.live ? 'live' : input.connected ? 'offline' : 'not connected'}`]
+  const streams = (input.streams || []).map((item) => ({ ...item, title: item.title.trim() })).filter((item) => item.title)
+  if (streams.length > 1) {
+    for (const stream of streams) {
+      const name = stream.label ? `${stream.label}: ${stream.title}` : stream.title
+      lines.push(stream.viewers != null ? `${name} · ${stream.viewers.toLocaleString()} viewers` : name)
+    }
+    if (input.connected) lines.push(`${input.viewers.toLocaleString()} combined viewers`)
+  } else {
+    const title = streams[0]?.title || input.title?.trim()
+    if (title) lines.push(title)
+    if (input.connected) lines.push(`${input.viewers.toLocaleString()} viewers`)
+  }
+  if (input.quota) lines.push(`Quota ${input.quota.used.toLocaleString()} / ${input.quota.limit.toLocaleString()}`)
+  if (input.health) lines.push(input.health)
+  else if (input.live) lines.push('Connected')
+  lines.push(input.connected ? `Open ${input.platform} dashboard` : 'Connect in the Relay Chat Dock window')
+  return lines.join('\n')
+}
+
 export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'unlisted' | 'private' }
 
 /** Same sentence the backend logs, so the dock and companion window match the console line. */

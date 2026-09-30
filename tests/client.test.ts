@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { describe, it } from 'node:test'
-import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
+import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
 import { virtualWindow } from '../src/virtualList.ts'
@@ -64,6 +68,28 @@ describe('chat dock helpers', () => {
     assert.equal(moderationStatus('timeout', 'Ada'), 'Timed out Ada')
     assert.equal(moderationStatus('ban', 'Ada', '  '), 'Banned Ada')
     assert.equal(youtubePrivacyMessage({ title: 'Night stream', privacy: 'unlisted' }), 'YouTube “Night stream” is unlisted.')
+  })
+
+  it('lists every YouTube live title on the tile tooltip, and Twitch or Kick show theirs', () => {
+    assert.equal(platformStatTip({ platform: 'Twitch', live: true, connected: true, viewers: 12, title: 'Night stream' }), 'Twitch · live\nNight stream\n12 viewers\nConnected\nOpen Twitch dashboard')
+    assert.equal(platformStatTip({ platform: 'Kick', live: true, connected: true, viewers: 3, title: 'Just chatting' }), 'Kick · live\nJust chatting\n3 viewers\nConnected\nOpen Kick dashboard')
+    assert.equal(platformStatTip({ platform: 'YouTube', live: true, connected: true, viewers: 9, streams: [{ title: 'Only one', viewers: 9 }] }), 'YouTube · live\nOnly one\n9 viewers\nConnected\nOpen YouTube dashboard')
+    assert.equal(platformStatTip({ platform: 'YouTube', live: true, connected: true, viewers: 16, streams: [{ title: 'Horizontal', viewers: 12 }, { title: 'Late night', label: 'Shorts', viewers: 4 }] }), 'YouTube · live\nHorizontal · 12 viewers\nShorts: Late night · 4 viewers\n16 combined viewers\nConnected\nOpen YouTube dashboard')
+  })
+
+  it('keeps the full broadcast title on the privacy warning for hover, and clips the line', () => {
+    const title = 'A scheduled title that is longer than the dock'
+    const html = renderToStaticMarkup(createElement(YoutubePrivacyBanner, {
+      notice: { videoId: 'abcdefghijk', title, privacy: 'unlisted' },
+      className: 'health-banner warn youtube-privacy',
+      onPublic: () => undefined,
+      onDismiss: () => undefined,
+    }))
+    assert.match(html, /class="youtube-privacy-text"/)
+    assert.match(html, /title="A scheduled title that is longer than the dock"/)
+    assert.match(html, /YouTube “A scheduled title that is longer than the dock” is unlisted\./)
+    const css = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+    assert.match(css, /\.youtube-privacy-text \{[^}]*text-overflow: ellipsis/)
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {

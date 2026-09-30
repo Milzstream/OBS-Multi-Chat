@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Twitch, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
-import { postYoutubePrivacy, youtubePrivacyMessage, type YoutubePrivacyNotice } from './chat-helpers'
+import { postYoutubePrivacy, type YoutubePrivacyNotice } from './chat-helpers'
+import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
@@ -204,14 +205,7 @@ export default function ConsoleApp() {
         </nav>
       </header>
       {youtubePrivacy.map((item) => (
-        <div key={item.videoId} className="console-privacy" role="status">
-          <span>{youtubePrivacyMessage(item)}</span>
-          <span className="youtube-privacy-actions">
-            <button type="button" onClick={() => { void postYoutubePrivacy([item.videoId]).then(() => setPrivacyStatus('Set to public')).catch((error) => setPrivacyStatus(error instanceof Error ? error.message : 'Could not make the video public')) }}>Make public</button>
-            <button type="button" onClick={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setPrivacyStatus('Could not dismiss')) }}>Dismiss</button>
-          </span>
-          {privacyStatus ? <small>{privacyStatus}</small> : null}
-        </div>
+        <YoutubePrivacyBanner key={item.videoId} notice={item} className="console-privacy" status={privacyStatus} onPublic={() => { void postYoutubePrivacy([item.videoId]).then(() => setPrivacyStatus('Set to public')).catch((error) => setPrivacyStatus(error instanceof Error ? error.message : 'Could not make the video public')) }} onDismiss={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setPrivacyStatus('Could not dismiss')) }} />
       ))}
       <div className="console-body">
         <div
