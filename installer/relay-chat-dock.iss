@@ -41,6 +41,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "addobsdocks"; Description: "Add Relay Chat and Relay Activity as OBS custom browser docks (enable them under Docks in OBS after install)"; GroupDescription: "OBS:";
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\resources"
+Type: filesandordirs; Name: "{app}\locales"
+Type: files; Name: "{app}\{#MyAppExeName}"
+Type: files; Name: "{app}\*.dll"
+Type: files; Name: "{app}\*.pak"
+Type: files; Name: "{app}\*.bin"
+Type: files; Name: "{app}\*.dat"
+Type: files; Name: "{app}\*.json"
+
 [Files]
 Source: "..\deploy\*"; DestDir: "{app}"; Excludes: "production.env"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 Source: "..\.env.example"; DestDir: "{app}"; Flags: ignoreversion
