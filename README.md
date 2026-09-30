@@ -66,7 +66,7 @@ http://localhost:4173/activity
 
 Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Activity is the alert feed.
 
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen.
+Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). The stream title always opens the YouTube Studio livestreaming dashboard, which lists every live screen. Click a chat username to open that person's Twitch viewer card for your channel, Kick profile, or YouTube channel page in the system browser. The viewer card needs your connected Twitch login in the path (`/popout/<you>/viewercard/<them>`). YouTube's community tab is often disabled, so that click opens the channel instead.
 
 ## API setup
 
@@ -186,7 +186,7 @@ Click **Connect** for each platform in either dock's settings. Each button opens
 
 ### Moderation
 
-Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id.
+Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch and Kick ask for an optional reason (up to 500 characters) before a ban or timeout. Leave it blank to send no reason. YouTube live chat bans have no reason field, so that prompt is hidden and a YouTube ban still asks you to confirm. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id.
 
 ### Activity dock
 
@@ -202,7 +202,7 @@ If a JWT is missing, the companion window and Activity dock warn you. Use **Igno
 
 The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
 
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's profile in your default browser (not inside the OBS dock). Both docks paint only the on-screen rows.
+Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
@@ -247,7 +247,8 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `GET /events` - Server-Sent Events stream for dock updates
 - `POST /api/messages` - send a message to selected platforms
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
-- `POST /api/open` - open an allowlisted Twitch, Kick, or YouTube profile URL, or YouTube Studio, in the system default browser
+- `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
+- `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
 - `POST /api/activity/test` - inject a local test activity row (not persisted)
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category/tags to one platform

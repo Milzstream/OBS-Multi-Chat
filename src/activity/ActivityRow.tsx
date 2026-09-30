@@ -1,5 +1,5 @@
 import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, Youtube, Zap } from 'lucide-react'
-import { kickProfileSlug } from '../chat-helpers'
+import { chatProfileUrl, openDockUrl, profileLinkTitle } from '../chat-helpers'
 import { activitySubtitle, kindLabel } from './format'
 
 /**
@@ -60,37 +60,27 @@ function KindIcon({ kind }: { kind: ActivityKind }) {
 }
 
 /**
- * Derive the profile URL a row links out to. StreamElements events carry no
- * profile of their own, so `event.source` inherits the platform the stream is
- * linked to. YouTube channel ids (`UC...`) get `/channel/` links, everything
- * else falls back to a `@handle` link.
+ * Derive the profile URL a row links out to. Twitch uses the viewer card when
+ * the broadcaster login is known, otherwise the public profile. YouTube is the
+ * channel page. A stored URL is only a fallback for events we cannot rebuild.
  */
-export function profileHref(event: ActivityEvent) {
-  if (event.profileUrl) return event.profileUrl
-  const handle = event.user.replace(/^@+/, '').trim().toLowerCase()
-  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
+export function profileHref(event: ActivityEvent, channelLogin?: string) {
   const source = event.source || event.platform
-  if (source === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (source === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(event.user, event.handle))}`
-  if (source === 'YouTube') {
-    if (event.userId && /^UC[\w-]{20,}$/i.test(event.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(event.userId)}`
-    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
-  }
-  return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }, channelLogin) || event.profileUrl
 }
 
-export function ActivityRow({ event, age }: { event: ActivityEvent; age: string }) {
+export function ActivityRow({ event, age, channelLogin }: { event: ActivityEvent; age: string; channelLogin?: string }) {
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
   const detail = activitySubtitle(event)
-  const href = profileHref(event)
+  const href = profileHref(event, source === 'Twitch' ? channelLogin : undefined)
   const openProfile = () => {
     if (!href) return
-    window.open(href, '_blank')
+    openDockUrl(href)
   }
   return (
-    <button type="button" className={href ? 'activity-row activity-row-link' : 'activity-row'} style={{ ['--row-color' as string]: color }} title={href ? `Open ${event.user} on ${source}` : undefined} onClick={href ? openProfile : undefined}>
+    <button type="button" className={href ? 'activity-row activity-row-link' : 'activity-row'} style={{ ['--row-color' as string]: color }} title={href ? profileLinkTitle(source) : undefined} onClick={href ? openProfile : undefined}>
       <span className="activity-icon" style={{ color: platformColor[source] }} title={source}><PlatformMark platform={source} /></span>
       <span className="activity-icon" style={{ color }}><KindIcon kind={event.kind} /></span>
       <div className="activity-copy">

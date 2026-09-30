@@ -149,7 +149,7 @@ export function corsOriginDelegate(options: Pick<LocalApiOptions, 'port' | 'lanE
   }
 }
 
-/** Allowlist external links the docks may open: https-only, no auth/port/query, and a path shape per known host (profiles + YouTube Studio). */
+/** Allowlist external links the docks may open: https-only, no auth/port/query/hash, and a path shape per known host (profiles, channel-scoped viewer cards, YouTube Studio). */
 export function isSafeExternalUrl(raw: string) {
   if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
   if (/[\u0000-\u0020\u007f<>"'\\|`]/.test(raw)) return false
@@ -161,7 +161,7 @@ export function isSafeExternalUrl(raw: string) {
   if (parsed.search || parsed.hash) return false
   const host = parsed.hostname.toLowerCase()
   const pathname = parsed.pathname
-  if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
+  if (PROFILE_HOSTS.twitch.has(host)) return /^\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname) || /^\/popout\/[A-Za-z0-9_]{1,25}\/viewercard\/[A-Za-z0-9_]{1,25}\/?$/.test(pathname)
   if (PROFILE_HOSTS.twitchDashboard.has(host)) return pathname === '/stream-manager' || pathname === '/stream-manager/' || pathname === '/stream' || pathname === '/stream/' || /^\/u\/[A-Za-z0-9_]{1,25}\/(stream-manager|stream)\/?$/.test(pathname)
   if (PROFILE_HOSTS.kick.has(host)) return /^\/[A-Za-z0-9_-]{1,50}\/?$/.test(pathname) || /^\/dashboard(\/stream)?\/?$/.test(pathname)
   if (PROFILE_HOSTS.youtube.has(host)) return /^\/channel\/UC[\w-]{20,}\/?$/.test(pathname) || /^\/@[A-Za-z0-9._-]{1,60}\/?$/.test(pathname)

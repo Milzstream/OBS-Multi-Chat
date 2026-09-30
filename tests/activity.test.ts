@@ -9,6 +9,7 @@ import { createActivityStore, parseActivityTime, profileUrl } from '../server/ac
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements } from '../server/streamelements.js'
 import { ActivityWarningBanner } from '../src/activity/ActivityApp.tsx'
+import { profileHref } from '../src/activity/ActivityRow.tsx'
 import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
 describe('activity time and profiles', () => {
@@ -30,6 +31,14 @@ describe('activity time and profiles', () => {
     assert.equal(profileUrl('Twitch', 'TestUser'), undefined)
     assert.equal(profileUrl('Twitch', 'Anonymous'), undefined)
   })
+
+  it('prefers the mod view over a stored public profile URL', () => {
+    const base = { id: '1', kind: 'follow' as const, user: 'Ada', time: '2026-09-02T12:00:00.000Z', profileUrl: 'https://www.twitch.tv/ada' }
+    assert.equal(profileHref({ ...base, platform: 'Twitch' }, 'milz'), 'https://www.twitch.tv/popout/milz/viewercard/ada')
+    assert.equal(profileHref({ ...base, platform: 'Twitch' }), 'https://www.twitch.tv/ada')
+    assert.equal(profileHref({ ...base, platform: 'StreamElements', source: 'YouTube', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012')
+    assert.equal(profileHref({ ...base, platform: 'StreamElements', kind: 'merch', profileUrl: 'https://www.twitch.tv/ada' }), 'https://www.twitch.tv/ada')
+  })
 })
 
 describe('activity store', () => {
@@ -46,6 +55,17 @@ describe('activity store', () => {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string }[]
       assert.equal(saved.some((event) => event.id === 'test-row'), false)
       assert.equal(saved.some((event) => event.id === 'follow-1'), true)
+    } finally {
+      try { fs.unlinkSync(file) } catch { /* ignore */ }
+    }
+  })
+
+  it('rewrites a dead viewer-card URL back to the public profile', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-card-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      fs.writeFileSync(file, JSON.stringify([{ id: 'follow-1', platform: 'Twitch', kind: 'follow', user: 'Ada', time: '2026-09-02T12:00:00.000Z', profileUrl: 'https://www.twitch.tv/popout/viewercard/ada?popout=' }]))
+      const store = createActivityStore(file)
+      assert.equal(store.list()[0]?.profileUrl, 'https://www.twitch.tv/ada')
     } finally {
       try { fs.unlinkSync(file) } catch { /* ignore */ }
     }

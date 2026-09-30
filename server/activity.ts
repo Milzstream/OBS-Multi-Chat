@@ -57,11 +57,18 @@ export function parseActivityTime(value: unknown) {
   return new Date().toISOString()
 }
 
-/** Build a clickable profile link per platform. Anonymous/test users get none. */
+/**
+ * Stored profile link. Twitch stays the public profile here because the viewer
+ * card needs the broadcaster login, which the dock adds at click time. YouTube
+ * is the channel page, not `/community`, which many channels leave disabled.
+ */
 export function profileUrl(platform: ActivityPlatform, user: string, userId?: string, slug?: string) {
   const handle = String(user || '').replace(/^@+/, '').trim().toLowerCase()
   if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
-  if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
+  if (platform === 'Twitch') {
+    if (!/^[a-z0-9_]{1,25}$/.test(handle)) return
+    return `https://www.twitch.tv/${handle}`
+  }
   if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(user, slug))}`
   if (platform === 'YouTube') {
     if (userId && /^UC[\w-]{20,}$/i.test(userId)) return `https://www.youtube.com/channel/${encodeURIComponent(userId)}`
@@ -127,7 +134,7 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
         ...event,
         source,
         time: parseActivityTime(event.time),
-        profileUrl: event.profileUrl || profileUrl(source, event.user, event.userId, event.handle),
+        profileUrl: profileUrl(source, event.user, event.userId, event.handle) || event.profileUrl,
       }
     }))
     save()
@@ -163,7 +170,7 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
         source,
         id: incoming.id || fallbackId({ ...incoming, user }),
         time: parseActivityTime(incoming.time),
-        profileUrl: incoming.profileUrl || profileUrl(source, incoming.user || user, incoming.userId, incoming.handle),
+        profileUrl: profileUrl(source, incoming.user || user, incoming.userId, incoming.handle) || incoming.profileUrl,
       }
       if (events.some((item) => item.id === event.id)) return false
       const at = Date.parse(event.time) || Date.now()
