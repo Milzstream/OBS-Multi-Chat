@@ -1,7 +1,8 @@
 /**
  * Shared helpers for the chat and activity docks: avatar/media URL proxying,
  * Kick handle normalization, category preference, feed filtering, combobox
- * highlight math, and the YouTube Studio URL the stream-controls link opens.
+ * highlight math, moderator profile links, and the YouTube Studio URL the
+ * stream-controls link opens.
  */
 
 export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
@@ -147,4 +148,51 @@ export function streamDashboardUrl(platform: ChatPlatform, account: { handle?: s
   }
   if (platform === 'Kick') return 'https://kick.com/dashboard/stream'
   return youtubeStudioUrl(account.channelId)
+}
+
+/**
+ * Moderator profile link. Twitch opens the viewer card (`?popout=` is the only
+ * query the local allowlist accepts). YouTube opens the channel community
+ * page, which is the history YouTube's own mod UI links to. Kick has no
+ * equivalent route, so it stays the public profile. Must match
+ * `profileUrl` in server/activity.ts and `isSafeExternalUrl`.
+ */
+export function chatProfileUrl(message: { platform: string; user: string; userId?: string; handle?: string }) {
+  const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
+  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
+  if (message.platform === 'Twitch') {
+    if (!/^[a-z0-9_]{1,25}$/.test(handle)) return
+    return `https://www.twitch.tv/popout/viewercard/${handle}?popout=`
+  }
+  if (message.platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(message.user, message.handle))}`
+  if (message.platform === 'YouTube') {
+    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}/community`
+    return `https://www.youtube.com/@${encodeURIComponent(handle)}/community`
+  }
+}
+
+export function profileLinkTitle(platform: string) {
+  if (platform === 'Twitch') return 'Open Twitch viewer card'
+  if (platform === 'YouTube') return 'Open YouTube channel history'
+  if (platform === 'Kick') return 'Open Kick profile'
+  return 'Open profile'
+}
+
+/** Twitch and Kick accept a ban/timeout reason. YouTube liveChat/bans does not. */
+export function moderationAcceptsReason(platform: string) {
+  return platform === 'Twitch' || platform === 'Kick'
+}
+
+/** Dock status line after a moderation call. Includes the reason only when one was sent. */
+export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban', user: string, reason?: string) {
+  if (action === 'delete') return 'Message deleted'
+  if (action === 'unban') return `Unbanned ${user}`
+  const line = action === 'ban' ? `Banned ${user}` : `Timed out ${user}`
+  const cleaned = reason?.trim()
+  return cleaned ? `${line}: ${cleaned}` : line
+}
+
+/** Ask the local backend to open an allowlisted URL in the system browser. Docks must not navigate themselves. */
+export function openDockUrl(url: string) {
+  void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) }).catch((error) => console.error('Failed to open link:', error))
 }

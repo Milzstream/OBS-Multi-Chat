@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
@@ -46,6 +46,21 @@ describe('chat dock helpers', () => {
     assert.equal(nextOptionIndex(7, 8, 1), 7)
     assert.equal(nextOptionIndex(0, 8, -1), 0)
     assert.equal(nextOptionIndex(3, 0, 1), 0)
+  })
+
+  it('opens the Twitch viewer card and YouTube community page, and leaves Kick on the profile', () => {
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'Ada' }), 'https://www.twitch.tv/popout/viewercard/ada?popout=')
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'not a login' }), undefined)
+    assert.equal(chatProfileUrl({ platform: 'Twitch', user: 'TestUser' }), undefined)
+    assert.equal(chatProfileUrl({ platform: 'Kick', user: 'SuperIOgame_Tyle88', handle: 'superiogame-tyle88' }), 'https://kick.com/superiogame-tyle88')
+    assert.equal(chatProfileUrl({ platform: 'YouTube', user: 'Ada', userId: 'UC1234567890123456789012' }), 'https://www.youtube.com/channel/UC1234567890123456789012/community')
+    assert.equal(chatProfileUrl({ platform: 'YouTube', user: '@Ada' }), 'https://www.youtube.com/@ada/community')
+    assert.equal(moderationAcceptsReason('Twitch'), true)
+    assert.equal(moderationAcceptsReason('Kick'), true)
+    assert.equal(moderationAcceptsReason('YouTube'), false)
+    assert.equal(moderationStatus('ban', 'Ada', 'spam'), 'Banned Ada: spam')
+    assert.equal(moderationStatus('timeout', 'Ada'), 'Timed out Ada')
+    assert.equal(moderationStatus('ban', 'Ada', '  '), 'Banned Ada')
   })
 
   it('builds YouTube Studio URLs without inventing a channel path', () => {

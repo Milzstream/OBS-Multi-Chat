@@ -3,10 +3,12 @@ import { describe, it } from 'node:test'
 import {
   applyChatModeration,
   kickBadges,
+  kickModerationBanPayload,
   kickEmoteUrl,
   looksLikePlaceholder,
   needsTranslation,
   normalizeAvatar,
+  normalizeModerationReason,
   activityAppendedEvent,
   activitySseFields,
   parseActivityMax,
@@ -27,10 +29,12 @@ import {
   translateFailureMessage,
   twitchBadgeLabel,
   twitchBadgesFromTag,
+  twitchModerationBanData,
   twitchEmoteUrl,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
   TWITCH_EVENTSUB_DEFAULT_URL,
+  youtubeLiveChatBanSnippet,
 } from '../server/logic.js'
 import { chatroomIdFrom, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
@@ -178,6 +182,33 @@ describe('API errors', () => {
     assert.equal(summarizeApiError(504, '<html>Gateway Timeout</html>'), 'Gateway Timeout (Twitch CDN busy)')
     assert.equal(summarizeApiError(400, JSON.stringify({ message: 'missing scope' })), 'missing scope')
     assert.equal(summarizeApiError(500, '<p>nope</p>'), 'nope')
+  })
+})
+
+describe('moderation reasons', () => {
+  it('omits a blank reason and caps Twitch at 500 characters', () => {
+    assert.equal(normalizeModerationReason('  '), undefined)
+    assert.equal(normalizeModerationReason('spam\nwave'), 'spam wave')
+    assert.equal(normalizeModerationReason('x'.repeat(600))?.length, 500)
+    const twitch = twitchModerationBanData('9', 'timeout', 600, 'spam')
+    assert.deepEqual(twitch, { user_id: '9', duration: 600, reason: 'spam' })
+    assert.equal('reason' in twitchModerationBanData('9', 'ban', undefined, '   '), false)
+    const kick = kickModerationBanPayload('1', '9', 'timeout', 600, 'spam')
+    assert.equal(kick.duration, 10)
+    assert.equal(kick.reason, 'spam')
+    assert.equal('reason' in kickModerationBanPayload('1', '9', 'unban', undefined, 'spam'), false)
+    assert.equal('duration' in kickModerationBanPayload('1', '9', 'ban'), false)
+  })
+
+  it('does not attach a reason to YouTube live chat bans', () => {
+    const banned = youtubeLiveChatBanSnippet('chat', 'UC1', 'ban')
+    assert.equal(banned.type, 'permanent')
+    assert.equal('reason' in banned, false)
+    assert.equal('banDurationSeconds' in banned, false)
+    const timed = youtubeLiveChatBanSnippet('chat', 'UC1', 'timeout', 60)
+    assert.equal(timed.type, 'temporary')
+    assert.equal(timed.banDurationSeconds, 60)
+    assert.equal('reason' in timed, false)
   })
 })
 

@@ -291,6 +291,55 @@ export function youtubeLiveChatMessageBody(liveChatId: string, text: string) {
   return { snippet: { liveChatId, type: 'textMessageEvent', textMessageDetails: { messageText: text } } }
 }
 
+/** Twitch Helix `reason` max. Kick accepts the same string; a blank reason is omitted rather than defaulted. */
+export const MODERATION_REASON_MAX = 500
+
+/**
+ * Optional ban/timeout reason. Empty, whitespace, and control characters become
+ * `undefined` so the platform call omits the field. Does not block the ban.
+ */
+export function normalizeModerationReason(raw: unknown) {
+  const text = String(raw ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!text) return
+  return [...text].slice(0, MODERATION_REASON_MAX).join('')
+}
+
+/** Helix ban/timeout body. Duration is seconds. Reason is omitted when blank — not the old hardcoded default. */
+export function twitchModerationBanData(userId: string, action: string, duration?: number, reason?: unknown) {
+  const data: { user_id: string; duration?: number; reason?: string } = { user_id: userId }
+  const cleaned = normalizeModerationReason(reason)
+  if (cleaned) data.reason = cleaned
+  if (action === 'timeout') data.duration = Math.max(1, Number(duration || 60))
+  return data
+}
+
+/** Kick ban/timeout body. Duration is minutes; the dock sends seconds. Unban omits duration and reason. */
+export function kickModerationBanPayload(broadcasterUserId: string, userId: string, action: string, durationSeconds?: number, reason?: unknown) {
+  const payload: { broadcaster_user_id: number; user_id: number; duration?: number; reason?: string } = {
+    broadcaster_user_id: Number(broadcasterUserId),
+    user_id: Number(userId),
+  }
+  if (action === 'unban') return payload
+  const cleaned = normalizeModerationReason(reason)
+  if (cleaned) payload.reason = cleaned
+  if (action === 'timeout') payload.duration = Math.max(1, Math.round(Number(durationSeconds || 60) / 60) || 1)
+  return payload
+}
+
+/**
+ * YouTube `liveChat/bans` snippet. There is no reason field (only liveChatId,
+ * type, banDurationSeconds, and bannedUserDetails), so a dock reason is not
+ * attached and the UI hides the field for YouTube.
+ */
+export function youtubeLiveChatBanSnippet(liveChatId: string, userId: string, action: string, duration?: number) {
+  return {
+    liveChatId,
+    type: action === 'timeout' ? 'temporary' : 'permanent',
+    ...(action === 'timeout' ? { banDurationSeconds: Math.max(1, Number(duration || 60)) } : {}),
+    bannedUserDetails: { channelId: userId },
+  }
+}
+
 export function youtubeChatKeysFor(sourceId: string | undefined, targets: YouTubeChatTarget[]) {
   if (!sourceId) return []
   const keys = [sourceId]

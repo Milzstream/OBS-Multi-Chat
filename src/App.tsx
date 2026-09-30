@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from './virtualList'
-import { dockAvatarSrc, kickProfileSlug, mergeCategoryResults, nextOptionIndex, preferredCategory, selectedSendPlatforms, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory, type TagAssignment, type TagPlatform } from './chat-helpers'
+import { chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, openDockUrl, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type MergedCategory, type TagAssignment, type TagPlatform } from './chat-helpers'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
@@ -22,6 +22,8 @@ type CategoryOption = { id: string; name: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 type ChatBadge = { title: string; url?: string; label?: string }
 type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
+type ModPrompt = { action: 'timeout' | 'ban'; duration?: number }
+type ModMenuState = { x: number; y: number; message: ChatMessage; prompt?: ModPrompt }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type YoutubeQuotaStatus = { used: number; limit: number }
 type BackendState = { accounts: Connection[]; streamInfo: StreamDetailsByPlatform; messages: ChatMessage[]; health: Record<Platform, Health>; translateChat?: boolean; youtubeQuota?: YoutubeQuotaStatus }
@@ -62,7 +64,7 @@ function App() {
   const [chatWarnings, setChatWarnings] = useState<string[]>([])
   const [youtubeQuota, setYoutubeQuota] = useState<YoutubeQuotaStatus>({ used: 0, limit: 10_000 })
   const [translateChat, setTranslateChat] = useState(true)
-  const [menu, setMenu] = useState<{ x: number; y: number; message: ChatMessage } | null>(null)
+  const [menu, setMenu] = useState<ModMenuState | null>(null)
   const liveConnections = connections.filter((connection) => connection.connected && connection.live)
   const connectedAccounts = connections.filter((connection) => connection.connected)
   const combinedViewers = liveConnections.reduce((total, connection) => total + connection.viewers, 0)
@@ -161,14 +163,20 @@ function App() {
     setComposer('')
     void fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platforms: selectedPlatforms, text }) }).then((response) => response.json()).then((result: { results: { platform: Platform; ok: boolean; error?: string }[] }) => { const failed = result.results.filter((item) => !item.ok); setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ') : 'Sent'); window.setTimeout(() => setSendStatus(''), 4000) }).catch(() => setSendStatus('Message request failed'))
   }
-  const moderate = (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number) => {
+  const moderate = (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => {
     if (!menu) return
     const target = menu.message
+    // Twitch/Kick collect an optional reason before sending. `undefined` means the field has not been shown yet; a blank string means the mod left it empty.
+    if ((action === 'ban' || action === 'timeout') && moderationAcceptsReason(target.platform) && reason === undefined) {
+      setMenu({ ...menu, prompt: { action, duration } })
+      return
+    }
     setMenu(null)
-    if (action === 'ban' && !window.confirm(`Ban ${target.user} on ${target.platform}?`)) return
-    void fetch('/api/moderate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, platform: target.platform, messageId: target.id, userId: target.userId, sourceId: target.sourceId, duration }) }).then((response) => response.json()).then((result: { ok: boolean; error?: string }) => {
+    if (action === 'ban' && !moderationAcceptsReason(target.platform) && !window.confirm(`Ban ${target.user} on ${target.platform}?`)) return
+    const sentReason = reason?.trim()
+    void fetch('/api/moderate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, platform: target.platform, messageId: target.id, userId: target.userId, sourceId: target.sourceId, duration, ...(sentReason ? { reason: sentReason } : {}) }) }).then((response) => response.json()).then((result: { ok: boolean; error?: string; reason?: string }) => {
       if (!result.ok) setSendStatus(`${target.platform}: ${result.error || 'moderation failed'}`)
-      else setSendStatus(action === 'delete' ? 'Message deleted' : action === 'ban' ? `Banned ${target.user}` : action === 'unban' ? `Unbanned ${target.user}` : `Timed out ${target.user}`)
+      else setSendStatus(moderationStatus(action, target.user, result.reason))
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => setSendStatus('Moderation request failed'))
   }
@@ -206,9 +214,42 @@ function App() {
       <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message) => <MessageItem key={message.id} message={message} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
-      {menu && <div className="mod-menu" style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - 168)), top: Math.max(6, Math.min(menu.y, window.innerHeight - (menu.message.deleted ? 90 : 190))) }} onClick={(event) => event.stopPropagation()}><div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div>{menu.message.deleted ? <button type="button" onClick={() => moderate('unban')}>Unban / untimeout</button> : <><button type="button" onClick={() => moderate('delete')}>Delete message</button><button type="button" onClick={() => moderate('timeout', 60)}>Timeout 1m</button><button type="button" onClick={() => moderate('timeout', 600)}>Timeout 10m</button><button type="button" onClick={() => moderate('timeout', 3600)}>Timeout 1h</button><button type="button" className="danger" onClick={() => moderate('ban')}>Ban</button></>}</div>}
+      {menu && <ModMenu menu={menu} onModerate={moderate} onClose={() => setMenu(null)} />}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
+  )
+}
+
+function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onModerate: (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => void; onClose: () => void }) {
+  const [reason, setReason] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const prompting = Boolean(menu.prompt)
+  useEffect(() => {
+    if (prompting) inputRef.current?.focus()
+  }, [prompting, menu.prompt?.action, menu.prompt?.duration])
+  const width = prompting ? 228 : 168
+  const height = prompting ? 168 : menu.message.deleted ? 90 : 190
+  const prompt = menu.prompt
+  return (
+    <div className={prompting ? 'mod-menu mod-menu-prompt' : 'mod-menu'} style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - width)), top: Math.max(6, Math.min(menu.y, window.innerHeight - height)) }} onClick={(event) => event.stopPropagation()}>
+      <div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div>
+      {prompt ? (
+        <form className="mod-menu-reason" onSubmit={(event) => { event.preventDefault(); onModerate(prompt.action, prompt.duration, reason) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose() } }}>
+          <label htmlFor="mod-reason">{prompt.action === 'ban' ? 'Ban' : 'Timeout'} on {menu.message.platform}. Reason is optional.</label>
+          <input id="mod-reason" ref={inputRef} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional)" />
+          <div className="mod-menu-actions">
+            <button type="submit" className={prompt.action === 'ban' ? 'danger' : undefined}>{prompt.action === 'ban' ? 'Ban' : 'Timeout'}</button>
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      ) : menu.message.deleted ? <button type="button" onClick={() => onModerate('unban')}>Unban / untimeout</button> : <>
+        <button type="button" onClick={() => onModerate('delete')}>Delete message</button>
+        <button type="button" onClick={() => onModerate('timeout', 60)}>Timeout 1m</button>
+        <button type="button" onClick={() => onModerate('timeout', 600)}>Timeout 10m</button>
+        <button type="button" onClick={() => onModerate('timeout', 3600)}>Timeout 1h</button>
+        <button type="button" className="danger" onClick={() => onModerate('ban')}>Ban</button>
+      </>}
+    </div>
   )
 }
 
@@ -237,30 +278,17 @@ function Avatar({ name, src, color }: { name: string; src?: string; color: strin
   return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
 }
 
-function getChatProfileUrl(message: ChatMessage): string | undefined {
-  const handle = message.user.replace(/^@+/, '').trim().toLowerCase()
-  if (!handle || /^anonymous$/i.test(handle) || handle === 'testuser') return
-  const platform = message.platform
-  if (platform === 'Twitch') return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-  if (platform === 'Kick') return `https://kick.com/${encodeURIComponent(kickProfileSlug(message.user, message.handle))}`
-  if (platform === 'YouTube') {
-    if (message.userId && /^UC[\w-]{20,}$/i.test(message.userId)) return `https://www.youtube.com/channel/${encodeURIComponent(message.userId)}`
-    return `https://www.youtube.com/@${encodeURIComponent(handle)}`
-  }
-  return `https://www.twitch.tv/${encodeURIComponent(handle)}`
-}
-
 function MessageItem({ message, showTranslationMark, onModerate }: { message: ChatMessage; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
   const platforms = message.platforms || [message.platform]
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
-  const profileUrl = getChatProfileUrl(message)
+  const profileUrl = chatProfileUrl(message)
   const openProfile = (event: React.MouseEvent) => {
     if (!profileUrl) return
     event.stopPropagation()
-    void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: profileUrl }) }).catch(err => console.error('Failed to open profile:', err))
+    openDockUrl(profileUrl)
   }
-  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={dockAvatarSrc(part.url)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}{message.deleted && parts.some((part) => part.type === 'emote') && (message.platform === 'Kick' || (message.platforms || []).includes('Kick')) ? <span className="deleted-note" title="Banned by a moderator">(Banned)</span> : null}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
+  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} title={profileUrl ? profileLinkTitle(message.platform) : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={dockAvatarSrc(part.url)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}{message.deleted && parts.some((part) => part.type === 'emote') && (message.platform === 'Kick' || (message.platforms || []).includes('Kick')) ? <span className="deleted-note" title="Banned by a moderator">(Banned)</span> : null}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
 /** Twitch/Kick category field. Arrow keys only move the open list; closed input keeps default caret behavior. */

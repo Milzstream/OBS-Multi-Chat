@@ -41,6 +41,14 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .mod-menu button { display: block; width: 100%; padding: 7px 8px; border-radius: 4px; background: transparent; color: #d8e0dd; font-size: 12px; text-align: left; }
 .mod-menu button:hover { background: #2b3533; }
 .mod-menu button.danger { color: #ff8b7a; }
+.mod-menu-prompt { width: 220px; }
+.mod-menu-reason { display: flex; flex-direction: column; gap: 6px; padding: 2px 4px 4px; }
+.mod-menu-reason label { color: #8b969a; font: 9px 'DM Mono', monospace; line-height: 1.35; }
+.mod-menu-reason input { width: 100%; padding: 6px 7px; border: 1px solid #3b4749; border-radius: 4px; outline: 0; background: #151a1c; color: #ecf2ef; font-size: 11px; }
+.mod-menu-reason input:focus { border-color: var(--teal); }
+.mod-menu-actions { display: flex; gap: 4px; }
+.mod-menu-actions button { flex: 1; width: auto; text-align: center; background: #2b3533; }
+.mod-menu-actions button.danger { background: #3a2422; }
 .message.deleted { opacity: .55; }
 .message.deleted p { text-decoration: line-through; }
 .message.deleted p img.emote { opacity: 1; text-decoration: none; }

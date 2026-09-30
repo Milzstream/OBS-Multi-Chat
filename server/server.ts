@@ -34,6 +34,7 @@ import {
   isTokenRefreshHealthMessage,
   normalizeChatHandle,
   kickBadges,
+  kickModerationBanPayload,
   kickStreamDetails,
   normalizeTags,
   twitchTagsForApi,
@@ -72,12 +73,14 @@ import {
   translateFailureMessage,
   TWITCH_EVENTSUB_DEFAULT_URL,
   twitchBadgesFromList,
+  twitchModerationBanData,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
   twitchEventToActivity,
   youtubeApiErrorReason,
   youtubeBadges,
   youtubeChatLabel,
+  youtubeLiveChatBanSnippet,
   youtubeLiveChatMessageBody,
   youtubeOfficialModeration,
   youtubeOfficialToActivity,
@@ -459,10 +462,10 @@ app.post('/api/messages', async (request, response) => {
   response.json({ results })
 })
 app.post('/api/moderate', async (request, response) => {
-  const body = request.body as { action?: string; platform?: Platform; messageId?: string; userId?: string; sourceId?: string; duration?: number }
-  if (!body.action || !body.platform) return response.status(400).json({ error: 'action and platform are required' })
-  try {
-    const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration })
+    const body = request.body as { action?: string; platform?: Platform; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }
+    if (!body.action || !body.platform) return response.status(400).json({ error: 'action and platform are required' })
+    try {
+      const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration, reason: body.reason })
     if (result.ok && (body.action === 'delete' || body.action === 'timeout' || body.action === 'ban' || body.action === 'unban')) {
       const target = state.messages.find((item) => item.id === body.messageId)
       applyChatModerationToState({
@@ -2247,15 +2250,16 @@ async function sendYouTubeMessage(text: string) {
   return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
 }
 
-async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
+async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }) {
   if (!tokens[platform]) return { ok: false, error: 'Not connected' }
   if (platform === 'Twitch') return moderateTwitch(body)
   if (platform === 'Kick') return moderateKick(body)
+  // YouTube liveChat/bans has no reason field, so moderateYouTube ignores body.reason.
   if (platform === 'YouTube') return moderateYouTube(body)
   return { ok: false, error: `${platform} moderation is not available` }
 }
 
-async function moderateTwitch(body: { action: string; messageId?: string; userId?: string; duration?: number }) {
+async function moderateTwitch(body: { action: string; messageId?: string; userId?: string; duration?: number; reason?: string }) {
   const token = await ensureToken('Twitch')
   if (!token?.userId) return { ok: false, error: 'Twitch is not connected' }
   const id = token.userId
@@ -2269,18 +2273,16 @@ async function moderateTwitch(body: { action: string; messageId?: string; userId
     await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}&user_id=${encodeURIComponent(body.userId)}`, token, { method: 'DELETE' })
     return { ok: true }
   }
-  const data: { user_id: string; duration?: number; reason: string } = { user_id: body.userId, reason: 'Relayed from OBS dock' }
-  // Twitch timeouts are in seconds
-  if (body.action === 'timeout') data.duration = Math.max(1, Number(body.duration || 60))
+  const data = twitchModerationBanData(body.userId, body.action, body.duration, body.reason)
   await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ data }),
   })
-  return { ok: true }
+  return { ok: true, ...(data.reason ? { reason: data.reason } : {}) }
 }
 
-async function moderateKick(body: { action: string; messageId?: string; userId?: string; duration?: number }) {
+async function moderateKick(body: { action: string; messageId?: string; userId?: string; duration?: number; reason?: string }) {
   const token = await ensureToken('Kick')
   if (!token?.userId) return { ok: false, error: 'Kick is not connected' }
   if (body.action === 'delete') {
@@ -2290,19 +2292,14 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
     return { ok: true }
   }
   if (!body.userId) return { ok: false, error: 'User id is required' }
-  const payload: { broadcaster_user_id: number; user_id: number; duration?: number; reason: string } = {
-    broadcaster_user_id: Number(token.userId),
-    user_id: Number(body.userId),
-    reason: 'Relayed from OBS dock',
-  }
-  if (body.action === 'timeout') payload.duration = Math.max(1, Math.round(Number(body.duration || 60) / 60) || 1) // Kick timeouts are in minutes, dock sends seconds
+  const payload = kickModerationBanPayload(token.userId, body.userId, body.action, body.duration, body.reason)
   const response = await kickApi('/moderation/bans', token, {
     method: body.action === 'unban' ? 'DELETE' : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body.action === 'unban' ? { broadcaster_user_id: payload.broadcaster_user_id, user_id: payload.user_id } : payload),
   })
   if (!response.ok) return { ok: false, error: await response.text() }
-  return { ok: true }
+  return { ok: true, ...(body.action !== 'unban' && payload.reason ? { reason: payload.reason } : {}) }
 }
 
 // Remember the ban ids YouTube handed back so the dock can unban what it banned (YouTube unban needs the original ban id)
@@ -2329,18 +2326,12 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
     return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
   }
   const chatIds = [...new Set([body.sourceId, ...youtubeLiveChatIds()].filter(Boolean))] as string[]
-  if (!body.userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
+  const userId = body.userId
+  if (!userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
   const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/bans?part=snippet', token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      snippet: {
-        liveChatId,
-        type: body.action === 'timeout' ? 'temporary' : 'permanent',
-        ...(body.action === 'timeout' ? { banDurationSeconds: Math.max(1, Number(body.duration || 60)) } : {}),
-        bannedUserDetails: { channelId: body.userId },
-      },
-    }),
+    body: JSON.stringify({ snippet: youtubeLiveChatBanSnippet(liveChatId, userId, body.action, body.duration) }),
   })))
   const failed = results.filter((result) => !result.ok)
   const remembered: string[] = []
@@ -2351,7 +2342,7 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
       if (id) remembered.push(String(id))
     } catch { /* ignore */ }
   }
-  if (remembered.length) youtubeBanIds.set(body.userId.toLowerCase(), remembered)
+  if (remembered.length) youtubeBanIds.set(userId.toLowerCase(), remembered)
   return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
 }
 
