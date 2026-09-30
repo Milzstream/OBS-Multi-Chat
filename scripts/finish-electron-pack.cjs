@@ -20,6 +20,22 @@ async function stampExeIcon(exePath) {
     lang,
     iconFile.icons.map((item) => item.data),
   )
+  const [major, minor, patch] = String(version).split('.').map((part) => Number(part) || 0)
+  const versionInfo = ResEdit.Resource.VersionInfo.fromEntries(res.entries)[0]
+  if (versionInfo) {
+    versionInfo.setFileVersion(major, minor, patch, 0, lang)
+    versionInfo.setProductVersion(major, minor, patch, 0, lang)
+    versionInfo.setStringValues({ lang, codepage: 1200 }, {
+      FileDescription: 'Relay Chat Dock',
+      ProductName: 'Relay Chat Dock',
+      CompanyName: 'Milzstream',
+      LegalCopyright: 'SEE LICENSE IN LICENSE',
+      OriginalFilename: 'relay-chat-dock.exe',
+      FileVersion: version,
+      ProductVersion: version,
+    })
+    versionInfo.outputToResourceEntries(res.entries)
+  }
   res.outputResource(exe)
   const stamped = `${exePath}.stamped`
   fs.writeFileSync(stamped, Buffer.from(exe.generate()))
