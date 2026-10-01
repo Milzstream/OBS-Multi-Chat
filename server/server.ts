@@ -328,7 +328,9 @@ const state: State = {
   activityWarnings: [],
   chatWarnings: [],
   youtubePrivacy: [],
-  streamelements: { connected: false, handle: '', missing: [] },
+  // The JWTs hydrate right after the server boots, so start out connecting:
+  // the docks should not read this as "StreamElements is not configured".
+  streamelements: { connected: false, handle: '', missing: [], connecting: true },
   activityFallback: settings.activityFallback,
   ignoreMissingJwt: settings.ignoreMissingJwt,
   dropOldAlerts: settings.dropOldAlerts,
@@ -1805,6 +1807,14 @@ function setChatWarning(key: string, message?: string) {
   broadcast()
 }
 
+/** Publish a StreamElements status slice to the docks, skipping the broadcast when nothing changed. */
+function updateStreamElementsStatus(patch: Partial<StreamElementsStatus>) {
+  const next = { ...state.streamelements, ...patch }
+  if (JSON.stringify(next) === JSON.stringify(state.streamelements)) return
+  state.streamelements = next
+  broadcast()
+}
+
 async function startStreamElements(backfill = false) {
   await streamElements.stop()
   const slots = streamElementsJwtSlots()
@@ -1812,10 +1822,14 @@ async function startStreamElements(backfill = false) {
   const missingNote = missingStreamElementsMessage(missing)
   const failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
   if (!slots.some((slot) => slot.jwt)) {
-    state.streamelements = { connected: false, handle: '', missing }
+    updateStreamElementsStatus({ connected: false, handle: '', missing, connecting: false })
     setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
     return failed
   }
+  // Hydrating a JWT hits the StreamElements API and can take a moment after a
+  // restart or a saved JWT. Keep the last known status and mark the window as
+  // connecting so the docks stay quiet instead of flashing a warning.
+  updateStreamElementsStatus({ missing, connecting: true })
   const channels = []
   const seen = new Map<string, Awaited<ReturnType<typeof hydrateStreamElements>>>()
   for (const slot of slots) {
@@ -1836,15 +1850,21 @@ async function startStreamElements(backfill = false) {
     }
   }
   if (!channels.length) {
-    state.streamelements = { connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'] }
+    updateStreamElementsStatus({ connected: false, handle: '', missing: missing.length ? missing : ['Twitch', 'Kick', 'YouTube'], connecting: false })
     setActivityWarning('streamelements', 'StreamElements JWTs failed to load. Check the Relay Chat Dock window or production.env.')
     console.error('StreamElements JWTs failed to load. Check the Relay Chat Dock window or production.env.')
     return failed
   }
   const handle = channels.map((channel) => channel.provider ? `${channel.handle} (${channel.provider})` : channel.handle).join(', ')
-  state.streamelements = { connected: true, handle, missing }
+  updateStreamElementsStatus({ connected: true, handle, connecting: false })
   setActivityWarning('streamelements', settings.ignoreMissingJwt ? undefined : missingNote)
-  await streamElements.start(channels, (event) => addActivity(event), (message) => setActivityWarning('streamelements-live', message))
+  // The socket callback is also how the dock learns the connection really is
+  // live: a drop only reaches it once the client has waited out its grace
+  // period, so a short reconnect never shows up as an alert.
+  await streamElements.start(channels, (event) => addActivity(event), (message) => {
+    setActivityWarning('streamelements-live', message)
+    updateStreamElementsStatus({ connected: streamElements.connected })
+  })
   console.log(`StreamElements connected (${handle})`)
   if (backfill) {
     for (const channel of channels) {

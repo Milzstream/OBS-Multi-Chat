@@ -2,13 +2,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, it } from 'node:test'
+import { describe, it, type TestContext } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
-import { activityFromStreamElements } from '../server/streamelements.js'
-import { ActivityWarningBanner } from '../src/activity/ActivityApp.tsx'
+import { activityFromStreamElements, StreamElementsClient } from '../server/streamelements.js'
+import { ActivityWarningBanner, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { profileHref } from '../src/activity/ActivityRow.tsx'
 import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
@@ -151,5 +151,129 @@ describe('activity display', () => {
     assert.match(markup, /STREAMELEMENTS_JWT_TWITCH/)
     assert.match(markup, /Relay Chat Dock window/)
     assert.doesNotMatch(markup, /Activity settings/)
+  })
+
+  it('stays quiet while StreamElements is still connecting, and warns once it settles', () => {
+    const base = { warnings: [] as string[], missingJwts: [] as string[], seConnected: false, seConnecting: true, seReady: true, ignoreMissingJwt: false, dismissed: false }
+    // A restart hydrates the JWTs after the dock's first snapshot. That window
+    // used to flash “StreamElements not configured” for a second.
+    assert.equal(shouldShowActivityWarning(base), false)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnected: true, seConnecting: true }), false)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false }), true)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true }), false)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true, missingJwts: ['Kick'] }), true)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true, ignoreMissingJwt: true }), false)
+    // Backend warnings still speak up, and a dismissal still holds.
+    assert.equal(shouldShowActivityWarning({ ...base, warnings: ['StreamElements disconnected — retrying alerts'] }), true)
+    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, dismissed: true }), false)
+    // Nothing has reported a StreamElements status yet.
+    assert.equal(shouldShowActivityWarning({ ...base, seReady: false, seConnecting: false }), false)
+  })
+})
+
+describe('StreamElements connection', () => {
+  type Handler = (payload?: unknown) => void
+
+  function fakeSocket() {
+    const handlers: Record<string, Handler[]> = {}
+    const add = (event: string, handler: Handler) => {
+      handlers[event] = [...(handlers[event] || []), handler]
+      return socket
+    }
+    const socket = {
+      readyState: 1,
+      sent: [] as string[],
+      on: (event: string, handler: Handler) => add(event, handler),
+      once(event: string, handler: Handler) {
+        const wrapper: Handler = (payload) => {
+          socket.off(event, wrapper)
+          handler(payload)
+        }
+        return add(event, wrapper)
+      },
+      off(event: string, handler: Handler) { handlers[event] = (handlers[event] || []).filter((item) => item !== handler) },
+      send(payload: string) { socket.sent.push(payload) },
+      ping() { return undefined },
+      close() { socket.fire('close') },
+      fire(event: string, payload?: unknown) { for (const handler of [...(handlers[event] || [])]) handler(payload) },
+    }
+    return socket
+  }
+
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  const channel = { channelId: 'c1', handle: 'Ada', jwt: 'jwt', provider: 'twitch' }
+  const warn = 'StreamElements disconnected — retrying alerts'
+
+  /** A client on a short clock: it retries at once, but waits 1s before it complains. */
+  function testClient(t: TestContext) {
+    const sockets: ReturnType<typeof fakeSocket>[] = []
+    const messages: (string | undefined)[] = []
+    const client = new StreamElementsClient({
+      open: () => {
+        const socket = fakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      reconnectBaseMs: 20,
+      graceMs: 1_000,
+    })
+    t.after(() => client.stop())
+    /** Astro's welcome, the staggered subscribe sends, then the ack. */
+    const ack = async (index: number) => {
+      sockets[index].fire('message', JSON.stringify({ type: 'welcome' }))
+      await wait(160)
+      sockets[index].fire('message', JSON.stringify({ type: 'response' }))
+    }
+    /** Every alert the dock has been given, ignoring the acks that clear them. */
+    const alerts = () => messages.filter((message): message is string => Boolean(message))
+    return { client, sockets, messages, alerts, ack }
+  }
+
+  it('subscribes to both StreamElements topics and clears the warning on the ack', async (t) => {
+    const { client, sockets, messages, ack } = testClient(t)
+    await client.start([channel], () => undefined, (message) => messages.push(message))
+    await ack(0)
+    assert.equal(sockets[0].sent.length, 2)
+    assert.deepEqual(sockets[0].sent.map((payload) => JSON.parse(payload).data.topic), ['channel.activities', 'channel.tips'])
+    assert.equal(client.connected, true)
+  })
+
+  it('does not warn about a socket that comes back inside the grace period', async (t) => {
+    const { client, sockets, messages, alerts, ack } = testClient(t)
+    await client.start([channel], () => undefined, (message) => messages.push(message))
+    await ack(0)
+
+    // A routine Astro drop. The old client warned right here, so the dock
+    // flashed a disconnect alert for a second on every reconnect.
+    sockets[0].fire('close')
+    await wait(60)
+    assert.equal(sockets.length, 2, 'the client retried the socket')
+    await ack(1)
+    assert.deepEqual(alerts(), [], 'a reconnected socket never raised an alert')
+    assert.equal(client.connected, true)
+  })
+
+  it('warns when the socket stays down past the grace period, and clears on recovery', async (t) => {
+    const { client, sockets, messages, alerts, ack } = testClient(t)
+    await client.start([channel], () => undefined, (message) => messages.push(message))
+    await ack(0)
+
+    sockets[0].fire('close')
+    await wait(1_100)
+    assert.deepEqual(alerts(), [warn])
+    assert.equal(client.connected, false)
+
+    await ack(1)
+    assert.deepEqual(messages.at(-1), undefined, 'recovery clears the warning')
+    assert.equal(client.connected, true)
+  })
+
+  it('never warns after a stop, so a restart cannot leave a stale alert', async (t) => {
+    const { client, sockets, messages } = testClient(t)
+    await client.start([channel], () => undefined, (message) => messages.push(message))
+    sockets[0].fire('close')
+    await client.stop()
+    await wait(1_100)
+    assert.deepEqual(messages, [])
   })
 })
