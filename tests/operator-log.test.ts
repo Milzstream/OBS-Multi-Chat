@@ -3,12 +3,13 @@ import { describe, it } from 'node:test'
 import { activityLogLine, createIngestLog, ingestSummary, liveCheckLine, moderationLogLine } from '../server/operator-log.js'
 
 describe('operator log', () => {
-  it('logs a live change once, and always logs a manual check', () => {
-    const first = liveCheckLine(undefined, { platform: 'Twitch', live: false, viewers: 0 })
-    assert.equal(first?.line, 'Twitch offline')
-    assert.equal(liveCheckLine(first?.key, { platform: 'Twitch', live: false, viewers: 0 }), undefined)
-    assert.match(liveCheckLine(first?.key, { platform: 'Twitch', live: false, viewers: 0 }, true)?.line || '', /check live/)
-    assert.match(liveCheckLine(first?.key, { platform: 'Kick', live: true, viewers: 12 })?.line || '', /12 viewers/)
+  it('logs a live check, repeats an unchanged result once a minute, and always logs Check live', () => {
+    const first = liveCheckLine(undefined, { platform: 'Twitch', live: false, viewers: 0 }, false, 1_000)
+    assert.equal(first.line, 'Twitch check: offline')
+    assert.equal(liveCheckLine(first, { platform: 'Twitch', live: false, viewers: 0 }, false, 20_000).line, undefined)
+    assert.match(liveCheckLine(first, { platform: 'Twitch', live: false, viewers: 0 }, true, 20_000).line || '', /check live/)
+    assert.match(liveCheckLine(first, { platform: 'Twitch', live: false, viewers: 0 }, false, 70_000).line || '', /Twitch check: offline/)
+    assert.match(liveCheckLine(first, { platform: 'Kick', live: true, viewers: 12 }, false, 2_000).line || '', /12 viewers/)
   })
 
   it('batches added messages and skips a zero count', () => {

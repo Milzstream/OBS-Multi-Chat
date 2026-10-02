@@ -376,7 +376,7 @@ function scheduleChatSave() { chatSave.schedule() }
 function flushChatSave() { chatSave.flush() }
 
 const ingestLog = createIngestLog((line) => console.log(line))
-const liveStatusSeen = new Map<Platform, string>()
+const liveStatusSeen = new Map<Platform, { key: string; at: number }>()
 
 function logPolledLive(platform: Platform, manual = false) {
   const account = state.accounts.find((item) => item.platform === platform)
@@ -387,9 +387,8 @@ function logPolledLive(platform: Platform, manual = false) {
 function noteLiveStatus(platform: Platform, live: boolean, viewers: number, manual = false) {
   const previous = liveStatusSeen.get(platform)
   const next = liveCheckLine(previous, { platform, live, viewers }, manual)
-  if (!next) return
-  liveStatusSeen.set(platform, next.key)
-  console.log(next.line)
+  liveStatusSeen.set(platform, { key: next.key, at: next.at })
+  if (next.line) console.log(next.line)
 }
 
 function applyChatModerationToState(change: ChatModeration) {
@@ -2361,6 +2360,7 @@ async function refreshYouTubeViewers() {
 
 async function seedYouTubeHistory(token: Token) {
   if (youtubeQuotaBlocked()) return
+  if (!youtubeTargets.length && !youtubeChat.connected) return
   const chatIds = youtubeLiveChatIds()
   if (youtubeChat.connected) {
     for (const chatId of chatIds) youtubeHistorySeeded.add(chatId)

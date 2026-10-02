@@ -87,6 +87,8 @@ export function extractSession(html: string, videoId: string): Session | undefin
 /** Extract the video id, returning undefined when the page is a replay or the live has ended. */
 export function extractVideoId(html: string) {
   if (/"isReplay"\s*:\s*true/.test(html) || /LIVE_STREAM_OFFLINE|This live event has ended/i.test(html)) return
+  const live = /watching now/i.test(html) || /"concurrentViewers":"[\d,]+"/.test(html) || /"isLive(?:Now)?"\s*:\s*true/.test(html)
+  if (!live) return
   return html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([^"]+)"/)?.[1]
     || html.match(/"videoDetails":\{"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
     || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
@@ -469,7 +471,11 @@ export class YouTubeLiveChat {
     while (!stopped()) {
       try {
         const loaded = await loadLivePage(loop.target.videoId)
-        if (!loaded) throw new Error('live chat page missing continuation')
+        if (!loaded) {
+          console.log(`YouTube InnerTube (${loop.target.videoId}): not a live chat`)
+          loop.stop()
+          return
+        }
         const { session } = loaded
         this.noteSuccess(loop.target.videoId)
         // Bootstrap and the first poll are history; mark them preload so the backend dedupes against the official history seed

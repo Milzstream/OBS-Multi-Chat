@@ -428,7 +428,10 @@ export class KickChat {
       this.ws = undefined
       this.scheduleReconnect()
     })
-    socket.on('error', (error) => { console.error('Kick chat:', error.message); socket.close() })
+    socket.on('error', (error) => {
+      if (!/closed before the connection was established/i.test(error.message)) console.error('Kick chat:', error.message)
+      socket.close()
+    })
   }
 
   /** Handle the raw Pusher protocol: connect/subscribe handshake, pings, then chat/activity/moderation events. */

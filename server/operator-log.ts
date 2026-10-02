@@ -3,11 +3,19 @@
  * added nothing is not logged, so an empty chat cannot fill the 1500-line buffer.
  */
 
-export function liveCheckLine(previous: string | undefined, next: { platform: string; live: boolean; viewers: number }, manual = false) {
+export const LIVE_CHECK_REPEAT_MS = 60_000
+
+/**
+ * A finished live-status poll. Unchanged results repeat about once a minute so
+ * Twitch and Kick are visible the way YouTube quota lines are, without a line
+ * every 15 seconds for the whole day.
+ */
+export function liveCheckLine(previous: { key: string; at: number } | undefined, next: { platform: string; live: boolean; viewers: number }, manual = false, now = Date.now(), repeatMs = LIVE_CHECK_REPEAT_MS) {
   const key = `${next.live}:${next.viewers}`
-  if (!manual && previous === key) return
   const status = next.live ? `live, ${next.viewers.toLocaleString()} viewers` : 'offline'
-  return { key, line: `${next.platform} ${status}${manual ? ' (check live)' : ''}` }
+  const line = `${next.platform} check: ${status}${manual ? ' (check live)' : ''}`
+  if (manual || !previous || previous.key !== key || now - previous.at >= repeatMs) return { key, at: now, line }
+  return { key, at: previous.at }
 }
 
 export function moderationLogLine(action: string, platform: string, user?: string) {
