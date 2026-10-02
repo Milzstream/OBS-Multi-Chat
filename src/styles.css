@@ -72,7 +72,7 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .viewer-total .live-pill, .viewer-total .offline-pill { margin-left: 4px; padding: 4px 7px; }
 @media (max-width: 620px) { .presence-panel { padding: 8px; }.platform-rollup { gap: 4px; }.platform-stat { padding: 6px 6px; }.platform-stat strong { font-size: 14px; }.viewer-total { margin-top: 8px; font-size: 9px; }.topbar { padding: 0 8px; }.brand { gap: 5px; font-size: 11px; }.header-actions { gap: 0; }.filter { padding-left: 5px; padding-right: 5px; } }
 .settings-popover { max-height: calc(100vh - 46px); overflow-y: auto; }
-.controls-popover { bottom: 0; max-height: none; overflow-y: auto; }
+.controls-popover { max-height: calc(100vh - 46px); overflow-y: auto; }
 .controls-popover .category-options { position: static; top: auto; margin-top: 4px; }
 .category-options { position: absolute; z-index: 8; left: 0; right: 0; top: calc(100% - 2px); max-height: 150px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border: 1px solid #3b4749; border-radius: 4px; background: #151a1c; box-shadow: 0 10px 24px rgba(0,0,0,.35); }
 .category-options button { display: flex; width: 100%; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 3px; background: transparent; color: #ecf2ef; font-size: 11px; text-align: left; }
