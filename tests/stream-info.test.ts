@@ -26,8 +26,11 @@ import {
   oauthAuthorizeUrl,
   parseAppSettings,
   shouldKeepTokenRefreshBanner,
+  LIVE_STATUS_POLL_MS,
   shouldPollLiveStatus,
   shouldRunYouTubeStatusCheck,
+  YOUTUBE_STATUS_LIVE_MS,
+  youtubeStatusIntervalMs,
   tokenRefreshFailureMessage,
   tokenRefreshRetryMessage,
   YOUTUBE_OAUTH_SCOPES,
@@ -161,6 +164,10 @@ describe('auto live check', () => {
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: true, manual: false, due: false }), false)
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: false, due: true }), false)
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: true, due: false }), true)
+    assert.equal(youtubeStatusIntervalMs(false), LIVE_STATUS_POLL_MS)
+    assert.equal(LIVE_STATUS_POLL_MS, 15_000)
+    assert.equal(youtubeStatusIntervalMs(true), YOUTUBE_STATUS_LIVE_MS)
+    assert.equal(YOUTUBE_STATUS_LIVE_MS, 5 * 60_000)
   })
 })
 

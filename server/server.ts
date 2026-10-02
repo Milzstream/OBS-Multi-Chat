@@ -27,9 +27,11 @@ import {
   applyLiveStreamDetails,
   collapseYouTubeDuplicates,
   defaultAppSettings,
+  LIVE_STATUS_POLL_MS,
   mergeAutoLiveCheck,
   shouldPollLiveStatus,
   shouldRunYouTubeStatusCheck,
+  youtubeStatusIntervalMs,
   isDailyQuotaHeader,
   isEndedYouTubeChat,
   isPermanentTokenRefreshError,
@@ -277,8 +279,6 @@ const youtubePrivacyDismissed = new Set<string>()
 const announcedYoutubePrivacy = new Set<string>()
 let lastYoutubePrivacyRecheck = 0
 const youtubeHistorySeeded = new Set<string>()
-const YOUTUBE_STATUS_SEEK_MS = 3 * 60_000
-const YOUTUBE_STATUS_LIVE_MS = 60 * 60_000
 const YOUTUBE_VIEWERS_MS = 45_000
 const YOUTUBE_OFFICIAL_CHAT_MS = 45_000
 const YOUTUBE_HYDRATE_MS = 20_000
@@ -815,7 +815,7 @@ function openCompanionWindow() {
 for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
 void startStreamElements(true)
 void pollLiveState()
-setInterval(() => { void pollLiveState() }, 15_000)
+setInterval(() => { void pollLiveState() }, LIVE_STATUS_POLL_MS)
 setInterval(watchTwitchEventSub, 2_000)
 setInterval(refreshChatHealth, 5_000)
 
@@ -2043,7 +2043,7 @@ async function pollYouTube(options?: { manual?: boolean }) {
   const manual = Boolean(options?.manual)
   // A failed site chat may force one official status look, but only while Auto is on.
   if (!manual && auto && live && youtubeChat.failed) youtubeForceStatus = true
-  const interval = live ? YOUTUBE_STATUS_LIVE_MS : YOUTUBE_STATUS_SEEK_MS
+  const interval = youtubeStatusIntervalMs(live)
   const statusDue = youtubeForceStatus || !lastYouTubeStatusAt || Date.now() - lastYouTubeStatusAt >= interval
   if (shouldRunYouTubeStatusCheck({ autoEnabled: auto, manual, due: statusDue })) {
     youtubeForceStatus = false

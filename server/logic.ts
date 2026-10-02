@@ -1290,10 +1290,25 @@ export function shouldPollLiveStatus(autoEnabled: boolean, reason: 'auto' | 'man
   return reason === 'manual' || autoEnabled
 }
 
+/** Twitch, Kick, and the shared poll loop. YouTube uses this only until it is live. */
+export const LIVE_STATUS_POLL_MS = 15_000
+
+/**
+ * While live, `liveBroadcasts.list` does not need the 15s loop. Five minutes
+ * still notices the broadcast ending, and an 8-hour stream is about 96 units
+ * instead of ~1,900. The list call itself is 1 unit.
+ */
+export const YOUTUBE_STATUS_LIVE_MS = 5 * 60_000
+
+/** Offline matches Twitch/Kick. Live stays slower so ending the stream is not a 15s quota poll. */
+export function youtubeStatusIntervalMs(live: boolean) {
+  return live ? YOUTUBE_STATUS_LIVE_MS : LIVE_STATUS_POLL_MS
+}
+
 /**
  * YouTube's official liveBroadcasts call spends quota. Skip it on the automatic
- * interval when Auto is off. A manual Check live still runs it. `due` is the
- * existing slow interval, or a forced follow-up such as a failed site chat
+ * interval when Auto is off. A manual Check live still runs it. `due` is
+ * `youtubeStatusIntervalMs`, or a forced follow-up such as a failed site chat
  * while Auto is still on.
  */
 export function shouldRunYouTubeStatusCheck(options: { autoEnabled: boolean; manual: boolean; due: boolean }) {
