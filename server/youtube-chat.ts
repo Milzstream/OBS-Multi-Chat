@@ -467,7 +467,7 @@ export class YouTubeLiveChat {
     void this.run(loop, () => stopped || this.closed)
   }
 
-  private async run(loop: { target: YouTubeChatTarget }, stopped: () => boolean) {
+  private async run(loop: { target: YouTubeChatTarget; stop: () => void }, stopped: () => boolean) {
     while (!stopped()) {
       try {
         const loaded = await loadLivePage(loop.target.videoId)
