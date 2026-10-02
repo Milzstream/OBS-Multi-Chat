@@ -29,6 +29,7 @@ import {
   LIVE_STATUS_POLL_MS,
   shouldPollLiveStatus,
   shouldRunYouTubeStatusCheck,
+  shouldRunYouTubeMaintenance,
   YOUTUBE_STATUS_LIVE_MS,
   youtubeStatusIntervalMs,
   tokenRefreshFailureMessage,
@@ -164,6 +165,9 @@ describe('auto live check', () => {
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: true, manual: false, due: false }), false)
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: false, due: true }), false)
     assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: true, due: false }), true)
+    assert.equal(shouldRunYouTubeMaintenance({ autoEnabled: false, manual: false, chatConnected: false }), false)
+    assert.equal(shouldRunYouTubeMaintenance({ autoEnabled: false, manual: false, chatConnected: true }), true)
+    assert.equal(shouldRunYouTubeMaintenance({ autoEnabled: false, manual: true, chatConnected: false }), true)
     assert.equal(youtubeStatusIntervalMs(false), LIVE_STATUS_POLL_MS)
     assert.equal(LIVE_STATUS_POLL_MS, 15_000)
     assert.equal(youtubeStatusIntervalMs(true), YOUTUBE_STATUS_LIVE_MS)

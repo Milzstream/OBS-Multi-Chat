@@ -32,6 +32,7 @@ import {
   mergeAutoLiveCheck,
   shouldPollLiveStatus,
   shouldRunYouTubeStatusCheck,
+  shouldRunYouTubeMaintenance,
   youtubeStatusIntervalMs,
   isDailyQuotaHeader,
   isEndedYouTubeChat,
@@ -1250,7 +1251,9 @@ function startAdapter(platform: Platform) {
     if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
     else maintainKickChat()
   }
-  if (platform === 'YouTube') void pollYouTube().then(() => broadcast()).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+  if (platform === 'YouTube' && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) {
+    void pollYouTube().then((checked) => { if (checked) logPolledLive('YouTube'); broadcast() }).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+  }
 }
 
 /** Keep an already-known Kick chat socket up without calling the channel live-status API. */
@@ -2055,9 +2058,9 @@ async function pollLiveState() {
     } else ensureTwitchChat()
   }
   if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
-  if (tokens.YouTube) try {
-    await pollYouTube()
-    logPolledLive('YouTube')
+  if (tokens.YouTube && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) try {
+    const checked = await pollYouTube()
+    if (checked) logPolledLive('YouTube')
     if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
   } catch (error) {
     if (noteYouTubeQuota(error)) { /* site chat continues */ }
@@ -2147,7 +2150,7 @@ async function pollYouTube(options?: { manual?: boolean }) {
 
 async function pollYouTubeNow(options?: { manual?: boolean }) {
   const token = await ensureToken('YouTube')
-  if (!token) return
+  if (!token) return false
   const account = state.accounts.find((item) => item.platform === 'YouTube')
   const live = Boolean(account?.live || youtubeChat.connected || youtubeTargets.length)
   const auto = settings.autoLiveCheck.YouTube
@@ -2156,7 +2159,8 @@ async function pollYouTubeNow(options?: { manual?: boolean }) {
   if (!manual && auto && live && youtubeChat.failed) youtubeForceStatus = true
   const interval = youtubeStatusIntervalMs(live)
   const statusDue = youtubeForceStatus || !lastYouTubeStatusAt || Date.now() - lastYouTubeStatusAt >= interval
-  if (shouldRunYouTubeStatusCheck({ autoEnabled: auto, manual, due: statusDue })) {
+  const checked = shouldRunYouTubeStatusCheck({ autoEnabled: auto, manual, due: statusDue })
+  if (checked) {
     youtubeForceStatus = false
     lastYouTubeStatusAt = Date.now()
     if (youtubeQuotaBlocked()) await discoverYouTubeLive(token)
@@ -2168,10 +2172,13 @@ async function pollYouTubeNow(options?: { manual?: boolean }) {
       }
     }
   }
+  // Auto off must not spend a history-seed unit on a chat id saved from the last stream.
+  if (!manual && !auto && !youtubeChat.connected && !youtubeTargets.length) return checked
   await recheckEndedYoutubePrivacy(token)
   await syncYouTubeChat(token)
   await seedYouTubeHistory(token)
   await refreshYouTubeViewers()
+  return checked
 }
 
 /** Copy each live YouTube title onto the account so the tile tooltip can list them. Cleared when YouTube is offline. */
