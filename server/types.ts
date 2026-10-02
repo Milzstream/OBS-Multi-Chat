@@ -29,11 +29,14 @@ export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[]; connecting: boolean }
 export type YoutubeQuota = { day: string; used: number; limit?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
+/** Per-platform automatic live-status polls. Missing or true means on. Chat sockets are not gated by this. */
+export type AutoLiveCheck = Record<Platform, boolean>
 export type AppSettings = {
   activityFallback: boolean
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
   translateChat: boolean
+  autoLiveCheck: AutoLiveCheck
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota
 }

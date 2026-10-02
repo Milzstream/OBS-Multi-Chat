@@ -10,6 +10,7 @@ import {
   TWITCH_OAUTH_SCOPES,
   YOUTUBE_OAUTH_SCOPES,
   type AppSettings,
+  type AutoLiveCheck,
   type ChatBadge,
   type ChatMessage,
   type ChatModeration,
@@ -1250,12 +1251,63 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
   return { day: String(item.day || ''), used: Math.max(0, Math.floor(Number(item.used) || 0)), ...(limit > 0 ? { limit } : {}) }
 }
 
+export function defaultAutoLiveCheck(): AutoLiveCheck {
+  return { Twitch: true, Kick: true, YouTube: true }
+}
+
+/**
+ * Missing keys stay on. Only an explicit `false` turns a platform's automatic
+ * live-status poll off, so older settings.json files keep today's behavior.
+ */
+export function parseAutoLiveCheck(value: unknown): AutoLiveCheck {
+  const defaults = defaultAutoLiveCheck()
+  if (!value || typeof value !== 'object') return defaults
+  const parsed = value as Partial<Record<Platform, unknown>>
+  return {
+    Twitch: parsed.Twitch === false ? false : defaults.Twitch,
+    Kick: parsed.Kick === false ? false : defaults.Kick,
+    YouTube: parsed.YouTube === false ? false : defaults.YouTube,
+  }
+}
+
+/** Apply a partial `{ Twitch?: boolean }` patch. Non-booleans are ignored. */
+export function mergeAutoLiveCheck(current: AutoLiveCheck, patch: unknown): AutoLiveCheck {
+  if (!patch || typeof patch !== 'object') return current
+  const incoming = patch as Partial<Record<Platform, unknown>>
+  const next = { ...current }
+  for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
+    if (typeof incoming[platform] === 'boolean') next[platform] = incoming[platform]
+  }
+  return next
+}
+
+/**
+ * Automatic live-status polls run only while that platform's Auto box is checked.
+ * A manual Check live always runs. This does not gate chat sockets — callers
+ * keep those up separately so an already-connected chat keeps updating.
+ */
+export function shouldPollLiveStatus(autoEnabled: boolean, reason: 'auto' | 'manual') {
+  return reason === 'manual' || autoEnabled
+}
+
+/**
+ * YouTube's official liveBroadcasts call spends quota. Skip it on the automatic
+ * interval when Auto is off. A manual Check live still runs it. `due` is the
+ * existing slow interval, or a forced follow-up such as a failed site chat
+ * while Auto is still on.
+ */
+export function shouldRunYouTubeStatusCheck(options: { autoEnabled: boolean; manual: boolean; due: boolean }) {
+  if (options.manual) return true
+  return options.autoEnabled && options.due
+}
+
 export function defaultAppSettings(): AppSettings {
   return {
     activityFallback: true,
     ignoreMissingJwt: false,
     dropOldAlerts: false,
     translateChat: true,
+    autoLiveCheck: defaultAutoLiveCheck(),
     streamInfo: emptyStreamInfo(),
     youtubeQuota: { day: '', used: 0 },
   }
@@ -1270,6 +1322,7 @@ export function parseAppSettings(value: unknown): AppSettings {
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
     translateChat: parsed.translateChat !== false,
+    autoLiveCheck: parseAutoLiveCheck(parsed.autoLiveCheck),
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
   }

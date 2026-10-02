@@ -27,6 +27,9 @@ import {
   applyLiveStreamDetails,
   collapseYouTubeDuplicates,
   defaultAppSettings,
+  mergeAutoLiveCheck,
+  shouldPollLiveStatus,
+  shouldRunYouTubeStatusCheck,
   isDailyQuotaHeader,
   isEndedYouTubeChat,
   isPermanentTokenRefreshError,
@@ -216,7 +219,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
@@ -336,6 +339,7 @@ const state: State = {
   dropOldAlerts: settings.dropOldAlerts,
   translateChat: settings.translateChat,
   translateError: '',
+  autoLiveCheck: { ...settings.autoLiveCheck },
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
 
@@ -575,8 +579,9 @@ app.post('/api/stream-info', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results })
 })
 app.post('/api/settings', (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean }
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>> }
   let changed = false
+  const turnedOn: Platform[] = []
   if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
     settings.activityFallback = body.activityFallback
     state.activityFallback = body.activityFallback
@@ -604,6 +609,19 @@ app.post('/api/settings', (request, response) => {
     state.translateChat = body.translateChat
     changed = true
   }
+  if (body.autoLiveCheck && typeof body.autoLiveCheck === 'object') {
+    const next = mergeAutoLiveCheck(settings.autoLiveCheck, body.autoLiveCheck)
+    for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
+      if (next[platform] && !settings.autoLiveCheck[platform]) turnedOn.push(platform)
+    }
+    if (next.Twitch !== settings.autoLiveCheck.Twitch || next.Kick !== settings.autoLiveCheck.Kick || next.YouTube !== settings.autoLiveCheck.YouTube) {
+      const youtubeTurnedOn = next.YouTube && !settings.autoLiveCheck.YouTube
+      settings.autoLiveCheck = next
+      state.autoLiveCheck = { ...next }
+      if (youtubeTurnedOn) youtubeForceStatus = true
+      changed = true
+    }
+  }
   if (changed) {
     saveSettings()
     broadcast()
@@ -613,8 +631,14 @@ app.post('/api/settings', (request, response) => {
     ignoreMissingJwt: settings.ignoreMissingJwt,
     dropOldAlerts: settings.dropOldAlerts,
     translateChat: settings.translateChat,
+    autoLiveCheck: settings.autoLiveCheck,
     streamelements: state.streamelements,
   })
+  // Turning Auto back on should notice a live change without waiting out YouTube's slow interval.
+  for (const platform of turnedOn) {
+    if (!tokens[platform]) continue
+    void checkLiveNow(platform).catch((error) => console.error(`${platform} live check:`, error instanceof Error ? error.message : error))
+  }
 })
 app.get('/api/jwts', (_request, response) => {
   const slots = streamElementsJwtSlots()
@@ -1157,10 +1181,21 @@ function startAdapter(platform: Platform) {
     twitchBadgesLoaded = false
     void ensureTwitchBadges()
     connectTwitchEventSub()
-    void pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
+    // Auto off: keep EventSub/IRC up, but do not ask Helix whether the channel is live.
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) void pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
+    else ensureTwitchChat()
   }
-  if (platform === 'Kick') void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
+  if (platform === 'Kick') {
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
+    else maintainKickChat()
+  }
   if (platform === 'YouTube') void pollYouTube().then(() => broadcast()).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+}
+
+/** Keep an already-known Kick chat socket up without calling the channel live-status API. */
+function maintainKickChat() {
+  const slug = tokens.Kick?.user
+  if (slug && !looksLikePlaceholder(slug)) startKickChat(slug)
 }
 
 async function checkLiveNow(platform: Platform) {
@@ -1172,7 +1207,7 @@ async function checkLiveNow(platform: Platform) {
     else {
       youtubeForceStatus = true
       beginYouTubeHydration()
-      await pollYouTube()
+      await pollYouTube({ manual: true })
       const account = state.accounts.find((item) => item.platform === 'YouTube')
       if (!account?.live) {
         const token = await ensureToken('YouTube')
@@ -1902,13 +1937,18 @@ async function pollLiveState() {
   const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
   const twitchWasLive = Boolean(twitchAccount?.live)
   const kickWasLive = Boolean(kickAccount?.live)
-  if (tokens.Twitch) try { await pollTwitch(); if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('Twitch poll:', message)
-    if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
-    ensureTwitchChat()
+  // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
+  if (tokens.Twitch) {
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
+      try { await pollTwitch(); if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('Twitch poll:', message)
+        if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
+        ensureTwitchChat()
+      }
+    } else ensureTwitchChat()
   }
-  if (twitchWasLive && !twitchAccount?.live) youtubeForceStatus = true
+  if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
   if (tokens.YouTube) try {
     await pollYouTube()
     if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
@@ -1920,13 +1960,17 @@ async function pollLiveState() {
       if (!youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
     }
   }
-  if (tokens.Kick) try { await pollKick(); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('Kick poll:', message)
-    if (!kickChat.connected) setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
-    else setHealth('Kick', 'warn', 'Kick status poll failed')
+  if (tokens.Kick) {
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
+      try { await pollKick(); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error('Kick poll:', message)
+        if (!kickChat.connected) setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
+        else setHealth('Kick', 'warn', 'Kick status poll failed')
+      }
+    } else maintainKickChat()
   }
-  if (kickWasLive && !kickAccount?.live) youtubeForceStatus = true
+  if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
   persistStreamInfo()
   refreshChatHealth()
   broadcast()
@@ -1990,15 +2034,18 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
   }, { preload: Boolean(message.preload), ingest: 'innertube' })
 }
 
-async function pollYouTube() {
+async function pollYouTube(options?: { manual?: boolean }) {
   const token = await ensureToken('YouTube')
   if (!token) return
   const account = state.accounts.find((item) => item.platform === 'YouTube')
   const live = Boolean(account?.live || youtubeChat.connected || youtubeTargets.length)
-  if (live && youtubeChat.failed) youtubeForceStatus = true
+  const auto = settings.autoLiveCheck.YouTube
+  const manual = Boolean(options?.manual)
+  // A failed site chat may force one official status look, but only while Auto is on.
+  if (!manual && auto && live && youtubeChat.failed) youtubeForceStatus = true
   const interval = live ? YOUTUBE_STATUS_LIVE_MS : YOUTUBE_STATUS_SEEK_MS
   const statusDue = youtubeForceStatus || !lastYouTubeStatusAt || Date.now() - lastYouTubeStatusAt >= interval
-  if (statusDue) {
+  if (shouldRunYouTubeStatusCheck({ autoEnabled: auto, manual, due: statusDue })) {
     youtubeForceStatus = false
     lastYouTubeStatusAt = Date.now()
     if (youtubeQuotaBlocked()) await discoverYouTubeLive(token)
@@ -2603,6 +2650,7 @@ function sseSettings() {
     dropOldAlerts: state.dropOldAlerts,
     translateChat: state.translateChat,
     translateError: state.translateError,
+    autoLiveCheck: state.autoLiveCheck,
   }
 }
 

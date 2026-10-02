@@ -3,6 +3,9 @@ import { describe, it } from 'node:test'
 import {
   applyLiveStreamDetails,
   defaultAppSettings,
+  defaultAutoLiveCheck,
+  mergeAutoLiveCheck,
+  parseAutoLiveCheck,
   descriptionWithTagLine,
   isMoreSpecificCategory,
   isPermanentTokenRefreshError,
@@ -23,6 +26,8 @@ import {
   oauthAuthorizeUrl,
   parseAppSettings,
   shouldKeepTokenRefreshBanner,
+  shouldPollLiveStatus,
+  shouldRunYouTubeStatusCheck,
   tokenRefreshFailureMessage,
   tokenRefreshRetryMessage,
   YOUTUBE_OAUTH_SCOPES,
@@ -121,21 +126,41 @@ describe('settings', () => {
     assert.equal(defaults.activityFallback, true)
     assert.equal(defaults.translateChat, true)
     assert.equal(defaults.youtubeQuota.used, 0)
+    assert.deepEqual(defaults.autoLiveCheck, { Twitch: true, Kick: true, YouTube: true })
     const parsed = parseAppSettings({
       activityFallback: false,
       ignoreMissingJwt: true,
       dropOldAlerts: true,
       translateChat: false,
+      autoLiveCheck: { YouTube: false, Kick: 'no' },
       streamInfo: { Twitch: { title: ' A ', category: 'IRL', categoryId: '9' }, Kick: null },
       youtubeQuota: { day: '2026-09-02', used: '12', limit: '10000' },
     })
     assert.equal(parsed.activityFallback, false)
     assert.equal(parsed.translateChat, false)
     assert.equal(parseAppSettings({}).translateChat, true)
+    assert.equal(parsed.autoLiveCheck.YouTube, false)
+    assert.equal(parsed.autoLiveCheck.Twitch, true)
+    assert.equal(parsed.autoLiveCheck.Kick, true)
+    assert.deepEqual(parseAppSettings({}).autoLiveCheck, defaultAutoLiveCheck())
+    assert.deepEqual(parseAutoLiveCheck(undefined), defaultAutoLiveCheck())
+    assert.deepEqual(mergeAutoLiveCheck(parsed.autoLiveCheck, { Twitch: false, Kick: 1 }), { Twitch: false, Kick: true, YouTube: false })
     assert.equal(parsed.streamInfo.Twitch.title, 'A')
     assert.equal(parsed.streamInfo.Kick.category, '')
     assert.deepEqual(loadYouTubeQuota({ day: '2026-09-02', used: 12, limit: 10000 }), { day: '2026-09-02', used: 12, limit: 10000 })
     assert.equal(loadStreamInfo(undefined).Twitch.title, '')
+  })
+})
+
+describe('auto live check', () => {
+  it('runs automatic status polls only while Auto is on, and always runs a manual Check live', () => {
+    assert.equal(shouldPollLiveStatus(true, 'auto'), true)
+    assert.equal(shouldPollLiveStatus(false, 'auto'), false)
+    assert.equal(shouldPollLiveStatus(false, 'manual'), true)
+    assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: true, manual: false, due: true }), true)
+    assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: true, manual: false, due: false }), false)
+    assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: false, due: true }), false)
+    assert.equal(shouldRunYouTubeStatusCheck({ autoEnabled: false, manual: true, due: false }), true)
   })
 })
 

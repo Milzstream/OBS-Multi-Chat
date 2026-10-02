@@ -7,12 +7,14 @@ import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
 type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string }
+type AutoLiveCheck = Record<Platform, boolean>
 type Settings = {
   translateChat: boolean
   translateError: string
   activityFallback: boolean
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
+  autoLiveCheck: AutoLiveCheck
   streamelements: { connected: boolean; handle: string; missing?: string[]; connecting?: boolean }
   youtubeQuota: { used: number; limit: number }
 }
@@ -52,6 +54,7 @@ export default function ConsoleApp() {
     activityFallback: true,
     ignoreMissingJwt: false,
     dropOldAlerts: false,
+    autoLiveCheck: { Twitch: true, Kick: true, YouTube: true },
     streamelements: { connected: false, handle: '', connecting: true },
     youtubeQuota: { used: 0, limit: 10000 },
   })
@@ -100,6 +103,11 @@ export default function ConsoleApp() {
           activityFallback: typeof remote.activityFallback === 'boolean' ? remote.activityFallback : current.activityFallback,
           ignoreMissingJwt: typeof remote.ignoreMissingJwt === 'boolean' ? remote.ignoreMissingJwt : current.ignoreMissingJwt,
           dropOldAlerts: typeof remote.dropOldAlerts === 'boolean' ? remote.dropOldAlerts : current.dropOldAlerts,
+          autoLiveCheck: remote.autoLiveCheck && typeof remote.autoLiveCheck === 'object' ? {
+            Twitch: remote.autoLiveCheck.Twitch !== false,
+            Kick: remote.autoLiveCheck.Kick !== false,
+            YouTube: remote.autoLiveCheck.YouTube !== false,
+          } : current.autoLiveCheck,
           streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : current.streamelements,
           youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : current.youtubeQuota,
         }))
@@ -187,6 +195,11 @@ export default function ConsoleApp() {
     void fetch(`/api/disconnect/${platform}`, { method: 'POST' })
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() })
+  const toggleAutoLiveCheck = (platform: Platform, enabled: boolean) => {
+    const autoLiveCheck = { ...settings.autoLiveCheck, [platform]: enabled }
+    setSettings((current) => ({ ...current, autoLiveCheck }))
+    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoLiveCheck: { [platform]: enabled } }) })
+  }
 
   const missing = settings.streamelements.missing || []
 
@@ -228,7 +241,9 @@ export default function ConsoleApp() {
             onConnect={connectPlatform}
             onDisconnect={disconnectPlatform}
             onCheckLive={checkLive}
-            note="Connect opens in your browser. Chat and activity stay in the OBS docks."
+            autoLiveCheck={settings.autoLiveCheck}
+            onToggleAutoLiveCheck={toggleAutoLiveCheck}
+            note="Connect opens in your browser. Chat and activity stay in the OBS docks. Auto checks whether each platform is live. Uncheck it to pause those status polls until you press Check live."
           />
           <span className="settings-section-title">CHAT</span>
           <label className="settings-toggle">

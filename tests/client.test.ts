@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
+import { ConnectionSettings } from '../src/ConnectionSettings.tsx'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
 import { virtualWindow } from '../src/virtualList.ts'
@@ -182,6 +183,29 @@ describe('SSE seq gaps', () => {
       streamelements: { connected: true, handle: 'Ada', missing: [] },
     })
     assert.equal(snapshot.streamelements && (snapshot.streamelements as { connected: boolean }).connected, true)
+  })
+})
+
+describe('auto live check toggle', () => {
+  const connection = { platform: 'Twitch' as const, viewers: 1, handle: 'ada', connected: true, live: false }
+  const render = (autoLiveCheck?: { Twitch: boolean }) => renderToStaticMarkup(createElement(ConnectionSettings, {
+    connections: [connection],
+    platformIcon: () => null,
+    onConnect: () => undefined,
+    onDisconnect: () => undefined,
+    onCheckLive: () => undefined,
+    autoLiveCheck,
+    onToggleAutoLiveCheck: () => undefined,
+  }))
+  const checkbox = (html: string, label: string) => html.split('<input').find((part) => part.includes(`aria-label="${label}"`)) || ''
+
+  it('checks Auto by default and leaves it unchecked when that platform is off', () => {
+    const on = render()
+    assert.match(checkbox(on, 'Auto-check Twitch live'), /checked/)
+    assert.match(on, />Auto</)
+    assert.match(on, /Check live/)
+    const off = render({ Twitch: false })
+    assert.doesNotMatch(checkbox(off, 'Auto-check Twitch live'), /checked/)
   })
 })
 
