@@ -51,7 +51,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 
 ## Windows app
 
-Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Chat filters, activity filters, and stream controls stay in the OBS docks.
+Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Each connected platform has **Check live** and an **Auto** box beside it. Auto is on by default. Chat filters, activity filters, and stream controls stay in the OBS docks.
 
 Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env` and `data\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
 
@@ -112,7 +112,7 @@ YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Paci
 
 The companion window links to the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). To enter your current usage, open the **YouTube Data API v3** group and read the **Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the **All quotas & system limits** card near the top of the page (for example `1,247`) — that is a count of how many quota rows exist, not units you have used. Type `35` or `35/10000` in the window; logging does not block on your input. After that, the app estimates forward from its own official API calls and warns near 80% and when the daily cap is reached. InnerTube site chat does not count against the quota.
 
-Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection on a slow interval (about 3 minutes while offline, much less often while live), a one-shot history seed when a new live chat appears, sending and deleting messages, and a slow official chat fallback only if InnerTube fails. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
+Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The official API is used sparingly: live-broadcast detection about every 15 seconds until the broadcast is live (same cadence as Twitch and Kick; `liveBroadcasts.list` is 1 unit), then about every 5 minutes while live so ending the stream is noticed without a status call four times a minute. A one-shot history seed runs when a new live chat appears, plus sending and deleting messages, and a slow official chat fallback only if InnerTube fails. Leaving Auto on while YouTube is offline all day is about 5,800 units, so uncheck it if the app stays open and you are not about to go live. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. The **Auto** box beside it is on by default for Twitch, Kick, and YouTube. Uncheck it to skip that platform’s automatic live-status polls. Chat that is already connected keeps updating. Going live or offline, and viewer counts from those polls, stay as last seen until you press **Check live**. For YouTube, Auto off skips the official live-broadcast status call (the quota one) until **Check live**; a restart with Auto off does not rediscover a YouTube live until then. InnerTube chat for a broadcast that is already connected keeps running. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues.
 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
@@ -250,7 +250,7 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `GET /api/state` - current accounts, stream info, recent messages, activity, and settings
 - `GET /events` - Server-Sent Events stream for dock updates
 - `POST /api/messages` - send a message to selected platforms
-- `POST /api/settings` - toggle native backup, ignore-missing-JWT, and 30-day drop
+- `POST /api/settings` - toggle native backup, ignore-missing-JWT, 30-day drop, translate, and per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on)
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
 - `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
 - `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
@@ -259,7 +259,7 @@ The app serves the docks at `http://localhost:4173` and binds to loopback (`127.
 - `POST /api/stream-info/:platform` - apply title/category/tags to one platform
 - `POST /api/stream-info` - apply shared title plus per-platform Twitch/Kick category and tags
 - `POST /api/disconnect/:platform` - remove a saved platform connection
-- `POST /api/live-check/:platform` - run that platform's live check immediately (does not change the slower automatic YouTube interval)
+- `POST /api/live-check/:platform` - run that platform's live check immediately, even if Auto is off (does not change the slower automatic YouTube interval)
 - `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
 - `GET /oauth/callback` - exchange the provider authorization code server-side
 

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import React, { useState, type ReactNode } from 'react'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
@@ -11,6 +11,9 @@ const platformMeta: Record<Platform, { color: string }> = {
 /**
  * Dock connection popover: connect, disconnect, and live checks.
  * Translate, JWTs, and alert options live in the companion window.
+ *
+ * Auto (default on) is the repeating live-status poll. Unchecking it does not
+ * stop chat that is already connected. Check live still runs immediately.
  */
 
 export function ConnectionSettings({
@@ -20,6 +23,8 @@ export function ConnectionSettings({
   onConnect,
   onDisconnect,
   onCheckLive,
+  autoLiveCheck,
+  onToggleAutoLiveCheck,
   note,
   embedded,
 }: {
@@ -29,6 +34,8 @@ export function ConnectionSettings({
   onConnect: (platform: Platform) => void
   onDisconnect: (platform: Platform) => void
   onCheckLive: (platform: Platform) => Promise<void> | void
+  autoLiveCheck?: Partial<Record<Platform, boolean>>
+  onToggleAutoLiveCheck?: (platform: Platform, enabled: boolean) => void
   note?: string
   embedded?: boolean
 }) {
@@ -52,7 +59,16 @@ export function ConnectionSettings({
           {connection.connected
             ? (
               <div className="connection-actions">
-                <button type="button" className="live-check" disabled={checking[connection.platform]} title="Run a live check now without waiting for the next automatic poll" onClick={() => void checkLive(connection.platform)}>
+                <label className="live-auto" title="Automatically check if this platform is live. Uncheck to pause status polls until you press Check live. Chat that is already connected keeps updating.">
+                  <input
+                    type="checkbox"
+                    aria-label={`Auto-check ${connection.platform} live`}
+                    checked={autoLiveCheck?.[connection.platform] !== false}
+                    onChange={(event) => onToggleAutoLiveCheck?.(connection.platform, event.target.checked)}
+                  />
+                  <span>Auto</span>
+                </label>
+                <button type="button" className="live-check" disabled={checking[connection.platform]} title="Run a live check now. This still runs if Auto is off, and does not change the automatic interval." onClick={() => void checkLive(connection.platform)}>
                   {checking[connection.platform] ? 'Checking…' : 'Check live'}
                 </button>
                 <button type="button" className="disconnect" onClick={() => onDisconnect(connection.platform)}>Disconnect</button>
