@@ -38,6 +38,8 @@ import {
   classifyChatItem,
   extractSession,
   extractVideoId,
+  innerTubeRetryDelay,
+  youtubeBrowserAllowed,
   nextContinuation,
   parseActions,
   parseModerationActions,
@@ -489,5 +491,15 @@ describe('YouTube InnerTube moderation', () => {
       { action: 'delete', messageId: 'm1' },
       { action: 'ban', userId: 'UC1' },
     ])
+  })
+
+  it('backs off a dead chat on its own and skips a browser that already failed', () => {
+    assert.equal(innerTubeRetryDelay(1), 4_000)
+    assert.equal(innerTubeRetryDelay(8), 20_000)
+    const missed = new Set<string>()
+    assert.equal(youtubeBrowserAllowed('video', missed), true)
+    missed.add('video')
+    assert.equal(youtubeBrowserAllowed('video', missed), false)
+    assert.equal(youtubeBrowserAllowed('other', missed), true)
   })
 })

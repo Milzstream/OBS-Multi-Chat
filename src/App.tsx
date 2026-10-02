@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from './virtualList'
-import { chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
+import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, unifiedCategoryQuery, visibleChatMessages, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
@@ -22,7 +22,7 @@ type StreamDetailsByPlatform = { Twitch: StreamDetails; Kick: StreamDetails; You
 type CategoryOption = { id: string; name: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 type ChatBadge = { title: string; url?: string; label?: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
+type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; copies?: { platform: Platform; id: string; userId?: string; sourceId?: string }[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
 type ModPrompt = { action: 'timeout' | 'ban'; duration?: number }
 type ModMenuState = { x: number; y: number; message: ChatMessage; prompt?: ModPrompt }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
@@ -60,6 +60,9 @@ function App() {
   const [streamTitle, setStreamTitle] = useState('')
   const [backendOnline, setBackendOnline] = useState(false)
   const [sendStatus, setSendStatus] = useState('')
+  const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  const moderatingRef = useRef(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [health, setHealth] = useState(initialHealth)
   const [chatWarnings, setChatWarnings] = useState<string[]>([])
@@ -165,27 +168,38 @@ function App() {
   }
   const sendMessage = (event: FormEvent) => {
     event.preventDefault()
-    if (!composer.trim() || selectedPlatforms.length === 0 || !backendOnline) return
+    if (sendingRef.current || !composer.trim() || selectedPlatforms.length === 0 || !backendOnline) return
     const text = composer.trim()
+    sendingRef.current = true
+    setSending(true)
     setComposer('')
-    void fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platforms: selectedPlatforms, text }) }).then((response) => response.json()).then((result: { results: { platform: Platform; ok: boolean; error?: string }[] }) => { const failed = result.results.filter((item) => !item.ok); setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ') : 'Sent'); window.setTimeout(() => setSendStatus(''), 4000) }).catch(() => setSendStatus('Message request failed'))
+    const restore = () => setComposer((current) => current.trim() ? current : text)
+    void fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platforms: selectedPlatforms, text }) }).then((response) => response.json()).then((result: { results: { platform: Platform; ok: boolean; error?: string }[] }) => {
+      const failed = result.results.filter((item) => !item.ok)
+      if (failed.length === result.results.length) restore()
+      setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ') : 'Sent')
+      window.setTimeout(() => setSendStatus(''), 4000)
+    }).catch(() => { restore(); setSendStatus('Message request failed') }).finally(() => { sendingRef.current = false; setSending(false) })
   }
   const moderate = (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => {
-    if (!menu) return
+    if (!menu || moderatingRef.current) return
     const target = menu.message
+    const targets = moderationTargets(target)
     // Twitch/Kick collect an optional reason before sending. `undefined` means the field has not been shown yet; a blank string means the mod left it empty.
-    if ((action === 'ban' || action === 'timeout') && moderationAcceptsReason(target.platform) && reason === undefined) {
+    if ((action === 'ban' || action === 'timeout') && targets.some((item) => moderationAcceptsReason(item.platform)) && reason === undefined) {
       setMenu({ ...menu, prompt: { action, duration } })
       return
     }
     setMenu(null)
-    if (action === 'ban' && !moderationAcceptsReason(target.platform) && !window.confirm(`Ban ${target.user} on ${target.platform}?`)) return
+    if (action === 'ban' && targets.every((item) => !moderationAcceptsReason(item.platform)) && !window.confirm(`Ban ${target.user} on ${moderationPlatformLabel(target)}?`)) return
     const sentReason = reason?.trim()
-    void fetch('/api/moderate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, platform: target.platform, messageId: target.id, userId: target.userId, sourceId: target.sourceId, duration, ...(sentReason ? { reason: sentReason } : {}) }) }).then((response) => response.json()).then((result: { ok: boolean; error?: string; reason?: string }) => {
-      if (!result.ok) setSendStatus(`${target.platform}: ${result.error || 'moderation failed'}`)
-      else setSendStatus(moderationStatus(action, target.user, result.reason))
+    moderatingRef.current = true
+    void Promise.all(targets.map((item) => fetch('/api/moderate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, platform: item.platform, messageId: item.messageId, userId: item.userId, sourceId: item.sourceId, duration, ...(sentReason ? { reason: sentReason } : {}) }) }).then((response) => response.json()).then((result: { ok: boolean; error?: string; reason?: string }) => ({ platform: item.platform, ...result })))).then((results) => {
+      const failed = results.filter((item) => !item.ok)
+      const sent = results.find((item) => item.ok && item.reason)
+      setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'moderation failed'}`).join(' | ') : moderationStatus(action, target.user, sent?.reason))
       window.setTimeout(() => setSendStatus(''), 4000)
-    }).catch(() => setSendStatus('Moderation request failed'))
+    }).catch(() => setSendStatus('Moderation request failed')).finally(() => { moderatingRef.current = false })
   }
   const saveStreamInfo = async (title: string, details: StreamDetailsByPlatform) => {
     setStreamTitle(title)
@@ -219,7 +233,7 @@ function App() {
       }}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => setShowControls((open) => !open)}><Gamepad2 size={16} /></button></div></header>
       <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} title={streamDetails[connection.platform]?.title} health={health[connection.platform]} quota={connection.platform === 'YouTube' ? youtubeQuota : undefined} onOpenDashboard={() => { void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: streamDashboardUrl(connection.platform, connection) }) }).catch((error) => console.error('Failed to open dashboard:', error)) }} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const item = health[platform]; return item.status !== 'ok' && item.message ? <div key={platform} className={`health-banner ${item.status}`}>{item.message}</div> : null })}{chatWarnings.map((message) => <div key={message} className="health-banner warn">{message}</div>)}{youtubePrivacy.map((item) => <YoutubePrivacyBanner key={item.videoId} notice={item} className="health-banner warn youtube-privacy" onPublic={() => { void postYoutubePrivacy([item.videoId]).catch((error) => setSendStatus(error instanceof Error ? error.message : 'Could not make the video public')) }} onDismiss={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setSendStatus('Could not dismiss the YouTube privacy warning')) }} />)}</section>
       <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message) => <MessageItem key={message.id} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
-      <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
+      <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={sending || selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
       {menu && <ModMenu menu={menu} onModerate={moderate} onClose={() => setMenu(null)} />}
       <div className="resize-hint"><span>RESIZABLE</span></div>
@@ -239,10 +253,10 @@ function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onModerate
   const prompt = menu.prompt
   return (
     <div className={prompting ? 'mod-menu mod-menu-prompt' : 'mod-menu'} style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - width)), top: Math.max(6, Math.min(menu.y, window.innerHeight - height)) }} onClick={(event) => event.stopPropagation()}>
-      <div className="mod-menu-user">{menu.message.user} · {menu.message.platform}</div>
+      <div className="mod-menu-user">{menu.message.user} · {moderationPlatformLabel(menu.message)}</div>
       {prompt ? (
         <form className="mod-menu-reason" onSubmit={(event) => { event.preventDefault(); onModerate(prompt.action, prompt.duration, reason) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose() } }}>
-          <label htmlFor="mod-reason">{prompt.action === 'ban' ? 'Ban' : 'Timeout'} on {menu.message.platform}. Reason is optional.</label>
+          <label htmlFor="mod-reason">{prompt.action === 'ban' ? 'Ban' : 'Timeout'} on {moderationPlatformLabel(menu.message)}. Reason is optional.</label>
           <input id="mod-reason" ref={inputRef} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional)" />
           <div className="mod-menu-actions">
             <button type="submit" className={prompt.action === 'ban' ? 'danger' : undefined}>{prompt.action === 'ban' ? 'Ban' : 'Timeout'}</button>
@@ -348,7 +362,7 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
   const pickedRef = useRef(false)
   const visible = options.slice(0, 8)
   useEffect(() => {
-    if (!typingRef.current) setQuery(preferredCategory(twitch.category, kick.category))
+    setQuery((current) => unifiedCategoryQuery(current, twitch.category, kick.category, typingRef.current))
   }, [twitch.category, kick.category])
   useEffect(() => {
     if ((!twitchEnabled && !kickEnabled) || query.trim().length < 2) { setOptions([]); setOpen(false); return }
@@ -429,9 +443,7 @@ function TagEditor({ tags, disabled, connected, onChange }: { tags: TagAssignmen
     if (!pieces.length) return
     const next = tags.map((item) => ({ tag: item.tag, platforms: [...item.platforms] }))
     for (const piece of pieces) {
-      const allowed = tagPlatforms(piece)
-      const platforms = (selected.length ? allowed.filter((platform) => selected.includes(platform)) : allowed)
-      const use = platforms.length ? platforms : allowed
+      const use = assignTagPlatforms(piece, selected)
       if (!use.length) continue
       const existing = next.find((item) => item.tag.toLowerCase() === piece.toLowerCase())
       if (existing) {

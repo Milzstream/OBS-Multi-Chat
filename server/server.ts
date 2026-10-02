@@ -67,7 +67,9 @@ import {
   quotaWarnAt,
   resolveTranslateConfig,
   resolveYouTubeLiveChatIds,
+  restoreYouTubeQuotaBlock,
   sanitizeIrcMessage,
+  shareInFlight,
   sseChangedKeys,
   sseNamedEvent,
   shouldKeepTokenRefreshBanner,
@@ -81,12 +83,18 @@ import {
   twitchModerationBanData,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
+  twitchEventSubRetryDelay,
+  twitchEventSubWatchdogShouldClose,
   twitchEventToActivity,
   youtubeApiErrorReason,
   youtubeBadges,
   youtubeChatLabel,
+  youtubeBanChatIds,
   youtubeLiveChatBanSnippet,
+  youtubeLiveChatCursor,
+  youtubeLiveChatListQuery,
   youtubeLiveChatMessageBody,
+  youtubeScrapedTarget,
   youtubeOfficialModeration,
   youtubeOfficialToActivity,
   youtubeQuotaCost,
@@ -270,6 +278,8 @@ let youtubeQuotaWarnLogged = false
 let youtubeQuotaHeaderLogged = false
 let lastYouTubeStatusAt = 0
 let lastYouTubeOfficialChatAt = 0
+const youtubeOfficialCursors = new Map<string, { pageToken?: string; waitMs: number }>()
+let youtubePollTail: Promise<void> = Promise.resolve()
 let lastYouTubeViewersAt = 0
 let youtubeForceStatus = true
 let youtubeTargets: YouTubeChatTarget[] = []
@@ -373,6 +383,10 @@ let twitchEventSubReady = false
 let twitchEventSubUnsupported = false
 let twitchKeepaliveMs = 10_000
 let twitchLastEventSub = 0
+let twitchEventSubResuming = false
+let twitchEventSubResumeSocket: WebSocket | undefined
+let twitchEventSubRetry: NodeJS.Timeout | undefined
+let twitchEventSubRetryAttempt = 0
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
 let sseSeq = 0
 let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
@@ -890,13 +904,14 @@ async function ensureToken(platform: Platform): Promise<Token | undefined> {
     markTokenRefreshFailure(platform)
     return
   }
-  if (!refreshLocks.has(platform)) {
-    refreshLocks.set(platform, refreshAccessToken(platform).finally(() => refreshLocks.delete(platform)))
-  }
-  return refreshLocks.get(platform)
+  return refreshAccessToken(platform)
 }
 
 async function refreshAccessToken(platform: Platform): Promise<Token | undefined> {
+  return shareInFlight(refreshLocks, platform, () => refreshAccessTokenNow(platform))
+}
+
+async function refreshAccessTokenNow(platform: Platform): Promise<Token | undefined> {
   const token = tokens[platform]
   if (!token?.refreshToken) {
     markTokenRefreshFailure(platform)
@@ -990,8 +1005,14 @@ function youtubeQuotaSnapshot(): YoutubeQuotaStatus {
 }
 
 function persistYouTubeQuota() {
-  const next = { day: youtubeQuotaDay || pacificDate(), used: youtubeQuotaUsed, limit: youtubeQuotaLimit }
-  if (settings.youtubeQuota.day === next.day && settings.youtubeQuota.used === next.used && settings.youtubeQuota.limit === next.limit) return
+  const next = {
+    day: youtubeQuotaDay || pacificDate(),
+    used: youtubeQuotaUsed,
+    limit: youtubeQuotaLimit,
+    ...(youtubeQuotaBlockedUntil > Date.now() ? { blockedUntil: youtubeQuotaBlockedUntil } : {}),
+  }
+  const saved = settings.youtubeQuota
+  if (saved.day === next.day && saved.used === next.used && saved.limit === next.limit && (saved.blockedUntil || 0) === (next.blockedUntil || 0)) return
   settings.youtubeQuota = next
   saveSettings()
 }
@@ -1005,7 +1026,7 @@ function ensureYouTubeQuotaDay() {
   youtubeQuotaUsed = sameDay ? saved.used : 0
   youtubeQuotaLimit = sameDay && saved.limit && saved.limit > 0 ? saved.limit : YOUTUBE_QUOTA_LIMIT
   youtubeQuotaWarnLogged = youtubeQuotaUsed >= youtubeQuotaWarnAt()
-  if (!sameDay) youtubeQuotaBlockedUntil = 0
+  youtubeQuotaBlockedUntil = sameDay ? restoreYouTubeQuotaBlock({ day: today, used: youtubeQuotaUsed, limit: youtubeQuotaLimit, blockedUntil: saved.blockedUntil }) : 0
   persistYouTubeQuota()
   state.youtubeQuota = youtubeQuotaSnapshot()
 }
@@ -1108,7 +1129,8 @@ function noteYouTubeQuotaUse(endpoint: string, method = 'GET') {
     youtubeQuotaWarnLogged = true
     console.warn(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} — approaching the daily cap (resets midnight Pacific)`)
   }
-  if (before < youtubeQuotaWarnAt() && youtubeQuotaUsed >= youtubeQuotaWarnAt()) applyYouTubeQuotaHealth()
+  if (youtubeQuotaUsed >= youtubeQuotaLimit) markYouTubeQuotaExceeded()
+  else if (before < youtubeQuotaWarnAt() && youtubeQuotaUsed >= youtubeQuotaWarnAt()) applyYouTubeQuotaHealth()
   else broadcast()
 }
 
@@ -1124,6 +1146,7 @@ function markYouTubeQuotaExceeded() {
     return
   }
   youtubeQuotaBlockedUntil = until
+  persistYouTubeQuota()
   console.error(`YouTube Data API quota exceeded (${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}). Official YouTube calls paused until midnight Pacific. Chat will use the site reader.`)
   applyYouTubeQuotaHealth()
 }
@@ -1138,7 +1161,10 @@ function noteYouTubeQuota(error: unknown) {
 /** One official YouTube Data API call, gated on the daily quota, with token refresh and quota bookkeeping. */
 async function youtubeRequest(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<{ ok: boolean; status: number; text: string }> {
   ensureYouTubeQuotaDay()
-  if (youtubeQuotaBlocked()) throw new Error('YouTube API quota exceeded')
+  if (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit) {
+    markYouTubeQuotaExceeded()
+    throw new Error('YouTube API quota exceeded')
+  }
   const method = String(options.method || 'GET').toUpperCase()
   const localized = /[?&]hl=/.test(endpoint) ? endpoint : `${endpoint}${endpoint.includes('?') ? '&' : '?'}hl=en`
   const headers = { Authorization: `Bearer ${token.accessToken}`, ...(options.headers as Record<string, string> | undefined) }
@@ -1158,7 +1184,14 @@ async function youtubeRequest(endpoint: string, token: Token, options: RequestIn
 }
 
 /** Forget an ended YouTube live chat id so we stop polling a dead room. */
+function runYouTubePoll<T>(work: () => Promise<T>): Promise<T> {
+  const run = youtubePollTail.then(work, work)
+  youtubePollTail = run.then(() => undefined, () => undefined)
+  return run
+}
+
 function dropEndedYouTubeChat(chatId: string) {
+  youtubeOfficialCursors.delete(chatId)
   const token = tokens.YouTube
   if (token) {
     token.liveChatIds = (token.liveChatIds || []).filter((id) => id !== chatId)
@@ -1204,10 +1237,10 @@ async function checkLiveNow(platform: Platform) {
   const work = (async () => {
     if (platform === 'Twitch') await pollTwitch()
     else if (platform === 'Kick') await pollKick()
-    else {
+    else await runYouTubePoll(async () => {
       youtubeForceStatus = true
       beginYouTubeHydration()
-      await pollYouTube({ manual: true })
+      await pollYouTubeNow({ manual: true })
       const account = state.accounts.find((item) => item.platform === 'YouTube')
       if (!account?.live) {
         const token = await ensureToken('YouTube')
@@ -1218,7 +1251,7 @@ async function checkLiveNow(platform: Platform) {
           await refreshYouTubeViewers()
         }
       }
-    }
+    })
     refreshChatHealth()
     broadcast()
   })().finally(() => {
@@ -1282,6 +1315,10 @@ function closeTwitchChat() {
   twitchEventSubReady = false
   twitchEventSubUnsupported = false
   twitchEventSubSessionId = ''
+  twitchEventSubResuming = false
+  twitchEventSubResumeSocket = undefined
+  twitchEventSubRetryAttempt = 0
+  cancelTwitchEventSubRetry()
   twitchIrcReady = false
   detachTwitchEventSub(twitchEventSub)
   twitchIrc?.close()
@@ -1296,6 +1333,22 @@ function detachTwitchEventSub(socket?: WebSocket) {
 }
 
 /** Connect Twitch EventSub over websocket; Twitch may ask us to reopen on a reconnect_url or we simply retry after a drop on a fresh session. */
+function cancelTwitchEventSubRetry() {
+  if (twitchEventSubRetry) clearTimeout(twitchEventSubRetry)
+  twitchEventSubRetry = undefined
+}
+
+function scheduleTwitchEventSubReconnect() {
+  if (twitchEventSubRetry || twitchEventSubResuming) return
+  if (!tokens.Twitch || twitchEventSubUnsupported) return
+  const delay = twitchEventSubRetryDelay(twitchEventSubRetryAttempt)
+  twitchEventSubRetryAttempt += 1
+  twitchEventSubRetry = setTimeout(() => {
+    twitchEventSubRetry = undefined
+    connectTwitchEventSub()
+  }, delay)
+}
+
 function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
   // Reconnect generations: a stale socket's events are dropped once a newer session wins
   if (!tokens.Twitch?.userId || twitchEventSubUnsupported) return
@@ -1303,9 +1356,15 @@ function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
   twitchEventSubGeneration = plan.generation
   const generation = plan.generation
   const socket = new WebSocket(url)
-  if (!plan.resume) {
+  if (plan.resume) {
+    twitchEventSubResuming = true
+    twitchEventSubResumeSocket = socket
+  } else {
     twitchEventSub = socket
     twitchEventSubReady = false
+    twitchLastEventSub = 0
+    twitchEventSubResuming = false
+    twitchEventSubResumeSocket = undefined
   }
   socket.on('message', (data) => {
     if (generation !== twitchEventSubGeneration) return
@@ -1317,6 +1376,11 @@ function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
       const previous = twitchEventSub
       twitchEventSub = socket
       if (previous && previous !== socket) detachTwitchEventSub(previous)
+      twitchEventSubResuming = false
+      twitchEventSubResumeSocket = undefined
+      twitchEventSubRetryAttempt = 0
+      cancelTwitchEventSubRetry()
+      twitchLastEventSub = Date.now()
       twitchKeepaliveMs = Number(payload.payload?.session?.keepalive_timeout_seconds || 10) * 1000
       if (plan.resume) { twitchEventSubReady = true; console.log('Twitch EventSub resumed') }
       else {
@@ -1335,10 +1399,20 @@ function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
     }
   })
   socket.on('close', () => {
-    if (twitchEventSubCloseAction(twitchEventSub === socket, generation, twitchEventSubGeneration) === 'ignore') return
+    const action = twitchEventSubCloseAction(twitchEventSub === socket, generation, twitchEventSubGeneration, twitchEventSubResuming, twitchEventSubResumeSocket === socket)
+    if (action === 'ignore') return
+    if (action === 'resume-failed') {
+      twitchEventSubResuming = false
+      twitchEventSubResumeSocket = undefined
+      twitchEventSubReady = false
+      scheduleTwitchEventSubReconnect()
+      return
+    }
     twitchEventSub = undefined
     twitchEventSubReady = false
-    if (tokens.Twitch && !twitchEventSubUnsupported) setTimeout(() => connectTwitchEventSub(), 3_000)
+    twitchEventSubResuming = false
+    twitchEventSubResumeSocket = undefined
+    scheduleTwitchEventSubReconnect()
   })
   socket.on('error', (error) => { console.error('Twitch EventSub:', error.message); socket.close() })
 }
@@ -1443,8 +1517,8 @@ function handleTwitchEventSub(payload: any) {
 }
 
 function watchTwitchEventSub() {
-  if (!twitchEventSub || !twitchLastEventSub) return
-  if (Date.now() - twitchLastEventSub > twitchKeepaliveMs + 2_000) twitchEventSub.close()
+  if (!twitchEventSub) return
+  if (twitchEventSubWatchdogShouldClose(twitchEventSubReady, twitchLastEventSub, Date.now(), twitchKeepaliveMs)) twitchEventSub.close()
 }
 
 function setHealth(platform: Platform, status: Health['status'], message = '') {
@@ -2035,6 +2109,10 @@ function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeC
 }
 
 async function pollYouTube(options?: { manual?: boolean }) {
+  return runYouTubePoll(() => pollYouTubeNow(options))
+}
+
+async function pollYouTubeNow(options?: { manual?: boolean }) {
   const token = await ensureToken('YouTube')
   if (!token) return
   const account = state.accounts.find((item) => item.platform === 'YouTube')
@@ -2207,7 +2285,7 @@ async function discoverYouTubeLive(token: Token) {
     return
   }
   const existing = youtubeTargets.find((item) => item.videoId === found.videoId)
-  if (!existing) setYouTubeTargets([{ videoId: found.videoId, liveChatId: token.liveChatId, title: found.title }])
+  if (!existing) setYouTubeTargets([youtubeScrapedTarget(found)])
   Object.assign(account, { live: true, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(Number.isFinite(found.viewers) ? { viewers: found.viewers } : {}) })
   publishYouTubeStreams()
   lastYouTubeViewersAt = 0
@@ -2255,7 +2333,7 @@ async function seedYouTubeHistory(token: Token) {
     youtubeHistorySeeded.add(chatId)
     beginYouTubeHydration()
     try {
-      const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails&maxResults=200`, token)
+      const messages = await youtubeApi(youtubeLiveChatListQuery(chatId, undefined, 200), token)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
         youtubeSeen.add(item.id)
         ingestYouTubeOfficialItem(item, chatId, chatIds, true)
@@ -2295,9 +2373,15 @@ async function pollYouTubeOfficialChat(token: Token) {
   const chatIds = youtubeLiveChatIds()
   if (!chatIds.length) return
   setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
+  let waitMs = YOUTUBE_OFFICIAL_CHAT_MS
   for (const chatId of chatIds) {
     try {
-      const messages = await youtubeApi(`/liveChat/messages?liveChatId=${encodeURIComponent(chatId)}&part=snippet,authorDetails`, token)
+      const cursor = youtubeOfficialCursors.get(chatId)
+      const messages = await youtubeApi(youtubeLiveChatListQuery(chatId, cursor?.pageToken), token)
+      const next = youtubeLiveChatCursor(messages)
+      if (next.pageToken) youtubeOfficialCursors.set(chatId, next)
+      else youtubeOfficialCursors.delete(chatId)
+      waitMs = Math.max(waitMs, next.waitMs)
       for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
         youtubeSeen.add(item.id)
         ingestYouTubeOfficialItem(item, chatId, chatIds)
@@ -2311,6 +2395,7 @@ async function pollYouTubeOfficialChat(token: Token) {
       console.error('YouTube chat poll:', error instanceof Error ? error.message : error)
     }
   }
+  lastYouTubeOfficialChatAt = Date.now() - YOUTUBE_OFFICIAL_CHAT_MS + waitMs
 }
 
 function relabelYouTubeTargets() {
@@ -2405,7 +2490,7 @@ async function sendTwitchMessage(text: string) {
   if (helix.ok) return helix
   await waitForTwitchIrc()
   if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-    twitchIrc.send(`PRIVMSG #${nick} :${text}\r\n`)
+    twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
     return { ok: true }
   }
   return { ok: false, error: helix.error || 'Twitch chat is not ready; reconnect Twitch and try again' }
@@ -2540,7 +2625,7 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
     if (!failed.length) youtubeBanIds.delete(body.userId.toLowerCase())
     return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
   }
-  const chatIds = [...new Set([body.sourceId, ...youtubeLiveChatIds()].filter(Boolean))] as string[]
+  const chatIds = youtubeBanChatIds(body.sourceId, youtubeTargets, token)
   const userId = body.userId
   if (!userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
   const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/bans?part=snippet', token, {

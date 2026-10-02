@@ -3,8 +3,8 @@ import fs from 'node:fs'
 import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationStatus, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
-import { activityDockFields, applyActivitySlice, chatDockFields, sseSeqIsGap } from '../src/sse.ts'
+import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { activityDockFields, applyActivitySlice, chatDockFields, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap } from '../src/sse.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 import { ConnectionSettings } from '../src/ConnectionSettings.tsx'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
@@ -27,6 +27,8 @@ describe('chat dock helpers', () => {
     assert.equal(preferredCategory('Just Chatting', 'Just Chatting (IRL)'), 'Just Chatting (IRL)')
     assert.equal(preferredCategory('', 'Kick Game'), 'Kick Game')
     assert.equal(preferredCategory('Twitch Game', ''), 'Twitch Game')
+    assert.equal(unifiedCategoryQuery('Valorant', 'Valorant', 'Just Chatting (IRL)', false), 'Valorant')
+    assert.equal(unifiedCategoryQuery('Old', 'Minecraft', 'Minecraft', false), 'Minecraft')
   })
 
   it('filters messages by platform including merged multi-platform rows', () => {
@@ -126,6 +128,11 @@ describe('chat dock helpers', () => {
     assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick'])
     assert.deepEqual(tagPlatforms('first-play'), ['Kick'])
     assert.deepEqual(tagPlatforms('こんにちは'), [])
+    assert.deepEqual(assignTagPlatforms('English', []), [])
+    assert.deepEqual(assignTagPlatforms('first-play', ['Twitch']), [])
+    assert.deepEqual(assignTagPlatforms('English', ['Kick']), ['Kick'])
+    assert.deepEqual(moderationTargets({ platform: 'Twitch', id: 'm1', copies: [{ platform: 'Twitch', id: 'm1', userId: '1' }, { platform: 'Kick', id: 'm2', userId: '2' }] }).map((item) => item.platform), ['Twitch', 'Kick'])
+    assert.equal(moderationPlatformLabel({ platform: 'Twitch', copies: [{ platform: 'Twitch' }, { platform: 'Kick' }] }), 'Twitch, Kick')
   })
 
   it('builds per-tag platform assignments from the three lists', () => {
@@ -177,6 +184,11 @@ describe('SSE seq gaps', () => {
     assert.equal((delta.activityEvent as { id: string }).id, 'a2')
     assert.equal(delta.activity, undefined)
     assert.deepEqual(applyActivitySlice([{ id: 'a1' }], delta).map((item) => item.id), ['a2', 'a1'])
+    assert.deepEqual(applyActivitySlice([{ id: 'a1' }, { id: 'a0' }], { activityEvent: { id: 'a2' }, activityTruncated: true }).map((item) => item.id), ['a2', 'a1'])
+    assert.equal(sseReconnectStillNeeded(3, 3), true)
+    assert.equal(sseReconnectStillNeeded(3, 4), false)
+    assert.equal(sseSeqFromState(8, 4), 8)
+    assert.equal(sseSeqFromState(8, 9), 9)
     assert.deepEqual(applyActivitySlice([{ id: 'a1' }], slice), [{ id: 'a1' }])
     const snapshot = activityDockFields({
       seq: 1,

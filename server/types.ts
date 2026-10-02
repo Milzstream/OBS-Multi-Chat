@@ -15,7 +15,8 @@ export type AccountStream = { title: string; viewers?: number; label?: string }
 export type Account = { platform: Platform; connected: boolean; live: boolean; viewers: number; handle: string; channelId?: string; streams?: AccountStream[] }
 export type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 export type ChatBadge = { title: string; url?: string; label?: string }
-export type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
+export type ChatMessageCopy = { platform: Platform; id: string; userId?: string; sourceId?: string }
+export type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; copies?: ChatMessageCopy[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; ingest?: 'official' | 'innertube' }
 // Aggregate moderation action across platforms. `timeout` (Twitch) and `ban`
 // both hide a user's messages; `unban` restores them. Timeout durations live
 // in the per-platform source, so this type stays duration-free.
@@ -27,7 +28,7 @@ export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 // is (re)subscribing. The docks stay quiet during it, so a restart or a saved
 // JWT does not flash a StreamElements alert that clears a second later.
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[]; connecting: boolean }
-export type YoutubeQuota = { day: string; used: number; limit?: number }
+export type YoutubeQuota = { day: string; used: number; limit?: number; blockedUntil?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
 /** Per-platform automatic live-status polls. Missing or true means on. Chat sockets are not gated by this. */
 export type AutoLiveCheck = Record<Platform, boolean>

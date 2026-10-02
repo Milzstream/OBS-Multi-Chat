@@ -292,6 +292,16 @@ async function fetchHtml(url: string) {
   }
 }
 
+const youtubeBrowserMisses = new Set<string>()
+
+export function innerTubeRetryDelay(failures: number) {
+  return Math.min(20_000, 2_000 * 2 ** Math.min(Math.max(0, failures), 4))
+}
+
+export function youtubeBrowserAllowed(videoId: string, missed: Set<string> = youtubeBrowserMisses) {
+  return !missed.has(videoId)
+}
+
 async function fetchHtmlWithBrowser(url: string) {
   const executablePath = browserPath()
   const chromium = await loadChromium()
@@ -334,7 +344,11 @@ async function loadLivePage(videoId: string) {
     `https://www.youtube.com/live_chat?is_popout=1&v=${encodeURIComponent(videoId)}`,
     `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
   ]) {
-    const html = await fetchHtml(url) || await fetchHtmlWithBrowser(url)
+    let html = await fetchHtml(url)
+    if (!html && youtubeBrowserAllowed(videoId)) {
+      html = await fetchHtmlWithBrowser(url)
+      if (!html) youtubeBrowserMisses.add(videoId)
+    }
     if (!html) continue
     const session = extractSession(html, videoId)
     if (!session) continue
@@ -376,6 +390,7 @@ export class YouTubeLiveChat {
   private closed = true
   private lastOk = 0
   private failures = 0
+  private failureCounts = new Map<string, number>()
   private key = ''
 
   get connected() { return !this.closed && this.loops.size > 0 && Date.now() - this.lastOk < 45_000 }
@@ -405,6 +420,7 @@ export class YouTubeLiveChat {
     this.onModeration = undefined
     this.key = ''
     this.failures = 0
+    this.failureCounts.clear()
     this.clearLoops()
   }
 
@@ -441,6 +457,8 @@ export class YouTubeLiveChat {
       stop: () => {
         stopped = true
         this.loops.delete(loop.target.videoId)
+        this.failureCounts.delete(loop.target.videoId)
+        this.syncFailureFloor()
       },
     }
     this.loops.set(target.videoId, loop)
@@ -453,8 +471,7 @@ export class YouTubeLiveChat {
         const loaded = await loadLivePage(loop.target.videoId)
         if (!loaded) throw new Error('live chat page missing continuation')
         const { session } = loaded
-        this.failures = 0
-        this.lastOk = Date.now()
+        this.noteSuccess(loop.target.videoId)
         // Bootstrap and the first poll are history; mark them preload so the backend dedupes against the official history seed
         for (const message of loaded.bootstrap) this.onMessage?.({ ...message, preload: true }, loop.target)
         for (const event of loaded.moderation) this.onModeration?.(event)
@@ -468,17 +485,34 @@ export class YouTubeLiveChat {
           const next = nextContinuation(payload)
           if (next.ended || !next.continuation) throw new Error('live chat ended')
           session.continuation = next.continuation
-          this.lastOk = Date.now()
-          this.failures = 0
+          this.noteSuccess(loop.target.videoId)
           await wait(Math.min(15_000, Math.max(4_000, next.timeoutMs || 8_000)))
         }
       } catch (error) {
         if (stopped()) return
-        this.failures += 1
+        const failures = this.noteFailure(loop.target.videoId)
         console.error(`YouTube InnerTube (${loop.target.videoId}):`, error instanceof Error ? error.message : error)
-        await wait(Math.min(20_000, 2_000 * 2 ** Math.min(this.failures, 4)))
+        await wait(innerTubeRetryDelay(failures))
       }
     }
+  }
+
+  private syncFailureFloor() {
+    const counts = [...this.failureCounts.values()]
+    this.failures = counts.length ? Math.min(...counts) : 0
+  }
+
+  private noteSuccess(videoId: string) {
+    this.failureCounts.set(videoId, 0)
+    this.syncFailureFloor()
+    this.lastOk = Date.now()
+  }
+
+  private noteFailure(videoId: string) {
+    const next = (this.failureCounts.get(videoId) || 0) + 1
+    this.failureCounts.set(videoId, next)
+    this.syncFailureFloor()
+    return next
   }
 
   private clearLoops() {

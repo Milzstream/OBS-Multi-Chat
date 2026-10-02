@@ -258,7 +258,6 @@ export class StreamElementsClient {
     this.subscribed = false
     const socket = this.open(ASTRO_URL)
     this.ws = socket
-    socket.on('open', () => { this.attempt = 0 })
     socket.on('message', (data) => this.handle(String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
@@ -288,6 +287,7 @@ export class StreamElementsClient {
         // The ack proves alerts are flowing, so it is also what cancels a
         // pending disconnect warning.
         this.subscribed = true
+        this.attempt = 0
         this.report()
       }
       return

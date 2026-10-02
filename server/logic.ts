@@ -13,6 +13,7 @@ import {
   type AutoLiveCheck,
   type ChatBadge,
   type ChatMessage,
+  type ChatMessageCopy,
   type ChatModeration,
   type Health,
   type MessagePart,
@@ -82,7 +83,10 @@ export function activityAppendedEvent<T extends { id: string }>(previous: T[], n
 /** Build the activity SSE slice: one new event, warnings only, or a full replace. */
 export function activitySseFields<T extends { id: string }>(previous: T[], next: T[], warnings: string[]) {
   const appended = activityAppendedEvent(previous, next)
-  if (appended) return { activityEvent: appended, activityWarnings: warnings }
+  if (appended) {
+    const truncated = previous.length > 0 && next.length === previous.length
+    return { activityEvent: appended, activityWarnings: warnings, ...(truncated ? { activityTruncated: true } : {}) }
+  }
   const sameList = previous.length === next.length && previous.every((item, i) => item.id === next[i]?.id)
   if (sameList) return { activityWarnings: warnings }
   return { activity: next, activityWarnings: warnings }
@@ -365,9 +369,40 @@ export function labelYouTubeTargets(targets: YouTubeChatTarget[]): YouTubeChatTa
 export function resolveYouTubeLiveChatIds(targets: YouTubeChatTarget[], token?: { liveChatIds?: string[]; liveChatId?: string }) {
   const fromTargets = targets.map((target) => target.liveChatId).filter((id): id is string => Boolean(id))
   if (fromTargets.length) return [...new Set(fromTargets)]
+  if (targets.length) return []
   if (token?.liveChatIds?.length) return [...new Set(token.liveChatIds)]
   if (token?.liveChatId) return [token.liveChatId]
   return []
+}
+
+/** Ban targets are live chat ids only. A scraped video id is not a `liveChatId`. */
+export function youtubeBanChatIds(sourceId: string | undefined, targets: YouTubeChatTarget[], token?: { liveChatIds?: string[]; liveChatId?: string }) {
+  const ids = new Set(resolveYouTubeLiveChatIds(targets, token))
+  if (sourceId) {
+    const match = targets.find((target) => target.liveChatId === sourceId || target.videoId === sourceId)
+    if (match?.liveChatId) ids.add(match.liveChatId)
+  }
+  return [...ids].filter((id) => !targets.some((target) => target.videoId === id && target.liveChatId !== id))
+}
+
+/** A newly scraped video must not inherit the previous broadcast's chat id. */
+export function youtubeScrapedTarget(found: { videoId: string; title?: string }, existing?: { liveChatId?: string }) {
+  return { videoId: found.videoId, ...(existing?.liveChatId ? { liveChatId: existing.liveChatId } : {}), ...(found.title ? { title: found.title } : {}) }
+}
+
+export function youtubeLiveChatListQuery(chatId: string, pageToken?: string, maxResults?: number) {
+  const params = new URLSearchParams({ liveChatId: chatId, part: 'snippet,authorDetails' })
+  if (pageToken) params.set('pageToken', pageToken)
+  if (maxResults) params.set('maxResults', String(maxResults))
+  return `/liveChat/messages?${params}`
+}
+
+export function youtubeLiveChatCursor(payload: { nextPageToken?: string; pollingIntervalMillis?: number } | null | undefined) {
+  const waitMs = Number(payload?.pollingIntervalMillis)
+  return {
+    pageToken: payload?.nextPageToken || undefined,
+    waitMs: Number.isFinite(waitMs) && waitMs > 0 ? waitMs : 45_000,
+  }
 }
 
 export function syncYouTubeTokenChatIds<T extends { liveChatIds?: string[]; liveChatId?: string }>(targets: YouTubeChatTarget[], token: T) {
@@ -650,11 +685,13 @@ export function collapseYouTubeDuplicates(
     const parts = current.parts?.some((part) => part.type === 'emote')
       ? current.parts
       : takeIncomingParts && message.parts?.length ? message.parts : current.parts
+    const copies = mergeChatCopies(current, message)
     kept[match] = {
       ...current,
       text,
       platforms,
       platform: platforms[0],
+      ...(copies ? { copies } : {}),
       sourceId: current.sourceId || message.sourceId,
       userId: current.userId || message.userId,
       ingest: message.ingest || current.ingest,
@@ -676,6 +713,24 @@ export function collapseYouTubeDuplicates(
  * on another platform or ingest source. Returns `seenIds` for the YouTube
  * dedupe map, plus `added` when a brand-new message was appended.
  */
+export function chatMessageCopies(message: Pick<ChatMessage, 'platform' | 'id' | 'userId' | 'sourceId' | 'copies'>): ChatMessageCopy[] {
+  if (message.copies?.length) return message.copies
+  if (!message.id) return []
+  return [{ platform: message.platform, id: message.id, userId: message.userId, sourceId: message.sourceId }]
+}
+
+/** Keep one id and user id per platform so a merged row can be moderated on each icon it shows. */
+export function mergeChatCopies(current: ChatMessage, incoming: ChatMessage): ChatMessageCopy[] | undefined {
+  const merged = new Map<Platform, ChatMessageCopy>()
+  for (const copy of [...chatMessageCopies(current), ...chatMessageCopies(incoming)]) {
+    const existing = merged.get(copy.platform)
+    if (!existing) merged.set(copy.platform, { ...copy })
+    else merged.set(copy.platform, { platform: copy.platform, id: existing.id || copy.id, userId: existing.userId || copy.userId, sourceId: existing.sourceId || copy.sourceId })
+  }
+  const copies = [...merged.values()]
+  return copies.length > 1 ? copies : undefined
+}
+
 export function mergeIncomingChat(
   messages: ChatMessage[],
   message: ChatMessage,
@@ -748,6 +803,7 @@ export function mergeIncomingChat(
     if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged) {
       return { messages, changed: false, seenIds }
     }
+    const copies = mergeChatCopies(current, message)
     return {
       messages: messages.map((item, index) => index === mergeAt ? {
         ...item,
@@ -755,6 +811,7 @@ export function mergeIncomingChat(
         text,
         platform: platforms[0],
         platforms,
+        ...(copies ? { copies } : { copies: undefined }),
         sourceId: item.sourceId || message.sourceId,
         userId: item.userId || message.userId,
         handle: item.handle || message.handle,
@@ -1248,7 +1305,22 @@ export function loadYouTubeQuota(value: unknown): YoutubeQuota {
   if (!value || typeof value !== 'object') return { day: '', used: 0 }
   const item = value as Partial<YoutubeQuota>
   const limit = item.limit != null ? Math.floor(Number(item.limit) || 0) : 0
-  return { day: String(item.day || ''), used: Math.max(0, Math.floor(Number(item.used) || 0)), ...(limit > 0 ? { limit } : {}) }
+  const blockedUntil = Number(item.blockedUntil)
+  return {
+    day: String(item.day || ''),
+    used: Math.max(0, Math.floor(Number(item.used) || 0)),
+    ...(limit > 0 ? { limit } : {}),
+    ...(Number.isFinite(blockedUntil) && blockedUntil > 0 ? { blockedUntil } : {}),
+  }
+}
+
+/** Same Pacific day at or over the cap stays paused, including after a restart that lost the in-memory timestamp. */
+export function restoreYouTubeQuotaBlock(saved: Pick<YoutubeQuota, 'day' | 'used' | 'limit' | 'blockedUntil'>, now = Date.now(), limitDefault = 10_000) {
+  if (!saved.day || saved.day !== pacificDate(now)) return 0
+  if (saved.blockedUntil && saved.blockedUntil > now) return saved.blockedUntil
+  const limit = saved.limit && saved.limit > 0 ? saved.limit : limitDefault
+  if (saved.used >= limit) return nextPacificMidnight(now)
+  return 0
 }
 
 export function defaultAutoLiveCheck(): AutoLiveCheck {
@@ -1450,7 +1522,30 @@ export function twitchEventSubConnectPlan(url: string, currentGeneration: number
   return { resume, generation: resume ? currentGeneration : currentGeneration + 1, keepPreviousUntilWelcome: resume }
 }
 
-export function twitchEventSubCloseAction(socketIsCurrent: boolean, generation: number, currentGeneration: number) {
-  if (generation !== currentGeneration || !socketIsCurrent) return 'ignore' as const
+export function twitchEventSubRetryDelay(attempt: number) {
+  return Math.min(30_000, 3_000 * 2 ** Math.max(0, attempt))
+}
+
+/** A socket that has not welcomed yet must not be closed for the previous session's keepalive. */
+export function twitchEventSubWatchdogShouldClose(ready: boolean, lastMessageAt: number, now: number, keepaliveMs: number) {
+  if (!ready || !lastMessageAt) return false
+  return now - lastMessageAt > keepaliveMs + 2_000
+}
+
+export function twitchEventSubCloseAction(socketIsCurrent: boolean, generation: number, currentGeneration: number, resumeInFlight = false, isResumeSocket = false) {
+  if (generation !== currentGeneration) return 'ignore' as const
+  if (resumeInFlight && isResumeSocket && !socketIsCurrent) return 'resume-failed' as const
+  if (resumeInFlight && socketIsCurrent) return 'ignore' as const
+  if (!socketIsCurrent) return 'ignore' as const
   return 'reconnect' as const
+}
+
+export function shareInFlight<K, T>(locks: Map<K, Promise<T>>, key: K, run: () => Promise<T>): Promise<T> {
+  const existing = locks.get(key)
+  if (existing) return existing
+  const pending = run().finally(() => {
+    if (locks.get(key) === pending) locks.delete(key)
+  })
+  locks.set(key, pending)
+  return pending
 }
