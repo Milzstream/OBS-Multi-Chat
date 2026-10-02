@@ -61,10 +61,38 @@ export function envTemplateBlocks(text: string) {
   return blocks
 }
 
-/** Set an uncommented `KEY=value` line. Empty value is ignored unless `allowEmpty` is set. */
+/** A newline in an env value becomes a new key on the next dotenv load. */
+export function envValueHasBreak(value: string) {
+  return /[\r\n\0]/.test(value)
+}
+
+/**
+ * Replace a text file without deleting it first. A failed copy leaves the
+ * previous `production.env` in place, including its client secrets.
+ */
+export function writeTextAtomic(filePath: string, text: string) {
+  const dir = path.dirname(filePath)
+  fs.mkdirSync(dir, { recursive: true })
+  const tmp = `${filePath}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600 })
+  try {
+    const fd = fs.openSync(tmp, 'r+')
+    try { fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
+  } catch {
+    // fsync is best-effort
+  }
+  try {
+    fs.copyFileSync(tmp, filePath)
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
+}
+
+/** Set an uncommented `KEY=value` line. Empty value is ignored unless `allowEmpty` is set. Values with CR/LF are refused. */
 export function setEnvKey(existing: string, key: string, value: string, allowEmpty = false) {
   const next = String(value || '').trim()
   if (!key || (!next && !allowEmpty)) return existing
+  if (envValueHasBreak(next)) return existing
   const nl = existing.includes('\r\n') ? '\r\n' : '\n'
   const lines = existing.length ? existing.split(/\r?\n/) : []
   const prefix = `${key}=`

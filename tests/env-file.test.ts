@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { consoleHyperlink, envKeyFromLine, envKeys, fileUrl, hasDuplicateFilledValues, jwtPreview, looksLikeJwt, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
+import { consoleHyperlink, envKeyFromLine, envKeys, envValueHasBreak, fileUrl, hasDuplicateFilledValues, jwtPreview, looksLikeJwt, mergeEnvTemplate, resolveEnvFilePath, setEnvKey, syncEnvFile } from '../server/env-file.js'
 
 describe('jwt preview', () => {
   it('never returns the full token', () => {
@@ -19,6 +19,9 @@ describe('installer JWT checks', () => {
     assert.equal(looksLikeJwt(jwt), true)
     assert.equal(looksLikeJwt('not-a-jwt'), false)
     assert.equal(looksLikeJwt(''), false)
+    assert.equal(looksLikeJwt('aaa.bbb.ccc\nRELAY_BIND=0.0.0.0'), false)
+    assert.equal(envValueHasBreak('ok\nRELAY_BIND=0.0.0.0'), true)
+    assert.equal(setEnvKey('KEY=old\n', 'KEY', 'bad\nRELAY_BIND=0.0.0.0'), 'KEY=old\n')
     assert.equal(hasDuplicateFilledValues(['aaa.bbb.ccc', 'aaa.bbb.ccc', '']), true)
     assert.equal(hasDuplicateFilledValues(['aaa.bbb.ccc', 'ddd.eee.fff', '']), false)
     assert.equal(hasDuplicateFilledValues(['', '', '']), false)

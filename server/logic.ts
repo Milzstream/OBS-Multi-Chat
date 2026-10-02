@@ -1388,6 +1388,15 @@ export function shouldRunYouTubeStatusCheck(options: { autoEnabled: boolean; man
   return options.autoEnabled && options.due
 }
 
+/**
+ * Auto off skips the launch poll, including token refresh and the history seed
+ * against a saved chat id. An InnerTube session that is already up keeps running.
+ */
+export function shouldRunYouTubeMaintenance(options: { autoEnabled: boolean; manual: boolean; chatConnected: boolean }) {
+  if (options.manual || options.autoEnabled) return true
+  return options.chatConnected
+}
+
 export function defaultAppSettings(): AppSettings {
   return {
     activityFallback: true,

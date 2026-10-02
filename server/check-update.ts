@@ -1,4 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -15,8 +16,10 @@ export type GitHubRelease = {
   html_url: string
   draft: boolean
   prerelease: boolean
-  assets?: { name: string; browser_download_url: string }[]
+  assets?: InstallerAsset[]
 }
+
+export type InstallerAsset = { name: string; browser_download_url: string; digest?: string }
 
 export type UpdateHooks = {
   confirm?: (message: string) => boolean
@@ -51,11 +54,57 @@ export function compareVersions(version1: string, version2: string): number {
   return 0
 }
 
-export function pickInstallerAsset(assets: { name: string; browser_download_url: string }[] | undefined) {
+export function pickInstallerAssetRecord(assets: InstallerAsset[] | undefined) {
   if (!assets?.length) return
-  const setup = assets.find((asset) => /windows-x64-setup\.exe$/i.test(asset.name))
+  return assets.find((asset) => /windows-x64-setup\.exe$/i.test(asset.name))
     || assets.find((asset) => /setup/i.test(asset.name) && /\.exe$/i.test(asset.name))
-  return setup?.browser_download_url
+}
+
+export function pickInstallerAsset(assets: InstallerAsset[] | undefined) {
+  return pickInstallerAssetRecord(assets)?.browser_download_url
+}
+
+/** Tags are filenames. Strip anything that `path.join` would treat as a directory. */
+export function safeReleaseTag(tag: string) {
+  const cleaned = tag.replace(/^v/i, '').replace(/[^A-Za-z0-9._-]/g, '')
+  return cleaned || 'update'
+}
+
+export function installerSetupPath(tag: string, tmpDir = os.tmpdir()) {
+  const dest = path.resolve(tmpDir, `obs-multi-chat-${safeReleaseTag(tag)}-setup.exe`)
+  const relative = path.relative(path.resolve(tmpDir), dest)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('update path escaped temp')
+  return dest
+}
+
+/** Setup binaries only come from GitHub release hosts, over HTTPS. */
+export function installerDownloadAllowed(url: string) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    const host = parsed.hostname.toLowerCase()
+    return host === 'github.com' || host === 'objects.githubusercontent.com' || host === 'release-assets.githubusercontent.com' || host.endsWith('.githubusercontent.com')
+  } catch {
+    return false
+  }
+}
+
+/** Break a PowerShell here-string terminator so a release tag cannot run as code. */
+export function escapePowerShellHereString(value: string) {
+  return value.replace(/'@/g, "' @")
+}
+
+export function windowsYesNoCommand(message: string, title: string) {
+  const body = escapePowerShellHereString(message)
+  const caption = escapePowerShellHereString(title)
+  return `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show(@'\n${body}\n'@, @'\n${caption}\n'@, 'YesNo', 'Question'); if ($r -eq 'Yes') { exit 0 } else { exit 1 }`
+}
+
+export function digestMatches(body: Buffer, digest?: string) {
+  const match = String(digest || '').match(/^sha256:([a-f0-9]{64})$/i)
+  if (!match) return false
+  const actual = crypto.createHash('sha256').update(body).digest('hex')
+  return actual.toLowerCase() === match[1].toLowerCase()
 }
 
 export function versionManifestPaths(input: { packaged: boolean; cwd: string; execPath: string }) {
@@ -107,8 +156,7 @@ async function getLatestGitHubRelease(): Promise<GitHubRelease | null> {
 
 function windowsYesNo(message: string, title: string) {
   if (process.platform !== 'win32') return false
-  const ps = `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show(@'\n${message}\n'@, @'\n${title}\n'@, 'YesNo', 'Question'); if ($r -eq 'Yes') { exit 0 } else { exit 1 }`
-  return spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', ps], { windowsHide: true }).status === 0
+  return spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', windowsYesNoCommand(message, title)], { windowsHide: true }).status === 0
 }
 
 async function downloadFile(url: string, dest: string) {
@@ -147,7 +195,8 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     const latestVersion = latestRelease.tag_name
     if (compareVersions(latestVersion, currentVersion) <= 0) return
 
-    const setupUrl = pickInstallerAsset(latestRelease.assets)
+    const setupAsset = pickInstallerAssetRecord(latestRelease.assets)
+    const setupUrl = setupAsset?.browser_download_url
     const installerCopy = hooks.installerCopy ?? (isDesktopPackaged() && isInstallerInstall(process.execPath))
 
     console.log('')
@@ -157,13 +206,26 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     console.log('')
 
     if (!installerCopy || !setupUrl) return
+    if (!installerDownloadAllowed(setupUrl)) {
+      console.log('  Installer update skipped: asset URL is not a GitHub release.')
+      return
+    }
+    if (!/^sha256:[a-f0-9]{64}$/i.test(setupAsset?.digest || '')) {
+      console.log('  Installer update skipped: release asset has no sha256 digest.')
+      return
+    }
 
     const confirm = hooks.confirm || ((message) => windowsYesNo(message, 'Relay Chat Dock'))
-    const message = `Relay Chat Dock ${latestVersion} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
+    const message = `Relay Chat Dock ${safeReleaseTag(latestVersion)} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
     if (!confirm(message)) return
 
-    const dest = path.join(os.tmpdir(), `obs-multi-chat-${latestVersion.replace(/^v/i, '')}-setup.exe`)
+    const dest = installerSetupPath(latestVersion)
     await (hooks.download || downloadFile)(setupUrl, dest)
+    if (!digestMatches(fs.readFileSync(dest), setupAsset?.digest)) {
+      console.error('  Update skipped: installer digest did not match.')
+      fs.rmSync(dest, { force: true })
+      return
+    }
     console.log('  Closing so Setup can replace the exe…')
     if (hooks.startInstaller) hooks.startInstaller(dest)
     else startInstaller(dest)

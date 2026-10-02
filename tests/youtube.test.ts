@@ -379,6 +379,7 @@ describe('YouTube InnerTube parsing', () => {
     assert.equal(parseYouTubeViewers('1,234 watching now'), 1234)
     assert.equal(parseYouTubeTitle(html), 'Night stream')
     assert.equal(extractVideoId('"isReplay":true ' + html), undefined)
+    assert.equal(extractVideoId('<link rel="canonical" href="https://www.youtube.com/watch?v=mPDDhBtFW_Jw">'), undefined)
   })
 
   it('parses text, emotes, badges, superchats, and memberships', () => {
