@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it, type TestContext } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
+import { activityIsDuplicate, createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
@@ -55,6 +55,18 @@ describe('activity store', () => {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string }[]
       assert.equal(saved.some((event) => event.id === 'test-row'), false)
       assert.equal(saved.some((event) => event.id === 'follow-1'), true)
+      assert.equal(activityIsDuplicate(
+        { id: 'native', platform: 'Twitch', kind: 'follow', user: 'cooluser', userId: '9', time: '2026-09-02T12:00:00.000Z' },
+        { id: 'se', platform: 'Twitch', kind: 'follow', user: 'Cool User', handle: 'cooluser', userId: '9', time: '2026-09-01T12:00:00.000Z' },
+      ), true)
+      assert.equal(activityIsDuplicate(
+        { id: 'a', platform: 'Twitch', kind: 'cheer', user: 'Ada', amount: '50 Bits', time: '2026-09-02T12:00:00.000Z' },
+        { id: 'b', platform: 'Twitch', kind: 'cheer', user: 'Ada', amount: '100 Bits', time: '2026-09-02T12:00:05.000Z' },
+      ), false)
+      assert.equal(activityIsDuplicate(
+        { id: 'a', platform: 'Twitch', kind: 'follow', user: 'Ada', userId: '1', time: '2026-08-01T12:00:00.000Z' },
+        { id: 'b', platform: 'Twitch', kind: 'follow', user: 'Ada', userId: '1', time: '2026-09-02T12:00:00.000Z' },
+      ), false)
     } finally {
       try { fs.unlinkSync(file) } catch { /* ignore */ }
     }
@@ -114,6 +126,9 @@ describe('StreamElements activity', () => {
     assert.match(tip?.amount || '', /\$5/)
     const follow = activityFromStreamElements({ type: 'follow', provider: 'youtube', data: { displayName: 'Mel' }, _id: 'f1' })
     assert.equal(follow?.kind, 'follow')
+    const member = activityFromStreamElements({ type: 'subscriber', provider: 'youtube', data: { displayName: 'Mel', username: 'mel' }, _id: 'mem1' })
+    assert.equal(member?.kind, 'membership')
+    assert.equal(member?.handle, 'mel')
     assert.equal(follow?.platform, 'YouTube')
     const cheer = activityFromStreamElements({ type: 'cheer', provider: 'twitch', data: { username: 'Pat', amount: 50 }, _id: 'c1' })
     assert.equal(cheer?.amount, '50 Bits')

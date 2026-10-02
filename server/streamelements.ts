@@ -80,7 +80,7 @@ function platformFromProvider(provider: string, type: string): ActivityPlatform 
 
 function kindFromSe(type: string, platform: ActivityPlatform): ActivityKind | undefined {
   if (type === 'follow' || type === 'follower' || type === 'fan') return 'follow'
-  if (type === 'subscriber') return platform === 'YouTube' ? 'follow' : 'subscription'
+  if (type === 'subscriber') return platform === 'YouTube' ? 'membership' : 'subscription'
   if (type === 'communitygiftpurchase') return 'gift'
   if (type === 'cheer' || type === 'cheerpurchase') return 'cheer'
   if (type === 'raid' || type === 'host') return 'raid'
@@ -93,6 +93,12 @@ function kindFromSe(type: string, platform: ActivityPlatform): ActivityKind | un
 
 function pickUser(data: any) {
   return String(data?.displayName || data?.username || data?.name || data?.user?.username || data?.donation?.user?.username || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
+}
+
+/** Login, when StreamElements sent one. Dedup compares this with the native `user_login`. */
+function pickHandle(data: any) {
+  const value = String(data?.username || data?.user?.username || data?.donation?.user?.username || '').replace(/^@+/, '').trim()
+  return value || undefined
 }
 
 /** Map a raw StreamElements event into an ActivityEvent, returning undefined for internal or crowd-sourced events the dock does not render. */
@@ -125,6 +131,7 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
     source,
     kind,
     user,
+    handle: pickHandle(inner?.donation?.user ? { ...inner, ...inner.donation.user } : inner),
     userId,
     amount,
     months: kind === 'subscription' || kind === 'membership' ? (Number.isFinite(months) && months > 0 ? months : undefined) : undefined,

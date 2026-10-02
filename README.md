@@ -22,7 +22,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the Relay Chat Dock window shows that path on every launch
 5. Start **Relay Chat Dock** from the Start Menu
 
-The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen.
+The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen. The download is only started when the asset URL is a GitHub release host and the file matches the release `sha256` digest.
 
 **Portable zip**
 
@@ -38,7 +38,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - Responsive OBS chat dock with platform filters and compact mode
 - OAuth callback server for Twitch, Kick, and YouTube
 - Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
-- Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default) so a backend restart does not empty the dock
+- Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default). The file is rewritten about once a second and again on exit, so a crash can drop the last second of chat, and a backend restart does not empty the dock
 - Activity history persistence in `data/activity.json` (the most recent `RELAY_ACTIVITY_MAX` events, 5000 by default)
 - Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
 - YouTube live detection, viewer count, live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
@@ -52,6 +52,8 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 ## Windows app
 
 Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Each connected platform has **Check live** and an **Auto** box beside it. Auto is on by default. Chat filters, activity filters, and stream controls stay in the OBS docks.
+
+The log is also the place to check a quiet dock. A live-status check prints one line when that platform goes live, goes offline, or the viewer count changes, and again when you press **Check live**. It does not repeat an unchanged offline line on every poll. New chat is a count, not each message (`Twitch: 40 messages (EventSub)`). A poll that added nothing stays silent. Deletes, timeouts, bans, and unbans print the action, platform, and user, never the message text. A stored activity alert prints one line (`Twitch follow: Ada`). Duplicate alerts the deduper drops are not logged.
 
 Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env` and `data\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
 
@@ -210,7 +212,7 @@ Newest alerts stay at the top; older rows drop down. Each row shows the platform
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
-**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. Duplicate events within 15 seconds are ignored either way.
+**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership on both feeds, not a follow.
 
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 

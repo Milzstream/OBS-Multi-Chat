@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createActivityStore } from '../server/activity.js'
 import { compareVersions, getCurrentVersion, isDesktopPackaged, pickInstallerAsset, versionManifestPaths } from '../server/check-update.js'
-import { commitJsonReplace, readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
+import { commitJsonReplace, createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'relay-persist-'))
@@ -105,6 +105,27 @@ describe('packaged data directory', () => {
       cwd: path.join(os.tmpdir(), 'other-cwd'),
       env: { RELAY_DATA_DIR: configured },
     }), path.resolve(configured))
+  })
+})
+
+describe('debounced save', () => {
+  it('writes once for a burst and again on flush', () => {
+    let writes = 0
+    let pending: (() => void) | undefined
+    const save = createDebouncedSave(() => { writes += 1 }, 1000, {
+      set: (fn) => { pending = fn as () => void; return 1 as unknown as ReturnType<typeof setTimeout> },
+      clear: () => { pending = undefined },
+    })
+    save.schedule()
+    save.schedule()
+    assert.equal(writes, 0)
+    pending?.()
+    assert.equal(writes, 1)
+    save.schedule()
+    save.flush()
+    assert.equal(writes, 2)
+    save.flush()
+    assert.equal(writes, 2)
   })
 })
 

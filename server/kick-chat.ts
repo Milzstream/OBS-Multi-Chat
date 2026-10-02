@@ -13,7 +13,7 @@ import WebSocket from 'ws'
  */
 
 export type KickChatMessage = { id?: string; user: string; text: string; userId?: string; slug?: string; color?: string; avatar?: string; badges?: { type?: string; text?: string }[]; emotes?: any[] }
-export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; slug?: string; amount?: string; months?: number; viewers?: number; message?: string }
+export type KickActivity = { id?: string; kind: 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'; user: string; userId?: string; slug?: string; amount?: string; months?: number; viewers?: number; message?: string; time?: string }
 export type KickModeration = { action: 'delete' | 'ban' | 'unban'; messageId?: string; userId?: string; user?: string; slug?: string }
 
 /** Kick's public Pusher app, used by the site for all real-time chat events. */
@@ -462,7 +462,10 @@ export class KickChat {
     const moderation = kickEventToModeration(event, data)
     if (moderation) this.onModeration?.(moderation)
     const activity = kickEventToActivity(event, data)
-    if (activity) this.onActivity?.(activity)
+    if (activity) {
+      const raw = data?.created_at || data?.createdAt || data?.timestamp
+      this.onActivity?.(raw ? { ...activity, time: String(raw) } : activity)
+    }
   }
 
   private startPing() {

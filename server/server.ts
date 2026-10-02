@@ -11,9 +11,10 @@ import { createServer } from 'node:http'
 import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile } from './env-file.js'
+import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile, writeTextAtomic } from './env-file.js'
 
-import { readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
+import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
+import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
 import { corsOriginDelegate, createControlGuard, createOpenHandler, isLoopbackAddress, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
@@ -160,13 +161,15 @@ const companionHost = createHostSession(() => shutdownCompanion())
 function shutdownCompanion(): never {
   if (!companionShutdown) {
     companionShutdown = true
-    try { persistChat() } catch { /* ignore */ }
+    try { flushChatSave() } catch { /* ignore */ }
+    try { ingestLog.flush() } catch { /* ignore */ }
     try { companionChild?.kill() } catch { /* ignore */ }
   }
   process.exit(0)
 }
 process.on('exit', () => {
-  try { persistChat() } catch { /* ignore */ }
+  try { flushChatSave() } catch { /* ignore */ }
+  try { ingestLog.flush() } catch { /* ignore */ }
   try { companionChild?.kill() } catch { /* ignore */ }
 })
 
@@ -306,7 +309,7 @@ function collapseYouTubeHydrationDuplicates() {
   if (!result.changed) return
   for (const id of result.seenIds) youtubeSeen.add(id)
   state.messages = result.messages
-  persistChat()
+  scheduleChatSave()
   broadcast()
 }
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
@@ -353,7 +356,7 @@ const state: State = {
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
 
-function persistChat() {
+function persistChatNow() {
   try {
     pruneYouTubeSeenIds(youtubeSeen, state.messages)
     const stored = state.messages.slice(-chatMax).map((message) => {
@@ -367,12 +370,35 @@ function persistChat() {
   }
 }
 
+const chatSave = createDebouncedSave(persistChatNow)
+function scheduleChatSave() { chatSave.schedule() }
+function flushChatSave() { chatSave.flush() }
+
+const ingestLog = createIngestLog((line) => console.log(line))
+const liveStatusSeen = new Map<Platform, string>()
+
+function logPolledLive(platform: Platform, manual = false) {
+  const account = state.accounts.find((item) => item.platform === platform)
+  if (!account?.connected) return
+  noteLiveStatus(platform, Boolean(account.live), account.viewers || 0, manual)
+}
+
+function noteLiveStatus(platform: Platform, live: boolean, viewers: number, manual = false) {
+  const previous = liveStatusSeen.get(platform)
+  const next = liveCheckLine(previous, { platform, live, viewers }, manual)
+  if (!next) return
+  liveStatusSeen.set(platform, next.key)
+  console.log(next.line)
+}
+
 function applyChatModerationToState(change: ChatModeration) {
   const result = applyChatModeration(state.messages, change)
-  if (!result.changed) return
+  if (!result.changed) return false
   state.messages = result.messages
-  persistChat()
+  scheduleChatSave()
   broadcast()
+  console.log(moderationLogLine(change.action, change.platform, change.user))
+  return true
 }
 
 let twitchIrc: WebSocket | undefined
@@ -480,7 +506,7 @@ app.post('/api/messages', async (request, response) => {
   const id = crypto.randomUUID()
   const user = tokens[platforms.find((platform) => tokens[platform]) || platforms[0]]?.user || 'You'
   rememberOutgoing({ id, text: trimmed, platforms, at: Date.now() })
-  addMessage({ id, platform: platforms[0], platforms, user, text: trimmed, time: new Date().toISOString() })
+  addMessage({ id, platform: platforms[0], platforms, user, text: trimmed, time: new Date().toISOString() }, { source: 'send' })
   const results = await Promise.all(platforms.map((platform) => sendMessage(platform, trimmed)))
   const sentPlatforms = results.filter((result) => result.ok).map((result) => result.platform)
   const existing = state.messages.find((item) => item.id === id)
@@ -491,7 +517,7 @@ app.post('/api/messages', async (request, response) => {
       existing.platforms = sentPlatforms
       existing.platform = sentPlatforms[0]
     }
-    persistChat()
+    scheduleChatSave()
     broadcast()
   }
   response.json({ results })
@@ -503,13 +529,14 @@ app.post('/api/moderate', async (request, response) => {
       const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration, reason: body.reason })
     if (result.ok && (body.action === 'delete' || body.action === 'timeout' || body.action === 'ban' || body.action === 'unban')) {
       const target = state.messages.find((item) => item.id === body.messageId)
-      applyChatModerationToState({
+      const applied = applyChatModerationToState({
         action: body.action,
         platform: body.platform,
         messageId: body.messageId,
         userId: body.userId,
         user: target?.user,
       })
+      if (!applied) console.log(moderationLogLine(body.action, body.platform, target?.user))
     }
     response.json(result)
   } catch (error) {
@@ -670,6 +697,7 @@ app.post('/api/jwts', async (request, response) => {
   for (const platform of platforms) {
     if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
     const value = String(body[platform] ?? '').trim()
+    if (value && !looksLikeJwt(value)) return response.status(400).json({ error: `${platform} JWT is not valid` })
     const key = STREAMELEMENTS_JWT_KEYS[platform]
     text = setEnvKey(text, key, value, true)
     process.env[key] = value
@@ -677,8 +705,7 @@ app.post('/api/jwts', async (request, response) => {
   }
   let failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
   if (saved.length) {
-    fs.mkdirSync(path.dirname(envPath), { recursive: true })
-    fs.writeFileSync(envPath, text, { encoding: 'utf8' })
+    writeTextAtomic(envPath, text)
     failed = await startStreamElements(false)
   }
   const slots = streamElementsJwtSlots()
@@ -835,7 +862,8 @@ setInterval(refreshChatHealth, 5_000)
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    persistChat()
+    flushChatSave()
+    ingestLog.flush()
     process.exit(0)
   })
 }
@@ -1235,8 +1263,8 @@ async function checkLiveNow(platform: Platform) {
   const pending = liveCheckLocks.get(platform)
   if (pending) return pending
   const work = (async () => {
-    if (platform === 'Twitch') await pollTwitch()
-    else if (platform === 'Kick') await pollKick()
+    if (platform === 'Twitch') { await pollTwitch(); logPolledLive('Twitch', true) }
+    else if (platform === 'Kick') { await pollKick(); logPolledLive('Kick', true) }
     else await runYouTubePoll(async () => {
       youtubeForceStatus = true
       beginYouTubeHydration()
@@ -1251,6 +1279,7 @@ async function checkLiveNow(platform: Platform) {
           await refreshYouTubeViewers()
         }
       }
+      logPolledLive('YouTube', true)
     })
     refreshChatHealth()
     broadcast()
@@ -1277,7 +1306,7 @@ function startKickChat(slug: string) {
     text: message.text,
     time: new Date().toISOString(),
     parts: parseKickParts(message.text, message.emotes),
-    })
+    }, { source: 'socket' })
     if (avatar && message.slug) kickAvatars.set(message.slug.toLowerCase(), avatar)
     else queueKickAvatar(message.slug || kickProfileSlug(message.user))
   }, tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
@@ -1291,7 +1320,7 @@ function startKickChat(slug: string) {
     months: event.months,
     viewers: event.viewers,
     message: event.message,
-    time: new Date().toISOString(),
+    time: event.time || new Date().toISOString(),
   }), (event: KickModeration) => applyChatModerationToState({
     action: event.action,
     platform: 'Kick',
@@ -1496,7 +1525,7 @@ function handleTwitchEventSub(payload: any) {
       time: new Date().toISOString(),
       parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
       emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
-    })
+    }, { source: 'EventSub' })
     setHealth('Twitch', 'ok')
     return
   }
@@ -1512,7 +1541,7 @@ function handleTwitchEventSub(payload: any) {
     applyChatModerationToState({ action: 'unban', platform: 'Twitch', userId: event?.user_id ? String(event.user_id) : undefined, user: event?.user_name || event?.user_login })
     return
   }
-  const activity = twitchEventToActivity(type, event)
+  const activity = twitchEventToActivity(type, event, payload?.metadata?.message_timestamp || new Date().toISOString())
   if (activity) addNativeActivity(activity)
 }
 
@@ -1610,7 +1639,7 @@ function openTwitchIrc() {
       setHealth('Twitch', 'ok')
       console.log(`Twitch IRC joined #${nick}`)
     }
-    parseTwitchLines(raw).forEach((message) => addMessage(message))
+    parseTwitchLines(raw).forEach((message) => addMessage(message, { source: 'IRC' }))
   })
   twitchIrc.on('close', () => {
     twitchIrc = undefined
@@ -1682,9 +1711,9 @@ async function flushTwitchAvatars() {
       return { ...item, avatar }
     })
     if (changed) {
-      persistChat()
-      broadcast()
-    }
+  scheduleChatSave()
+  broadcast()
+}
   } catch (error) {
     console.error('Twitch avatars:', error instanceof Error ? error.message : error)
   }
@@ -1718,7 +1747,7 @@ async function flushKickAvatars() {
     return { ...item, avatar }
   })
   if (changed) {
-    persistChat()
+    scheduleChatSave()
     broadcast()
   }
   if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
@@ -1830,7 +1859,7 @@ async function applyTranslation(message: ChatMessage) {
   const current = state.messages[index]
   const text = next.filter((part) => part.type === 'text').map((part) => part.text).join('') || current.text
   state.messages = state.messages.map((item, itemIndex) => itemIndex === index ? { ...item, text, parts: next, originalText: current.originalText || current.text } : item)
-  persistChat()
+  scheduleChatSave()
   broadcast()
 }
 
@@ -1882,6 +1911,7 @@ function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[],
 function addActivity(event: ActivityEvent) {
   if (!activityStore.add(event)) return
   state.activity = activityStore.list()
+  console.log(activityLogLine(event))
   broadcast()
 }
 
@@ -1984,7 +2014,7 @@ async function startStreamElements(backfill = false) {
   return failed
 }
 
-function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube' }) {
+function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube'; source?: string }) {
   const result = mergeIncomingChat(state.messages, message, options, {
     ownHandles: ownHandles(),
     ownUserIds: ownUserIds(),
@@ -1995,9 +2025,11 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
   for (const id of result.seenIds) youtubeSeen.add(id)
   if (!result.changed) return
   state.messages = result.messages
-  persistChat()
+  scheduleChatSave()
   broadcast()
   if (result.added) {
+    const source = options?.preload ? 'history' : options?.source || (options?.ingest === 'official' ? 'official list' : options?.ingest === 'innertube' ? 'InnerTube' : 'chat')
+    ingestLog.note(message.platform, source)
     queueTranslation(result.added)
     if (result.added.platform === 'Twitch') queueTwitchAvatar(result.added.userId)
   }
@@ -2014,7 +2046,7 @@ async function pollLiveState() {
   // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
   if (tokens.Twitch) {
     if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
-      try { await pollTwitch(); if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
+      try { await pollTwitch(); logPolledLive('Twitch'); if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('Twitch poll:', message)
         if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
@@ -2025,6 +2057,7 @@ async function pollLiveState() {
   if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
   if (tokens.YouTube) try {
     await pollYouTube()
+    logPolledLive('YouTube')
     if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
   } catch (error) {
     if (noteYouTubeQuota(error)) { /* site chat continues */ }
@@ -2036,7 +2069,7 @@ async function pollLiveState() {
   }
   if (tokens.Kick) {
     if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
-      try { await pollKick(); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
+      try { await pollKick(); logPolledLive('Kick'); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('Kick poll:', message)
         if (!kickChat.connected) setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
@@ -2424,7 +2457,7 @@ function retagYouTubeMessages() {
   })
   if (!changed) return false
   state.messages = next
-  persistChat()
+  scheduleChatSave()
   return true
 }
 

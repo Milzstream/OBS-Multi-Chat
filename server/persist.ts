@@ -68,6 +68,32 @@ export function commitJsonReplace(filePath: string, tmp: string, bak: string, io
   }
 }
 
+/**
+ * Coalesce bursty writes. `schedule` is a no-op while a flush is already
+ * waiting; `flush` writes immediately and is what shutdown must call so the
+ * last second of chat is not left only in memory.
+ */
+export function createDebouncedSave(save: () => void, waitMs = 1000, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }) {
+  let dirty = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+  function flush() {
+    if (timer) timers.clear(timer)
+    timer = undefined
+    if (!dirty) return
+    dirty = false
+    save()
+  }
+  function schedule() {
+    dirty = true
+    if (timer) return
+    timer = timers.set(() => {
+      timer = undefined
+      flush()
+    }, waitMs)
+  }
+  return { schedule, flush }
+}
+
 export function writeJsonAtomic(filePath: string, value: unknown) {
   const dir = path.dirname(filePath)
   fs.mkdirSync(dir, { recursive: true })

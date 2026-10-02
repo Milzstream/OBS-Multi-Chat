@@ -103,6 +103,41 @@ function prune(events: ActivityEvent[], maxAgeMs = 0, maxEvents = ACTIVITY_MAX) 
   }).slice(0, maxEvents)
 }
 
+const FOLLOW_LIKE = new Set<ActivityKind>(['follow', 'raid', 'membership'])
+const BACKFILL_MS = 14 * 24 * 60 * 60 * 1000
+const REPEAT_MS = 2 * 60 * 1000
+
+/** Collapse spaces and punctuation so `Cool User` and `cooluser` can be the same chatter. */
+export function activityNameKey(value: string) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+function nameKeys(event: ActivityEvent) {
+  return [activityNameKey(event.user), activityNameKey(event.handle || '')].filter(Boolean)
+}
+
+function activityNamesMatch(left: ActivityEvent, right: ActivityEvent) {
+  const rightKeys = new Set(nameKeys(right))
+  return nameKeys(left).some((key) => rightKeys.has(key))
+}
+
+/**
+ * Same alert from StreamElements and the native backup. Follows, raids, and
+ * memberships stay collapsed across the 14-day startup backfill. Repeating
+ * kinds (subs, cheers, gifts) only collapse inside two minutes, and never
+ * when both sides have different user ids.
+ */
+export function activityIsDuplicate(existing: ActivityEvent, incoming: ActivityEvent) {
+  if (existing.id && existing.id === incoming.id) return true
+  if (existing.platform !== incoming.platform || existing.kind !== incoming.kind) return false
+  if ((existing.amount || '') !== (incoming.amount || '')) return false
+  if (existing.userId && incoming.userId && existing.userId !== incoming.userId) return false
+  const sameUser = Boolean(existing.userId && incoming.userId && existing.userId === incoming.userId) || activityNamesMatch(existing, incoming)
+  if (!sameUser) return false
+  const delta = Math.abs((Date.parse(existing.time) || 0) - (Date.parse(incoming.time) || 0))
+  return delta < (FOLLOW_LIKE.has(existing.kind) ? BACKFILL_MS : REPEAT_MS)
+}
+
 /**
  * Full event store: keeps everything in memory for fast reads, persists to a
  * single JSON file via `persist.ts`, and prunes both by age and count.
@@ -172,9 +207,7 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
         time: parseActivityTime(incoming.time),
         profileUrl: profileUrl(source, incoming.user || user, incoming.userId, incoming.handle) || incoming.profileUrl,
       }
-      if (events.some((item) => item.id === event.id)) return false
-      const at = Date.parse(event.time) || Date.now()
-      if (events.some((item) => item.platform === event.platform && item.kind === event.kind && item.user.toLowerCase() === event.user.toLowerCase() && Math.abs((Date.parse(item.time) || 0) - at) < 15_000 && (item.amount || '') === (event.amount || ''))) return false
+      if (events.some((item) => activityIsDuplicate(item, event))) return false
       const next = [event, ...events]
       const tests = next.filter(isTestEvent)
       const real = newestFirst(next.filter((item) => !isTestEvent(item))).slice(0, cap)
