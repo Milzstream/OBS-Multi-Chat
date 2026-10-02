@@ -422,7 +422,6 @@ export class KickChat {
     console.log(`Kick chat connecting (${this.slug})`)
     const socket = new WebSocket(PUSHER_URL)
     this.ws = socket
-    socket.on('open', () => { this.attempt = 0 })
     socket.on('message', (data) => this.handle(String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
@@ -450,6 +449,7 @@ export class KickChat {
       return
     }
     if (event === 'pusher_internal:subscription_succeeded') {
+      this.attempt = 0
       if (String(payload?.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
       return
     }

@@ -33,6 +33,14 @@ import {
   twitchEmoteUrl,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
+  twitchEventSubRetryDelay,
+  twitchEventSubWatchdogShouldClose,
+  shareInFlight,
+  restoreYouTubeQuotaBlock,
+  youtubeBanChatIds,
+  youtubeLiveChatCursor,
+  youtubeLiveChatListQuery,
+  youtubeScrapedTarget,
   TWITCH_EVENTSUB_DEFAULT_URL,
   youtubeLiveChatBanSnippet,
 } from '../server/logic.js'
@@ -258,6 +266,13 @@ describe('Twitch EventSub reconnect', () => {
     assert.equal(twitchEventSubCloseAction(false, 5, 5), 'ignore')
     assert.equal(twitchEventSubCloseAction(true, 4, 5), 'ignore')
     assert.equal(twitchEventSubCloseAction(true, 5, 5), 'reconnect')
+    assert.equal(twitchEventSubCloseAction(true, 4, 4, true, false), 'ignore')
+    assert.equal(twitchEventSubCloseAction(false, 4, 4, true, true), 'resume-failed')
+    assert.equal(twitchEventSubRetryDelay(0), 3_000)
+    assert.equal(twitchEventSubRetryDelay(4), 30_000)
+    assert.equal(twitchEventSubWatchdogShouldClose(false, 1, 100_000, 10_000), false)
+    assert.equal(twitchEventSubWatchdogShouldClose(true, 0, 100_000, 10_000), false)
+    assert.equal(twitchEventSubWatchdogShouldClose(true, 1, 20_000, 10_000), true)
   })
 })
 
@@ -305,6 +320,7 @@ describe('activity history cap and SSE deltas', () => {
     assert.equal(activityAppendedEvent([a, b], [c, a])?.id, 'c')
     assert.equal(activityAppendedEvent([a, b], [c, b]), undefined)
     assert.deepEqual(activitySseFields([a], [b, a], ['w']), { activityEvent: b, activityWarnings: ['w'] })
+    assert.deepEqual(activitySseFields([a, b], [c, a], []), { activityEvent: c, activityWarnings: [], activityTruncated: true })
     assert.deepEqual(activitySseFields([a], [a], ['w']), { activityWarnings: ['w'] })
     assert.deepEqual(activitySseFields([a], [c, b], []), { activity: [c, b], activityWarnings: [] })
   })
@@ -320,5 +336,43 @@ describe('translation providers', () => {
     assert.equal(parseTranslatedText('libre', { translatedText: 'Hello' }, 'hola'), 'Hello')
     assert.equal(parseTranslatedText('gtx', [[['hola', 'hola']]], 'hola'), undefined)
     assert.match(translateFailureMessage('gtx'), /TRANSLATE_API_KEY/)
+  })
+})
+
+describe('0.7.4 relay fixes', () => {
+  it('shares one in-flight refresh per platform', async () => {
+    const locks = new Map<string, Promise<number>>()
+    let calls = 0
+    const run = () => shareInFlight(locks, 'Twitch', async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return calls
+    })
+    const [first, second] = await Promise.all([run(), run()])
+    assert.equal(calls, 1)
+    assert.equal(first, 1)
+    assert.equal(second, 1)
+  })
+
+  it('keeps a scraped video off the previous live chat id', () => {
+    assert.deepEqual(youtubeScrapedTarget({ videoId: 'newVideo123', title: 'Night' }), { videoId: 'newVideo123', title: 'Night' })
+    assert.equal(youtubeScrapedTarget({ videoId: 'sameVideo12', title: 'Night' }, { liveChatId: 'CHAT' }).liveChatId, 'CHAT')
+    const targets = [{ videoId: 'newVideo123' }]
+    assert.deepEqual(youtubeBanChatIds('newVideo123', targets, { liveChatId: 'OLD' }), [])
+    assert.deepEqual(youtubeBanChatIds('CHAT', [{ videoId: 'v', liveChatId: 'CHAT' }]), ['CHAT'])
+  })
+
+  it('continues an official YouTube chat poll from nextPageToken', () => {
+    assert.match(youtubeLiveChatListQuery('CHAT', 'PAGE'), /pageToken=PAGE/)
+    assert.equal(youtubeLiveChatCursor({ nextPageToken: 'PAGE', pollingIntervalMillis: 10_000 }).pageToken, 'PAGE')
+    assert.equal(youtubeLiveChatCursor({}).waitMs, 45_000)
+  })
+
+  it('restores a same-day YouTube quota block without a saved timestamp', () => {
+    const now = Date.parse('2026-10-02T18:00:00.000Z')
+    assert.equal(restoreYouTubeQuotaBlock({ day: '2026-10-01', used: 10_000, limit: 10_000 }, now), 0)
+    const until = restoreYouTubeQuotaBlock({ day: '2026-10-02', used: 10_000, limit: 10_000 }, now)
+    assert.ok(until > now)
+    assert.equal(restoreYouTubeQuotaBlock({ day: '2026-10-02', used: 10, limit: 10_000, blockedUntil: now + 1000 }, now), now + 1000)
   })
 })

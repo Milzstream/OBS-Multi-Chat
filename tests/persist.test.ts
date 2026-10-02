@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { createActivityStore } from '../server/activity.js'
 import { compareVersions, getCurrentVersion, isDesktopPackaged, pickInstallerAsset, versionManifestPaths } from '../server/check-update.js'
-import { readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
+import { commitJsonReplace, readJsonFile, resolveDataDir, writeJsonAtomic } from '../server/persist.js'
 
 function tempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'relay-persist-'))
@@ -120,6 +120,22 @@ describe('atomic JSON persistence', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('does not delete the live file when the backup rename fails', () => {
+    const removed: string[] = []
+    let copied = false
+    const file = 'tokens.json'
+    const ok = commitJsonReplace(file, 'tokens.json.1.tmp', 'tokens.json.bak', {
+      existsSync: () => true,
+      readFileSync: () => '{"accessToken":"old"}',
+      rmSync: (target) => { removed.push(target) },
+      renameSync: (_from, to) => { if (String(to).endsWith('.bak')) throw new Error('EPERM') },
+      copyFileSync: () => { copied = true },
+    })
+    assert.equal(ok, true)
+    assert.equal(copied, true)
+    assert.equal(removed.includes(file), false)
   })
 
   it('recovers from a truncated destination using the backup', () => {

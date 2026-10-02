@@ -31,6 +31,43 @@ export function resolveDataDir(input: {
  * `.bak` first (it is re-validated as parseable JSON) so the last-known-good
  * copy survives a failed rename.
  */
+type JsonReplaceIo = {
+  existsSync: (path: string) => boolean
+  readFileSync: (path: string, encoding: BufferEncoding) => string
+  rmSync: (path: string, options?: { force?: boolean }) => void
+  renameSync: (from: string, to: string) => void
+  copyFileSync: (from: string, to: string) => void
+}
+
+/**
+ * Move the previous file aside, then rename the temp into place. A failed
+ * backup must not delete the live file; overwrite it by copy instead.
+ */
+export function commitJsonReplace(filePath: string, tmp: string, bak: string, io: JsonReplaceIo = fs): boolean {
+  let movedAside = !io.existsSync(filePath)
+  if (!movedAside) {
+    try {
+      JSON.parse(io.readFileSync(filePath, 'utf8'))
+      io.rmSync(bak, { force: true })
+      io.renameSync(filePath, bak)
+      movedAside = true
+    } catch {
+      movedAside = false
+    }
+  }
+  if (movedAside) {
+    io.renameSync(tmp, filePath)
+    return true
+  }
+  try {
+    io.copyFileSync(tmp, filePath)
+    io.rmSync(tmp, { force: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function writeJsonAtomic(filePath: string, value: unknown) {
   const dir = path.dirname(filePath)
   fs.mkdirSync(dir, { recursive: true })
@@ -43,16 +80,9 @@ export function writeJsonAtomic(filePath: string, value: unknown) {
   } catch {
     // fsync is best-effort on filesystems that do not support it
   }
-  if (fs.existsSync(filePath)) {
-    try {
-      JSON.parse(fs.readFileSync(filePath, 'utf8'))
-      fs.rmSync(bak, { force: true })
-      fs.renameSync(filePath, bak)
-    } catch {
-      fs.rmSync(filePath, { force: true })
-    }
+  if (!commitJsonReplace(filePath, tmp, bak)) {
+    throw new Error(`Could not replace ${filePath}`)
   }
-  fs.renameSync(tmp, filePath)
 }
 
 /**

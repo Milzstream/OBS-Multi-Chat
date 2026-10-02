@@ -38,18 +38,33 @@ export function chatDockFields(remote: Record<string, unknown>) {
  * `undefined` so a chat/activity/settings slice cannot look like
  * “StreamElements disconnected” (#55).
  */
-export function applyActivitySlice<T extends { id: string }>(previous: T[], fields: { activity?: unknown; activityEvent?: unknown }) {
+export function applyActivitySlice<T extends { id: string }>(previous: T[], fields: { activity?: unknown; activityEvent?: unknown; activityTruncated?: boolean }) {
   if (Array.isArray(fields.activity)) return fields.activity as T[]
   const added = fields.activityEvent
   if (!added || typeof added !== 'object' || Array.isArray(added) || !('id' in added)) return previous
   const event = added as T
-  return [event, ...previous.filter((item) => item.id !== event.id)]
+  const next = [event, ...previous.filter((item) => item.id !== event.id)]
+  if (fields.activityTruncated && next.length > previous.length) return next.slice(0, previous.length)
+  return next
+}
+
+/** A frame that arrived during backoff means the scheduled reconnect should not tear the stream down. */
+export function sseReconnectStillNeeded(frameGenAtSchedule: number, frameGenNow: number) {
+  return frameGenNow === frameGenAtSchedule
+}
+
+/** Ignore a late `/api/state` that would rewind the cursor behind a newer frame. */
+export function sseSeqFromState(lastSeq: number | null, incoming: number) {
+  if (!Number.isFinite(incoming)) return lastSeq
+  if (lastSeq == null || incoming >= lastSeq) return incoming
+  return lastSeq
 }
 
 export function activityDockFields(remote: Record<string, unknown>) {
   return {
     activity: Array.isArray(remote.activity) ? remote.activity : undefined,
     activityEvent: remote.activityEvent && typeof remote.activityEvent === 'object' && !Array.isArray(remote.activityEvent) ? remote.activityEvent : undefined,
+    activityTruncated: remote.activityTruncated === true ? true : undefined,
     activityWarnings: Array.isArray(remote.activityWarnings) ? remote.activityWarnings : undefined,
     streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
     accounts: Array.isArray(remote.accounts) ? remote.accounts : undefined,
@@ -76,11 +91,17 @@ export function subscribeDockSse(handlers: {
   let closed = false
   let reconnectTimer: number | undefined
   let connecting = false
+  let frameGen = 0
+  let resyncGen = 0
 
   const applyFrame = (type: SseFrameType, data: Record<string, unknown>) => {
     lastEventAt = Date.now()
-    // Ping frames only refresh the stall watchdog; they carry no state
-    if (type === 'ping') return
+    frameGen += 1
+    // Ping frames refresh the stall watchdog and clear the failure counter
+    if (type === 'ping') {
+      failures = 0
+      return
+    }
     const seq = Number(data.seq)
     if (!Number.isFinite(seq)) return
     if (sseSeqIsGap(lastSeq, seq, type)) {
@@ -98,18 +119,21 @@ export function subscribeDockSse(handlers: {
   }
 
   const resync = async () => {
+    const gen = ++resyncGen
     try {
       const response = await fetch('/api/state')
+      if (gen !== resyncGen) return
       if (!response.ok) throw new Error('state')
       const remote = await response.json() as Record<string, unknown>
-      const seq = Number(remote.seq)
-      if (Number.isFinite(seq)) lastSeq = seq
+      if (gen !== resyncGen) return
+      lastSeq = sseSeqFromState(lastSeq, Number(remote.seq))
       lastEventAt = Date.now()
+      frameGen += 1
       handlers.onSnapshot(remote)
       handlers.onStatus(true)
       failures = 0
     } catch {
-      handlers.onStatus(false)
+      if (gen === resyncGen) handlers.onStatus(false)
     }
   }
 
@@ -138,7 +162,6 @@ export function subscribeDockSse(handlers: {
 
   const scheduleReconnect = () => {
     if (closed || reconnectTimer != null) return
-    lastEventAt = Date.now()
     failures += 1
     if (failures >= SSE_RELOAD_AFTER) {
       window.location.reload()
@@ -147,8 +170,13 @@ export function subscribeDockSse(handlers: {
     // Exponential backoff capped at 8s; after enough failures the backend is
     // presumed gone and reloading re-establishes the whole dock
     const delay = Math.min(8_000, 500 * 2 ** failures)
+    const scheduledGen = frameGen
     reconnectTimer = window.setTimeout(() => {
       reconnectTimer = undefined
+      if (!sseReconnectStillNeeded(scheduledGen, frameGen)) {
+        failures = 0
+        return
+      }
       connecting = false
       void resync()
       connect()

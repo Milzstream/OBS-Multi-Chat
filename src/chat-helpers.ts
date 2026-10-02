@@ -37,6 +37,16 @@ export function preferredCategory(twitch: string, kick: string) {
   return twitchName.length >= kickName.length ? twitchName : kickName
 }
 
+/** Keep a one-platform pick. `preferredCategory` would replace it with the other platform's longer name. */
+export function unifiedCategoryQuery(current: string, twitch: string, kick: string, typing: boolean) {
+  if (typing) return current
+  const shown = current.trim()
+  const twitchName = twitch.trim()
+  const kickName = kick.trim()
+  if (shown && (shown === twitchName || shown === kickName)) return shown
+  return preferredCategory(twitch, kick)
+}
+
 export function visibleChatMessages<T extends { platform: ChatPlatform; platforms?: ChatPlatform[] }>(messages: T[], filter: 'All' | ChatPlatform) {
   if (filter === 'All') return messages
   return messages.filter((message) => (message.platforms || [message.platform]).includes(filter))
@@ -88,6 +98,12 @@ export function mergeCategoryResults(twitch: CategoryHit[], kick: CategoryHit[])
 export type TagPlatform = 'Twitch' | 'Kick'
 
 /** Twitch: letters/numbers 1–25. Kick: those plus - _. No catalog/autocomplete APIs. */
+/** Destination toggles are authoritative. An empty selection does not fall through to every valid platform. */
+export function assignTagPlatforms(tag: string, selected: TagPlatform[]): TagPlatform[] {
+  if (!selected.length) return []
+  return tagPlatforms(tag).filter((platform) => selected.includes(platform))
+}
+
 export function tagPlatforms(tag: string): TagPlatform[] {
   const value = tag.trim().replace(/^#+/, '')
   if (!value) return []
@@ -97,6 +113,17 @@ export function tagPlatforms(tag: string): TagPlatform[] {
 }
 
 export type TagAssignment = { tag: string; platforms: TagPlatform[] }
+export type ModerationTarget = { platform: ChatPlatform; messageId?: string; userId?: string; sourceId?: string }
+
+export function moderationTargets(message: { platform: ChatPlatform; id: string; userId?: string; sourceId?: string; copies?: Array<{ platform: ChatPlatform; id: string; userId?: string; sourceId?: string }> }): ModerationTarget[] {
+  if (message.copies?.length) return message.copies.map((copy) => ({ platform: copy.platform, messageId: copy.id, userId: copy.userId, sourceId: copy.sourceId }))
+  return [{ platform: message.platform, messageId: message.id, userId: message.userId, sourceId: message.sourceId }]
+}
+
+export function moderationPlatformLabel(message: { platform: ChatPlatform; copies?: Array<{ platform: ChatPlatform }> }) {
+  if (message.copies?.length) return [...new Set(message.copies.map((copy) => copy.platform))].join(', ')
+  return message.platform
+}
 
 export function tagAssignments(twitch?: string[], kick?: string[]): TagAssignment[] {
   const map = new Map<string, TagAssignment>()
