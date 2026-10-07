@@ -54,6 +54,11 @@ function decodeJwt(jwt: string) {
   }
 }
 
+/** Astro says this when a topic is already on the session. That is not a failure. */
+function alreadySubscribed(message: string) {
+  return /already subscribed/i.test(message)
+}
+
 function formatAmount(amount: unknown, currency?: unknown) {
   const value = typeof amount === 'number' ? amount : Number(amount)
   if (!Number.isFinite(value)) return String(amount || '')
@@ -214,6 +219,11 @@ export class StreamElementsClient {
   private attempt = 0
   /** True once Astro has acked the subscribe, i.e. alerts are actually flowing. */
   private subscribed = false
+  /** A reconnect token restores the session, so welcome must not subscribe again. */
+  private resumed = false
+  private sentTopics = new Set<string>()
+  private subscribeTimers: NodeJS.Timeout[] = []
+  private status?: string
   private readonly open: (url: string) => AstroSocket
   private readonly graceMs: number
   private readonly reconnectBaseMs: number
@@ -239,6 +249,9 @@ export class StreamElementsClient {
   async stop() {
     this.closed = true
     this.subscribed = false
+    this.resumed = false
+    this.status = undefined
+    this.sentTopics.clear()
     this.channels = []
     this.onActivity = undefined
     this.onStatus = undefined
@@ -251,6 +264,12 @@ export class StreamElementsClient {
     this.reconnectTimer = undefined
     if (this.warnTimer) clearTimeout(this.warnTimer)
     this.warnTimer = undefined
+    this.clearSubscribeTimers()
+  }
+
+  private clearSubscribeTimers() {
+    for (const timer of this.subscribeTimers) clearTimeout(timer)
+    this.subscribeTimers = []
   }
 
   private async connect() {
@@ -263,9 +282,12 @@ export class StreamElementsClient {
   private async openSocket() {
     await this.disconnectSocket()
     this.subscribed = false
+    this.resumed = false
+    this.sentTopics.clear()
+    this.clearSubscribeTimers()
     const socket = this.open(ASTRO_URL)
     this.ws = socket
-    socket.on('message', (data) => this.handle(String(data)))
+    socket.on('message', (data) => this.handle(socket, String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
       this.ws = undefined
@@ -275,18 +297,33 @@ export class StreamElementsClient {
     socket.on('error', (error) => { console.error('StreamElements:', error.message); socket.close() })
   }
 
-  private handle(raw: string) {
+  private handle(socket: AstroSocket, raw: string) {
+    if (socket !== this.ws) return
     let payload: any
     try { payload = JSON.parse(raw) } catch { return }
     const type = String(payload?.type || '')
     if (type === 'welcome') {
-      this.subscribe()
       this.startPing()
+      // The reconnect token already restored the topics. Subscribing again is
+      // what makes Astro answer "already subscribed to topic" on every cycle.
+      if (this.resumed) {
+        this.subscribed = true
+        this.attempt = 0
+        this.report()
+        return
+      }
+      this.subscribe()
       return
     }
     if (type === 'response') {
       if (payload.error) {
         const message = String(payload.data?.message || payload.error)
+        if (alreadySubscribed(message)) {
+          this.subscribed = true
+          this.attempt = 0
+          if (!this.status || alreadySubscribed(this.status)) this.report()
+          return
+        }
         console.error('StreamElements subscribe:', message)
         this.subscribed = false
         this.report(`StreamElements: ${message}`)
@@ -316,6 +353,9 @@ export class StreamElementsClient {
     let delay = 0
     for (const channel of this.channels) {
       for (const topic of ['channel.activities', 'channel.tips']) {
+        const key = `${channel.channelId}\0${topic}`
+        if (this.sentTopics.has(key)) continue
+        this.sentTopics.add(key)
         const payload = JSON.stringify({
           type: 'subscribe',
           nonce: crypto.randomUUID(),
@@ -327,7 +367,7 @@ export class StreamElementsClient {
           },
         })
         const wait = delay
-        setTimeout(() => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(payload) }, wait)
+        this.subscribeTimers.push(setTimeout(() => { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(payload) }, wait))
         delay += 120
       }
     }
@@ -341,6 +381,9 @@ export class StreamElementsClient {
   }
 
   private openReconnect(token: string) {
+    this.clearSubscribeTimers()
+    this.resumed = true
+    this.sentTopics.clear()
     const socket = this.open(`${ASTRO_URL}/?reconnect_token=${encodeURIComponent(token)}`)
     const previous = this.ws
     this.ws = socket
@@ -352,7 +395,7 @@ export class StreamElementsClient {
       this.subscribed = true
       this.report()
     })
-    socket.on('message', (data) => this.handle(String(data)))
+    socket.on('message', (data) => this.handle(socket, String(data)))
     socket.on('close', () => {
       if (this.ws !== socket) return
       this.ws = undefined
@@ -369,6 +412,8 @@ export class StreamElementsClient {
       clearTimeout(this.warnTimer)
       this.warnTimer = undefined
     }
+    if (this.status === message) return
+    this.status = message
     this.onStatus?.(message)
   }
 
@@ -385,7 +430,7 @@ export class StreamElementsClient {
     this.warnTimer = setTimeout(() => {
       this.warnTimer = undefined
       if (this.closed || this.subscribed) return
-      this.onStatus?.('StreamElements disconnected — retrying alerts')
+      this.report('StreamElements disconnected — retrying alerts')
     }, this.graceMs)
   }
 

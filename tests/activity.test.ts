@@ -283,6 +283,30 @@ describe('StreamElements connection', () => {
     assert.equal(client.connected, true)
   })
 
+  it('does not warn when Astro says the topic is already subscribed', async (t) => {
+    const { client, sockets, messages, alerts, ack } = testClient(t)
+    await client.start([channel, { ...channel, jwt: 'other-jwt' }], () => undefined, (message) => messages.push(message))
+    await ack(0)
+    assert.equal(sockets[0].sent.length, 2, 'one channel id is one subscribe per topic')
+    sockets[0].fire('message', JSON.stringify({ type: 'response', error: 'err', data: { message: 'already subscribed to topic' } }))
+    assert.deepEqual(alerts(), [])
+    assert.equal(client.connected, true)
+  })
+
+  it('does not subscribe again when Astro hands back a reconnect token', async (t) => {
+    const { client, sockets, messages, alerts, ack } = testClient(t)
+    await client.start([channel], () => undefined, (message) => messages.push(message))
+    await ack(0)
+    sockets[0].fire('message', JSON.stringify({ type: 'reconnect', data: { reconnect_token: 'resume' } }))
+    assert.equal(sockets.length, 2)
+    sockets[1].fire('open')
+    sockets[1].fire('message', JSON.stringify({ type: 'welcome' }))
+    await wait(200)
+    assert.equal(sockets[1].sent.length, 0)
+    assert.deepEqual(alerts(), [])
+    assert.equal(client.connected, true)
+  })
+
   it('never warns after a stop, so a restart cannot leave a stale alert', async (t) => {
     const { client, sockets, messages } = testClient(t)
     await client.start([channel], () => undefined, (message) => messages.push(message))
