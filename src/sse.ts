@@ -76,6 +76,12 @@ export function activityDockFields(remote: Record<string, unknown>) {
   }
 }
 
+function withWatchToken(url: string, token: string) {
+  if (!token) return url
+  const join = url.includes('?') ? '&' : '?'
+  return `${url}${join}token=${encodeURIComponent(token)}`
+}
+
 export function subscribeDockSse(handlers: {
   onSnapshot: (data: Record<string, unknown>) => void
   onChat?: (data: Record<string, unknown>) => void
@@ -83,7 +89,10 @@ export function subscribeDockSse(handlers: {
   onPresence?: (data: Record<string, unknown>) => void
   onSettings?: (data: Record<string, unknown>) => void
   onStatus: (online: boolean) => void
+  /** View secret from the watch URL. Omitted on the operator docks, which are loopback. */
+  token?: string
 }) {
+  const token = handlers.token?.trim() || ''
   let source: EventSource | null = null
   let lastSeq: number | null = null
   let lastEventAt = Date.now()
@@ -121,7 +130,7 @@ export function subscribeDockSse(handlers: {
   const resync = async () => {
     const gen = ++resyncGen
     try {
-      const response = await fetch('/api/state')
+      const response = await fetch(withWatchToken('/api/state', token))
       if (gen !== resyncGen) return
       if (!response.ok) throw new Error('state')
       const remote = await response.json() as Record<string, unknown>
@@ -141,7 +150,7 @@ export function subscribeDockSse(handlers: {
     if (closed || connecting) return
     connecting = true
     source?.close()
-    const next = new EventSource('/events')
+    const next = new EventSource(withWatchToken('/events', token))
     source = next
     // Event taxonomy: snapshot = full state; chat/activity = incremental feeds;
     // presence/settings = mirrors of backend settings; ping = keepalive
