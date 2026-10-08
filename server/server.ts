@@ -458,7 +458,7 @@ function currentWatchUrl() {
 }
 app.get('/api/console', (_request, response) => {
   const base = `http://127.0.0.1:${port}`
-  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, lanEnabled, watchUrl: currentWatchUrl() || null })
+  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, lanEnabled: localApi.lanEnabled, watchUrl: currentWatchUrl() || null })
 })
 app.get('/api/logs', (request, response) => {
   const after = Number(request.query.after || 0)
