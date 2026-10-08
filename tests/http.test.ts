@@ -16,6 +16,8 @@ import {
   listenOn,
   parseOpenUrl,
   resolveBindHost,
+  stickyLanBind,
+  watchOffLogLine,
 } from '../server/local-api.js'
 import { createOAuthStateStore } from '../server/oauth-state.js'
 
@@ -40,11 +42,19 @@ describe('local control authorization', () => {
     assert.deepEqual(resolveBindHost({ RELAY_BIND: '0.0.0.0' }), { host: '0.0.0.0', lanEnabled: true })
     assert.deepEqual(resolveBindHost({ RELAY_LAN: '1' }), { host: '0.0.0.0', lanEnabled: true })
     assert.equal(listenHostFor(false), '127.0.0.1')
-    assert.equal(listenHostFor(false, '0.0.0.0'), '127.0.0.1')
     assert.equal(listenHostFor(true), '0.0.0.0')
-    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
     assert.equal(listenHostFor(true, '127.0.0.1'), '0.0.0.0')
+    assert.equal(listenHostFor(false, '127.0.0.1'), '127.0.0.1')
+    assert.equal(stickyLanBind('0.0.0.0'), true)
+    assert.equal(stickyLanBind('192.168.1.20'), true)
+    assert.equal(stickyLanBind('127.0.0.1'), false)
+    assert.equal(stickyLanBind(''), false)
+    assert.equal(listenHostFor(false, '0.0.0.0'), '0.0.0.0')
+    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
+    assert.equal(listenHostFor(false, '192.168.1.20'), '192.168.1.20')
     assert.equal(listenHostFor(true, '192.168.1.20'), '192.168.1.20')
+    assert.match(watchOffLogLine('0.0.0.0'), /RELAY_BIND=0\.0\.0\.0 is still listening/)
+    assert.match(watchOffLogLine(''), /cannot open the relay/)
   })
 
   it('closes and re-listens so Watch can bind and unbind the LAN', async () => {

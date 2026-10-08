@@ -7,9 +7,9 @@ import type { NextFunction, Request, Response } from 'express'
 /**
  * Local control API helpers: hardening and URL allowlists for the docks.
  *
- * The HTTP socket binds to loopback while Watch is off. Turning Watch on
- * (companion button, `settings.lanWatch`, `RELAY_LAN=1`, or a non-loopback
- * `RELAY_BIND`) rebinds to the LAN; turning it off returns to loopback.
+ * Bind and Watch are separate. `RELAY_BIND=0.0.0.0` or a LAN IP is sticky: the
+ * socket stays there and Watch only hosts `/watch`. Default / loopback bind:
+ * Watch on temporarily listens on `0.0.0.0`, Watch off returns to `127.0.0.1`.
  * Off this computer:
  * - A watch token (query `token` or `relay_watch` cookie) can only read
  *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
@@ -69,9 +69,9 @@ export function isLoopbackHost(host: string) {
 
 /**
  * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
- * (or any non-loopback `RELAY_BIND`) starts with Watch on. Writes from off this
- * computer then require `RELAY_API_TOKEN`; the watch link uses its own view token.
- * The companion Watch button rebinds this at runtime via `listenHostFor`.
+ * (or any non-loopback `RELAY_BIND`) starts with Watch on. A non-loopback
+ * `RELAY_BIND` is sticky: Watch will not unbind it. Default bind + Watch on
+ * temporarily listens on all interfaces via `listenHostFor`.
  */
 export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   const raw = String(env.RELAY_BIND || '').trim()
@@ -81,16 +81,27 @@ export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: s
   return { host: '127.0.0.1', lanEnabled: false }
 }
 
+/** True when `RELAY_BIND` is `0.0.0.0` or a LAN IP. That socket stays bound. */
+export function stickyLanBind(envBind = '') {
+  const bound = envBind.trim()
+  return Boolean(bound && !isLoopbackHost(bound))
+}
+
 /**
- * Socket bind for the current Watch state. Watch off is always loopback, even
- * if `RELAY_BIND=0.0.0.0` is set. Watch on uses that env host when it is a LAN
- * address, otherwise all interfaces.
+ * Socket bind for the current Watch state.
+ * Sticky LAN `RELAY_BIND` is always returned, Watch on or off.
+ * Default / loopback config: Watch on uses `0.0.0.0`, Watch off uses `127.0.0.1`.
  */
 export function listenHostFor(lanEnabled: boolean, envBind = '') {
-  if (!lanEnabled) return '127.0.0.1'
   const bound = envBind.trim()
-  if (bound && !isLoopbackHost(bound)) return bound
-  return '0.0.0.0'
+  if (stickyLanBind(bound)) return bound
+  return lanEnabled ? '0.0.0.0' : '127.0.0.1'
+}
+
+export function watchOffLogLine(envBind = '') {
+  const bound = envBind.trim()
+  if (stickyLanBind(bound)) return `Watch is off. RELAY_BIND=${bound} is still listening; the watch page is not hosted.`
+  return 'Watch is off. Other devices cannot open the relay.'
 }
 
 /** Watch URL without the view secret, for the companion log. */

@@ -17,7 +17,7 @@ import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, ST
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, watchLogLine } from './local-api.js'
+import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
@@ -247,7 +247,7 @@ type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMes
 
 const port = Number(process.env.PORT || 4173)
 const { lanEnabled: envLanEnabled } = resolveBindHost()
-/** LAN listen address while Watch is on. Watch off always rebinds to 127.0.0.1. */
+/** Honored as-is when it is 0.0.0.0 or a LAN IP. Default loopback only expands to the LAN while Watch is on. */
 const envBindHost = String(process.env.RELAY_BIND || '').trim()
 const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
 const localApi = { port, bindHost: '127.0.0.1', lanEnabled: envLanEnabled, apiToken, watchToken: undefined as string | undefined }
@@ -691,7 +691,7 @@ app.post('/api/settings', async (request, response) => {
     if (rebound.ok) {
       settings.lanWatch = body.lanWatch
       watchChanged = true
-      console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : 'Watch is off. Other devices cannot open the relay.')
+      console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : watchOffLogLine(envBindHost))
     } else {
       watchError = rebound.error
       console.error(watchError)
@@ -852,10 +852,19 @@ function dropSseClients() {
   clients.clear()
 }
 
-/** Watch on binds the LAN; Watch off returns to loopback. A failed LAN bind restores the previous socket. */
+/**
+ * Watch hosts or unhosts `/watch`. The socket only moves when bind is the
+ * default loopback: Watch on → 0.0.0.0, Watch off → 127.0.0.1. A sticky
+ * RELAY_BIND (0.0.0.0 or a LAN IP) stays put.
+ */
 async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
   const nextHost = listenHostFor(enabled, envBindHost)
   if (enabled === localApi.lanEnabled && nextHost === localApi.bindHost && httpServer.listening) return { ok: true }
+  if (nextHost === localApi.bindHost && httpServer.listening) {
+    localApi.lanEnabled = enabled
+    if (enabled) ensureWatchToken()
+    return { ok: true }
+  }
   const previousHost = localApi.bindHost
   const previousEnabled = localApi.lanEnabled
   try {
@@ -873,9 +882,9 @@ async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: fa
       localApi.lanEnabled = previousEnabled
     } catch {
       try {
-        await listenOn(httpServer, port, '127.0.0.1')
-        localApi.bindHost = '127.0.0.1'
-        localApi.lanEnabled = false
+        await listenOn(httpServer, port, previousHost || '127.0.0.1')
+        localApi.bindHost = previousHost || '127.0.0.1'
+        localApi.lanEnabled = previousEnabled
       } catch { /* last-resort bind failed; the next request will error */ }
     }
     return { ok: false, error: `Could not ${enabled ? 'listen on the LAN' : 'return to this computer only'}: ${message}` }
@@ -906,7 +915,9 @@ function printListenBanner() {
       ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
       : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
   } else {
-    console.log('Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
+    console.log(stickyLanBind(envBindHost)
+      ? watchOffLogLine(envBindHost)
+      : 'Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
   }
   if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
   if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)

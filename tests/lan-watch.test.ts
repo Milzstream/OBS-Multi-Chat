@@ -159,7 +159,10 @@ describe('LAN watch access', () => {
     assert.equal(watchUrlForLog('http://192.168.1.20:4173/watch?token=view-secret'), 'http://192.168.1.20:4173/watch')
     assert.equal(watchLogLine('http://192.168.1.20:4173/watch?token=view-secret'), 'Watch          http://192.168.1.20:4173/watch')
     assert.equal(watchLogLine(undefined), 'Watch is on, but no private IPv4 address was found for a watch link.')
-    assert.equal(listenHostFor(false, '0.0.0.0'), '127.0.0.1')
+    assert.equal(listenHostFor(false, '0.0.0.0'), '0.0.0.0')
+    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
+    assert.equal(listenHostFor(false), '127.0.0.1')
+    assert.equal(listenHostFor(true), '0.0.0.0')
   })
 
   it('mounts /watch instead of the operator docks', () => {

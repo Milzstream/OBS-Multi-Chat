@@ -8,7 +8,8 @@ import type { LogLine } from './log-buffer.js'
  *
  * Lives next to `production.env`: installer copies use
  * `%LOCALAPPDATA%\Relay Chat Dock\logs\relay.log`, portable copies use
- * `<exe dir>\logs\relay.log`. Rotate at a few megabytes into `relay.log.bak`.
+ * `<exe dir>\logs\relay.log`. Capped: the live file rotates into `relay.log.bak`
+ * at 2 MB, so disk use stays around 4 MB. Oldest lines drop on rotate.
  * Append without fsync so the chat path stays cheap; flush on a timer and
  * again before exit so a hard crash still has the last few seconds.
  */
