@@ -67,6 +67,7 @@ export default function ConsoleApp() {
   const [quotaDraft, setQuotaDraft] = useState('')
   const [quotaStatus, setQuotaStatus] = useState('')
   const [copied, setCopied] = useState('')
+  const [watchMenu, setWatchMenu] = useState(false)
   const [youtubePrivacy, setYoutubePrivacy] = useState<YoutubePrivacyNotice[]>([])
   const [privacyStatus, setPrivacyStatus] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
@@ -84,6 +85,13 @@ export default function ConsoleApp() {
     window.addEventListener('pagehide', bye)
     return () => window.removeEventListener('pagehide', bye)
   }, [])
+
+  useEffect(() => {
+    if (!watchMenu) return
+    const close = () => setWatchMenu(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [watchMenu])
 
   useEffect(() => {
     let cancelled = false
@@ -179,8 +187,8 @@ export default function ConsoleApp() {
     }
   }
 
-  const toggleWatch = async () => {
-    const enabled = !info?.lanEnabled
+  const setWatch = async (enabled: boolean) => {
+    setWatchMenu(false)
     try {
       const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanWatch: enabled }) })
       const data = await response.json() as { lanEnabled?: boolean; watchUrl?: string | null }
@@ -226,16 +234,30 @@ export default function ConsoleApp() {
           <button type="button" title={info?.envPath || 'Configuration file'} disabled={!info?.envPath} onClick={() => info?.envPath && void copy('config', info.envPath)}>{copied === 'config' ? 'Copied' : 'Config'}</button>
           <button type="button" title={info?.chatUrl || 'Chat dock URL'} disabled={!info?.chatUrl} onClick={() => info?.chatUrl && void copy('chat', info.chatUrl)}>{copied === 'chat' ? 'Copied' : 'Chat dock'}</button>
           <button type="button" title={info?.activityUrl || 'Activity dock URL'} disabled={!info?.activityUrl} onClick={() => info?.activityUrl && void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Activity dock'}</button>
-          <button
-            type="button"
-            className={info?.lanEnabled ? 'watch-on' : 'watch-off'}
-            title={info?.lanEnabled ? `${info.watchUrl || 'Watch is on'}\nRight-click to copy. Click to turn off.` : 'Turn on a readonly LAN watch link. Chat and activity docks stay on this computer.'}
-            onClick={() => void toggleWatch()}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              if (info?.watchUrl) void copy('watch', info.watchUrl)
-            }}
-          >{copied === 'watch' ? 'Copied' : info?.lanEnabled ? 'Watch on' : 'Watch'}</button>
+          <span className="watch-menu-wrap">
+            <button
+              type="button"
+              className={info?.lanEnabled ? 'watch-on' : 'watch-off'}
+              title={info?.lanEnabled ? 'Click to copy the watch link. Right-click to turn it off.' : 'Turn on a readonly LAN watch link. Chat and activity docks stay on this computer.'}
+              onClick={() => {
+                if (info?.lanEnabled) {
+                  if (info.watchUrl) void copy('watch', info.watchUrl)
+                  return
+                }
+                void setWatch(true)
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                if (info?.lanEnabled) setWatchMenu(true)
+              }}
+            >{copied === 'watch' ? 'Copied' : info?.lanEnabled ? 'Watch on' : 'Watch'}</button>
+            {watchMenu ? (
+              <div className="watch-menu" onClick={(event) => event.stopPropagation()}>
+                <button type="button" onClick={() => { if (info?.watchUrl) void copy('watch', info.watchUrl); setWatchMenu(false) }}>Copy link</button>
+                <button type="button" onClick={() => void setWatch(false)}>Turn off</button>
+              </div>
+            ) : null}
+          </span>
         </nav>
       </header>
       {youtubePrivacy.map((item) => (
