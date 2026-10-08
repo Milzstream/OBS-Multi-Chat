@@ -235,7 +235,7 @@ function tokenMatches(expected: string | undefined, presented: string | undefine
 }
 
 function limitedToThisComputer(): { ok: false; status: 403; error: string } {
-  return { ok: false, status: 403, error: 'Local control API is limited to this computer. Set RELAY_BIND=0.0.0.0 to allow LAN access.' }
+  return { ok: false, status: 403, error: 'Watch is off. Turn it on in the Relay Chat Dock window to share a readonly link.' }
 }
 
 /**
@@ -245,7 +245,10 @@ function limitedToThisComputer(): { ok: false; status: 403; error: string } {
  */
 export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true; watchCookie?: boolean } | { ok: false; status: number; error: string } {
   const kind = classifyAccess(request.method, request.path)
-  if (kind === 'public') return { ok: true }
+  if (kind === 'public') {
+    if (options.lanEnabled || isLoopbackAddress(request.ip)) return { ok: true }
+    return limitedToThisComputer()
+  }
   const origin = String(request.origin || '').trim()
   const referer = String(request.referer || '').trim()
   const source = origin || referer

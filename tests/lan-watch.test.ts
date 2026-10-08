@@ -111,6 +111,16 @@ describe('LAN watch access', () => {
       path: '/api/jwts',
       ip: '127.0.0.1',
     }, lan).ok, true)
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/assets/index.js',
+      ip: '192.168.1.20',
+    }, { ...lan, lanEnabled: false }).ok, false)
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/',
+      ip: '192.168.1.20',
+    }, { ...lan, lanEnabled: true, watchToken: 'view-secret' }).ok, false)
   })
 
   it('keeps a view token that is not the write secret', () => {

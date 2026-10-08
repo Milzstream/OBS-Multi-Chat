@@ -237,9 +237,10 @@ if (process.argv.includes('--add-obs-docks')) {
 type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
-const { host: bindHost, lanEnabled } = resolveBindHost()
+const { lanEnabled: envLanEnabled } = resolveBindHost()
+const bindHost = '0.0.0.0'
 const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
-const localApi = { port, bindHost, lanEnabled, apiToken, watchToken: undefined as string | undefined }
+const localApi = { port, bindHost, lanEnabled: envLanEnabled, apiToken, watchToken: undefined as string | undefined }
 const app = express()
 const httpServer = createServer(app)
 httpServer.requestTimeout = 0
@@ -247,26 +248,34 @@ httpServer.headersTimeout = 0
 httpServer.timeout = 0
 const clients = new Set<express.Response>()
 const dataDir = resolveDataDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd(), env: process.env })
-// View secret for the shared watch URL. Kept distinct from RELAY_API_TOKEN so that link cannot write.
-const watchTokenFile = path.join(dataDir, 'watch-token')
-let storedWatchToken = ''
-try { storedWatchToken = fs.readFileSync(watchTokenFile, 'utf8') } catch { /* created on the first LAN run */ }
-const watchSecret = resolveWatchSecret({
-  lanEnabled,
-  envToken: process.env.RELAY_WATCH_TOKEN,
-  apiToken,
-  stored: storedWatchToken,
-  create: () => crypto.randomBytes(24).toString('base64url'),
-})
-if (watchSecret.persist) {
-  try { writeTextAtomic(watchTokenFile, `${watchSecret.persist}\n`) }
-  catch (error) { console.error(`Could not save the watch token: ${error instanceof Error ? error.message : error}`) }
-}
-localApi.watchToken = watchSecret.token
 const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
 const settings = loadSettings()
+if (typeof settings.lanWatch === 'boolean') localApi.lanEnabled = settings.lanWatch
+// View secret for the shared watch URL. Kept distinct from RELAY_API_TOKEN so that link cannot write.
+const watchTokenFile = path.join(dataDir, 'watch-token')
+let storedWatchToken = ''
+try { storedWatchToken = fs.readFileSync(watchTokenFile, 'utf8') } catch { /* created the first time Watch is turned on */ }
+function ensureWatchToken() {
+  if (localApi.watchToken) return localApi.watchToken
+  const secret = resolveWatchSecret({
+    lanEnabled: true,
+    envToken: process.env.RELAY_WATCH_TOKEN,
+    apiToken,
+    stored: storedWatchToken,
+    create: () => crypto.randomBytes(24).toString('base64url'),
+  })
+  if (secret.persist) {
+    storedWatchToken = secret.persist
+    try { writeTextAtomic(watchTokenFile, `${secret.persist}\n`) }
+    catch (error) { console.error(`Could not save the watch token: ${error instanceof Error ? error.message : error}`) }
+  }
+  localApi.watchToken = secret.token
+  if (secret.warning) console.warn(secret.warning)
+  return secret.token
+}
+if (localApi.lanEnabled) ensureWatchToken()
 const activityStore = createActivityStore(path.join(dataDir, 'activity.json'), activityMax)
 if (settings.dropOldAlerts) activityStore.setMaxAge(ACTIVITY_MAX_AGE_MS)
 const redirectUri = process.env.OAUTH_REDIRECT_URI || `http://localhost:${port}/oauth/callback`
@@ -443,7 +452,8 @@ app.get('/api/state', (_request, response) => {
   response.json({ seq: sseSeq, ...state })
 })
 function currentWatchUrl() {
-  if (!lanEnabled) return
+  if (!localApi.lanEnabled) return
+  ensureWatchToken()
   return lanWatchUrl({ bindHost, port, token: localApi.watchToken, interfaces: os.networkInterfaces() })
 }
 app.get('/api/console', (_request, response) => {
@@ -633,7 +643,7 @@ app.post('/api/stream-info', async (request, response) => {
   response.json({ streamInfo: state.streamInfo, results })
 })
 app.post('/api/settings', (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>> }
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean }
   let changed = false
   const turnedOn: Platform[] = []
   if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
@@ -663,6 +673,17 @@ app.post('/api/settings', (request, response) => {
     state.translateChat = body.translateChat
     changed = true
   }
+  let watchChanged = false
+  if (typeof body.lanWatch === 'boolean' && body.lanWatch !== localApi.lanEnabled) {
+    settings.lanWatch = body.lanWatch
+    localApi.lanEnabled = body.lanWatch
+    if (body.lanWatch) ensureWatchToken()
+    watchChanged = true
+    const url = currentWatchUrl()
+    console.log(body.lanWatch
+      ? (url ? `Watch          ${url}` : 'Watch is on, but no private IPv4 address was found.')
+      : 'Watch is off. Other devices cannot open the relay.')
+  }
   if (body.autoLiveCheck && typeof body.autoLiveCheck === 'object') {
     const next = mergeAutoLiveCheck(settings.autoLiveCheck, body.autoLiveCheck)
     for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
@@ -676,10 +697,8 @@ app.post('/api/settings', (request, response) => {
       changed = true
     }
   }
-  if (changed) {
-    saveSettings()
-    broadcast()
-  }
+  if (changed || watchChanged) saveSettings()
+  if (changed) broadcast()
   response.json({
     activityFallback: settings.activityFallback,
     ignoreMissingJwt: settings.ignoreMissingJwt,
@@ -687,6 +706,8 @@ app.post('/api/settings', (request, response) => {
     translateChat: settings.translateChat,
     autoLiveCheck: settings.autoLiveCheck,
     streamelements: state.streamelements,
+    lanEnabled: localApi.lanEnabled,
+    watchUrl: currentWatchUrl() || null,
   })
   // Turning Auto back on should notice a live change without waiting out YouTube's slow interval.
   for (const platform of turnedOn) {
@@ -831,14 +852,15 @@ httpServer.listen(port, bindHost, () => {
     console.log(`Chat dock      ${base}`)
     console.log(`Activity dock  ${base}/activity`)
   }
-  if (lanEnabled) {
+  if (localApi.lanEnabled) {
     const watchUrl = currentWatchUrl()
-    console.log(watchUrl ? `Watch          ${watchUrl}` : 'LAN is on, but no private IPv4 address was found for a watch link.')
+    console.log(watchUrl ? `Watch          ${watchUrl}` : 'Watch is on, but no private IPv4 address was found for a watch link.')
     console.log(apiToken
       ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
       : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
+  } else {
+    console.log('Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
   }
-  if (watchSecret.warning) console.warn(watchSecret.warning)
   if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
   if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)
   listenForYouTubeQuotaInput()

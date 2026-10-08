@@ -1421,6 +1421,7 @@ export function parseAppSettings(value: unknown): AppSettings {
     autoLiveCheck: parseAutoLiveCheck(parsed.autoLiveCheck),
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
+    ...(typeof parsed.lanWatch === 'boolean' ? { lanWatch: parsed.lanWatch } : {}),
   }
 }
 

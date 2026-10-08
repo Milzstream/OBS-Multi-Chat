@@ -179,6 +179,17 @@ export default function ConsoleApp() {
     }
   }
 
+  const toggleWatch = async () => {
+    const enabled = !info?.lanEnabled
+    try {
+      const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lanWatch: enabled }) })
+      const data = await response.json() as { lanEnabled?: boolean; watchUrl?: string | null }
+      if (!response.ok) return
+      setInfo((current) => current ? { ...current, lanEnabled: Boolean(data.lanEnabled), watchUrl: data.watchUrl || null } : current)
+      if (enabled && data.watchUrl) await copy('watch', data.watchUrl)
+    } catch { /* button stays as it was */ }
+  }
+
   const copy = async (label: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value)
@@ -215,7 +226,16 @@ export default function ConsoleApp() {
           <button type="button" title={info?.envPath || 'Configuration file'} disabled={!info?.envPath} onClick={() => info?.envPath && void copy('config', info.envPath)}>{copied === 'config' ? 'Copied' : 'Config'}</button>
           <button type="button" title={info?.chatUrl || 'Chat dock URL'} disabled={!info?.chatUrl} onClick={() => info?.chatUrl && void copy('chat', info.chatUrl)}>{copied === 'chat' ? 'Copied' : 'Chat dock'}</button>
           <button type="button" title={info?.activityUrl || 'Activity dock URL'} disabled={!info?.activityUrl} onClick={() => info?.activityUrl && void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Activity dock'}</button>
-          <button type="button" title={info?.watchUrl || 'Set RELAY_BIND=0.0.0.0 to share a readonly watch link'} disabled={!info?.watchUrl} onClick={() => info?.watchUrl && void copy('watch', info.watchUrl)}>{copied === 'watch' ? 'Copied' : 'Watch'}</button>
+          <button
+            type="button"
+            className={info?.lanEnabled ? 'watch-on' : 'watch-off'}
+            title={info?.lanEnabled ? `${info.watchUrl || 'Watch is on'}\nRight-click to copy. Click to turn off.` : 'Turn on a readonly LAN watch link. Chat and activity docks stay on this computer.'}
+            onClick={() => void toggleWatch()}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              if (info?.watchUrl) void copy('watch', info.watchUrl)
+            }}
+          >{copied === 'watch' ? 'Copied' : info?.lanEnabled ? 'Watch on' : 'Watch'}</button>
         </nav>
       </header>
       {youtubePrivacy.map((item) => (

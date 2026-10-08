@@ -173,13 +173,13 @@ STREAMELEMENTS_JWT_KICK=
 STREAMELEMENTS_JWT_YOUTUBE=
 ```
 
-The backend binds to `127.0.0.1` by default so only this computer can reach the docks, the companion, and the control API. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location.
+The docks, companion, and control API stay on this computer until Watch is turned on. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location.
 
 ### Readonly LAN watch link
 
-Set `RELAY_BIND=0.0.0.0` (or `RELAY_LAN=1`) when a friend on the same Wi-Fi should see chat and activity without sitting at the streaming PC. That is opt-in. Windows may ask to allow the app on private networks the first time that bind is used.
+Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved, so a restart keeps the last state. Windows may ask to allow the app on private networks the first time it listens.
 
-The companion window gains a **Watch** button next to the dock URL buttons. It copies a link like `http://192.168.1.20:4173/watch?token=...`. The same line is printed at startup. The token is created in `data/watch-token` and stays stable across restarts. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
+Until Watch is on, other devices are refused, including the chat dock, the activity dock, and the live update stream. `RELAY_LAN=1` or `RELAY_BIND=0.0.0.0` starts with Watch already on. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
 
 That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
 
@@ -256,7 +256,7 @@ The same command also creates a ready-to-copy `deploy` folder containing the lat
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. A readonly watch link is separate and stays off until `RELAY_BIND=0.0.0.0` is set; copy it from the **Watch** button in the companion window. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
+The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. A readonly watch link stays off until you click **Watch** in the companion window. Right-click that button to copy the link. Other devices cannot open the chat or activity docks. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
 
 ## Backend endpoints
 
