@@ -177,7 +177,7 @@ The docks, companion, and control API stay on this computer until Watch is turne
 
 ### Readonly LAN watch link
 
-Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. That copies a link like `http://192.168.1.20:4173/watch?token=...`. Click **Watch on** to copy it again. Right-click **Watch on** and choose **Turn off** to stop sharing. The choice is saved, so a restart keeps the last state. Windows may ask to allow the app on private networks the first time it listens.
+Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved, so a restart keeps the last state. Windows may ask to allow the app on private networks the first time it listens.
 
 Until Watch is on, other devices are refused, including the chat dock, the activity dock, and the live update stream. `RELAY_LAN=1` or `RELAY_BIND=0.0.0.0` starts with Watch already on. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
 

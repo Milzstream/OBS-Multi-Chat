@@ -179,10 +179,6 @@ a.activity-row { color: inherit; text-decoration: none; }
 .console-links button, .console-link { padding: 4px 8px; border-radius: 4px; background: #1c2f2c; color: var(--teal); font: 10px 'DM Mono', monospace; }
 .console-links button:disabled, .console-links button.watch-off { opacity: .45; }
 .console-links button.watch-on { background: #24574c; color: #e8fff8; }
-.watch-menu-wrap { position: relative; }
-.watch-menu { position: absolute; z-index: 6; top: calc(100% + 4px); right: 0; display: flex; flex-direction: column; min-width: 96px; padding: 4px; border: 1px solid #40504e; border-radius: 4px; background: #202729; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
-.watch-menu button { width: 100%; text-align: left; background: transparent; }
-.watch-menu button:hover { background: #2a3b37; }
 .console-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
 .console-log { min-height: 0; overflow: auto; padding: 12px 16px 18px; background: #0c0c0c; font: 13px/1.35 'Cascadia Mono', 'DM Mono', Consolas, monospace; scrollbar-color: #333 transparent; scrollbar-width: thin; }
 .console-line { display: flex; gap: 12px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #cccccc; }
