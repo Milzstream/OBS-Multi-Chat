@@ -4,6 +4,7 @@
 !.env.example
 production.env
 data/
+logs/
 
 # Dependencies and build output
 node_modules/

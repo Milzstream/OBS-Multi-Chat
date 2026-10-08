@@ -1,5 +1,9 @@
 import { formatWithOptions } from 'node:util'
 
+/**
+ * In-memory ring the companion window reads over SSE. `log-file.ts` writes the
+ * same lines to disk (secrets redacted) so a crash still leaves a trace.
+ */
 export type LogLevel = 'log' | 'info' | 'warn' | 'error'
 export type LogLine = { id: number; time: string; level: LogLevel; text: string }
 

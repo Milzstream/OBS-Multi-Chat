@@ -48,6 +48,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 
 - Activity dock (StreamElements as source of truth, optional native backup)
 - Windows app window for the log, account connections, translate, and StreamElements JWTs. Closing that window stops the docks
+- Companion crash log in `logs/relay.log` (rotated to `relay.log.bak`), same folder as `production.env`. Watch tokens, JWTs, and OAuth secrets are redacted
 
 ## Windows app
 
@@ -55,7 +56,9 @@ Start **Relay Chat Dock** from the Start Menu. There is no console window. The a
 
 The log is also the place to check a quiet dock. Each live-status poll prints `Twitch check: offline` or `Kick check: live, 12 viewers`. An unchanged result repeats about once a minute, and **Check live** always prints. YouTube also prints a quota line on every official call, which is why that platform looks busier while Auto is on and you are offline. Uncheck Auto if the app will sit open and you are not about to go live. New chat is a count, not each message (`Twitch: 40 messages (EventSub)`). A poll that added nothing stays silent. Deletes, timeouts, bans, and unbans print the action, platform, and user, never the message text. A stored activity alert prints one line (`Twitch follow: Ada`). Duplicate alerts the deduper drops are not logged.
 
-Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env` and `data\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
+The same lines are appended to `logs\relay.log` next to `production.env` (installer: `%LOCALAPPDATA%\Relay Chat Dock\logs\relay.log`). A crash, a killed process, or closing the window leaves that file. It does not grow without bound: at about 2 MB it rotates into `relay.log.bak`, so disk use stays around 4 MB. Access tokens, refresh tokens, client secrets, StreamElements JWTs, and the Watch view token are stripped before a line is written.
+
+Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env`, `data\`, and `logs\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
 
 ## OBS docks
 
@@ -177,9 +180,14 @@ The docks, companion, and control API stay on this computer until Watch is turne
 
 ### Readonly LAN watch link
 
-Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved, so a restart keeps the last state. Windows may ask to allow the app on private networks the first time it listens.
+Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved. Windows may ask to allow the app on private networks the first time the process listens on the LAN.
 
-Until Watch is on, other devices are refused, including the chat dock, the activity dock, and the live update stream. `RELAY_LAN=1` or `RELAY_BIND=0.0.0.0` starts with Watch already on. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
+Bind and Watch are separate:
+
+- Default bind (`127.0.0.1`, or unset `RELAY_BIND`): Watch on temporarily listens on `0.0.0.0`. Watch off returns to loopback, so other devices can no longer open a TCP connection.
+- `RELAY_BIND=0.0.0.0` or a LAN IP such as `192.168.1.20`: that socket stays bound. Watch only hosts or unhosts the `/watch` page. Tools with `RELAY_API_TOKEN` can still reach the LAN listener while Watch is off.
+
+Until Watch is on (and bind is loopback), other devices cannot reach the chat dock, the activity dock, or the live update stream. `RELAY_LAN=1` starts with Watch already on; you can still turn it off from the window. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
 
 That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
 
@@ -256,7 +264,7 @@ The same command also creates a ready-to-copy `deploy` folder containing the lat
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. A readonly watch link stays off until you click **Watch** in the companion window. Right-click that button to copy the link. Other devices cannot open the chat or activity docks. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
+The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot connect at all. Click **Watch** to share a readonly LAN link; with the default bind that temporarily listens on `0.0.0.0`, and turning Watch off returns to loopback. If `production.env` sets `RELAY_BIND=0.0.0.0` or a LAN IP, that bind stays and Watch only hosts or unhosts `/watch`. Right-click the Watch button to copy the link. Other devices cannot open the chat or activity docks. Installed copies store tokens, settings, chat, activity, and `logs\relay.log` in `%LOCALAPPDATA%\Relay Chat Dock`. A portable folder uses those files beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
 
 ## Backend endpoints
 
@@ -273,7 +281,7 @@ Loopback (this computer) can call every route with no token. Off this computer t
 - `POST /api/messages` - send a message to selected platforms
 - `GET /api/jwts` - companion-internal StreamElements JWTs for Twitch, Kick, and YouTube. Not included in `/api/state`, and not readable with the watch token
 - `POST /api/jwts` - save those JWTs into `production.env` and reconnect StreamElements. Same write rule as the other mutating routes
-- `POST /api/settings` - toggle native backup, ignore-missing-JWT, 30-day drop, translate, and per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on)
+- `POST /api/settings` - toggle native backup, ignore-missing-JWT, 30-day drop, translate, per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on), and `lanWatch` (hosts `/watch`; rebinds the socket only when `RELAY_BIND` is loopback)
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
 - `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
 - `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio

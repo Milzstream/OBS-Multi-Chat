@@ -1,13 +1,16 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { spawn, type SpawnOptions } from 'node:child_process'
+import type { Server } from 'node:http'
 import type { NextFunction, Request, Response } from 'express'
 
 /**
  * Local control API helpers: hardening and URL allowlists for the docks.
  *
- * The process binds to loopback unless LAN is opted in (`RELAY_BIND` not
- * loopback, or `RELAY_LAN=1`). Off this computer:
+ * Bind and Watch are separate. `RELAY_BIND=0.0.0.0` or a LAN IP is sticky: the
+ * socket stays there and Watch only hosts `/watch`. Default / loopback bind:
+ * Watch on temporarily listens on `0.0.0.0`, Watch off returns to `127.0.0.1`.
+ * Off this computer:
  * - A watch token (query `token` or `relay_watch` cookie) can only read
  *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
  *   moderate, open links, or read JWTs. Neighbors on the Wi-Fi do not get
@@ -66,8 +69,9 @@ export function isLoopbackHost(host: string) {
 
 /**
  * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
- * (or any non-loopback `RELAY_BIND`) switches to the LAN. Writes from off this
- * computer then require `RELAY_API_TOKEN`; the watch link uses its own view token.
+ * (or any non-loopback `RELAY_BIND`) starts with Watch on. A non-loopback
+ * `RELAY_BIND` is sticky: Watch will not unbind it. Default bind + Watch on
+ * temporarily listens on all interfaces via `listenHostFor`.
  */
 export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   const raw = String(env.RELAY_BIND || '').trim()
@@ -75,6 +79,74 @@ export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: s
   if (lanFlag) return { host: raw || '0.0.0.0', lanEnabled: true }
   if (raw) return { host: raw, lanEnabled: !isLoopbackHost(raw) }
   return { host: '127.0.0.1', lanEnabled: false }
+}
+
+/** True when `RELAY_BIND` is `0.0.0.0` or a LAN IP. That socket stays bound. */
+export function stickyLanBind(envBind = '') {
+  const bound = envBind.trim()
+  return Boolean(bound && !isLoopbackHost(bound))
+}
+
+/**
+ * Socket bind for the current Watch state.
+ * Sticky LAN `RELAY_BIND` is always returned, Watch on or off.
+ * Default / loopback config: Watch on uses `0.0.0.0`, Watch off uses `127.0.0.1`.
+ */
+export function listenHostFor(lanEnabled: boolean, envBind = '') {
+  const bound = envBind.trim()
+  if (stickyLanBind(bound)) return bound
+  return lanEnabled ? '0.0.0.0' : '127.0.0.1'
+}
+
+export function watchOffLogLine(envBind = '') {
+  const bound = envBind.trim()
+  if (stickyLanBind(bound)) return `Watch is off. RELAY_BIND=${bound} is still listening; the watch page is not hosted.`
+  return 'Watch is off. Other devices cannot open the relay.'
+}
+
+/** Watch URL without the view secret, for the companion log. */
+export function watchUrlForLog(url: string | undefined) {
+  if (!url) return
+  try {
+    const parsed = new URL(url)
+    parsed.search = ''
+    parsed.hash = ''
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '') || parsed.origin
+  } catch {
+    return
+  }
+}
+
+export function watchLogLine(url: string | undefined) {
+  const safe = watchUrlForLog(url)
+  return safe
+    ? `Watch          ${safe}`
+    : 'Watch is on, but no private IPv4 address was found for a watch link.'
+}
+
+export function closeListeningServer(server: Server, drop?: () => void): Promise<void> {
+  drop?.()
+  try { server.closeAllConnections() } catch { /* Node < 18.2 has no closeAllConnections */ }
+  if (!server.listening) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve())
+  })
+}
+
+export function listenOn(server: Server, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => reject(error)
+    server.once('error', onError)
+    try {
+      server.listen(port, host, () => {
+        server.off('error', onError)
+        resolve()
+      })
+    } catch (error) {
+      server.off('error', onError)
+      reject(error)
+    }
+  })
 }
 
 export function isLoopbackAddress(address?: string | null) {
