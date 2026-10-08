@@ -157,6 +157,7 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .activity-row { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 6px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--row-color); background: linear-gradient(90deg, color-mix(in srgb, var(--row-color) 28%, #14181b), color-mix(in srgb, var(--row-color) 10%, #14181b) 55%, #14181b); animation: reveal .35s ease both; color: inherit; text-align: left; }
 .activity-row-link { cursor: pointer; }
 .activity-row-link:hover { filter: brightness(1.08); }
+a.activity-row { color: inherit; text-decoration: none; }
 .activity-icon { display: grid; place-items: center; width: 16px; flex-shrink: 0; }
 .activity-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .activity-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f2f4f2; font-size: 13px; font-weight: 650; }
@@ -176,7 +177,8 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .console-top span { color: #8b969a; font-size: 11px; }
 .console-links { display: flex; align-items: center; gap: 6px; }
 .console-links button, .console-link { padding: 4px 8px; border-radius: 4px; background: #1c2f2c; color: var(--teal); font: 10px 'DM Mono', monospace; }
-.console-links button:disabled { opacity: .45; }
+.console-links button:disabled, .console-links button.watch-off { opacity: .45; }
+.console-links button.watch-on { background: #24574c; color: #e8fff8; }
 .console-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
 .console-log { min-height: 0; overflow: auto; padding: 12px 16px 18px; background: #0c0c0c; font: 13px/1.35 'Cascadia Mono', 'DM Mono', Consolas, monospace; scrollbar-color: #333 transparent; scrollbar-width: thin; }
 .console-line { display: flex; gap: 12px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #cccccc; }
@@ -194,4 +196,16 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
   .console-body { grid-template-columns: 1fr; }
   .console-top { align-items: flex-start; flex-direction: column; }
   .console-settings { border-left: 0; border-top: 1px solid var(--line); }
+}
+.watch-app { height: 100vh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.watch-only { flex-shrink: 0; color: var(--teal); font: 10px 'DM Mono', monospace; letter-spacing: .08em; }
+.watch-split { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(220px, .85fr); }
+.watch-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.watch-pane + .watch-pane { border-left: 1px solid var(--line); }
+.watch-pane .chat-toolbar, .watch-pane .activity-topbar { flex-shrink: 0; }
+.watch-app a.clickable-username { color: inherit; cursor: pointer; text-decoration: none; }
+.watch-app a.clickable-username:hover { opacity: .7; text-decoration: underline; }
+@media (max-width: 720px) {
+  .watch-split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1.2fr) minmax(180px, .8fr); }
+  .watch-pane + .watch-pane { border-left: 0; border-top: 1px solid var(--line); }
 }

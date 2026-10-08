@@ -40,6 +40,8 @@ export type AppSettings = {
   autoLiveCheck: AutoLiveCheck
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota
+  /** Readonly LAN watch link. Unset means follow RELAY_LAN / RELAY_BIND. */
+  lanWatch?: boolean
 }
 
 // Chat-history cap: `CHAT_MAX` is the default, `RELAY_CHAT_MAX` may pull it

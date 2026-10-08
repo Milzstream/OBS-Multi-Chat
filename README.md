@@ -148,6 +148,7 @@ Fill in the values:
 PORT=4173
 OAUTH_REDIRECT_URI=http://localhost:4173/oauth/callback
 # RELAY_BIND=127.0.0.1
+# RELAY_WATCH_TOKEN=
 # RELAY_API_TOKEN=
 # RELAY_DATA_DIR=
 
@@ -172,7 +173,17 @@ STREAMELEMENTS_JWT_KICK=
 STREAMELEMENTS_JWT_YOUTUBE=
 ```
 
-The backend binds to `127.0.0.1` by default so only this computer can reach the control API. Set `RELAY_BIND=0.0.0.0` only if another device on your LAN must open the docks, and set `RELAY_API_TOKEN` so non-browser LAN clients must send that secret. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location.
+The docks, companion, and control API stay on this computer until Watch is turned on. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location.
+
+### Readonly LAN watch link
+
+Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved, so a restart keeps the last state. Windows may ask to allow the app on private networks the first time it listens.
+
+Until Watch is on, other devices are refused, including the chat dock, the activity dock, and the live update stream. `RELAY_LAN=1` or `RELAY_BIND=0.0.0.0` starts with Watch already on. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
+
+That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
+
+A browser on another device still cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. Requesting `/` or sending a matching `Origin` does not change that. `RELAY_API_TOKEN` is only for a tool that sends it in `x-relay-token` or `Authorization: Bearer`. It is not accepted from the query string. Shutdown, the companion window, and the operator docks stay on this computer even with that token. OAuth from another device requires the header; the companion window does not, because it is on this computer.
 
 Never commit or share `.env` or `production.env`. Client secrets, JWTs, access tokens, and refresh tokens must remain on the backend and must not be placed in `VITE_` variables or the OBS Browser Source.
 
@@ -245,13 +256,23 @@ The same command also creates a ready-to-copy `deploy` folder containing the lat
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
+The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot call send, moderate, disconnect, or `/api/open`. A readonly watch link stays off until you click **Watch** in the companion window. Right-click that button to copy the link. Other devices cannot open the chat or activity docks. Installed copies store tokens, settings, chat, and activity in `%LOCALAPPDATA%\Relay Chat Dock\data`. A portable folder uses `data` beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
 
 ## Backend endpoints
 
+Loopback (this computer) can call every route with no token. Off this computer the classes are:
+
+- Watch token (`?token=` on the shared link, then the `relay_watch` cookie): `GET /watch`, `GET /api/state`, `GET /events`, and `GET /api/media` only.
+- `RELAY_API_TOKEN` header (`x-relay-token` or `Authorization: Bearer`): other reads and writes, including the JWT routes below. Not accepted from the query string. A matching `Origin` is not enough.
+- This computer only, even with that header: the operator docks (`/`, `/activity`), the companion (`/console`, `/api/console`, `/api/logs`, `/events/logs`, `/api/console/*`), and `POST /api/shutdown`.
+- OAuth (`GET /oauth/:platform`, `GET /oauth/callback`): this computer, or the API token header. A LAN browser cannot replace the stored Twitch, Kick, or YouTube token.
+
+- `GET /watch` - readonly chat and activity page for a shared LAN link
 - `GET /api/state` - current accounts, stream info, recent messages, activity, and settings
 - `GET /events` - Server-Sent Events stream for dock updates
 - `POST /api/messages` - send a message to selected platforms
+- `GET /api/jwts` - companion-internal StreamElements JWTs for Twitch, Kick, and YouTube. Not included in `/api/state`, and not readable with the watch token
+- `POST /api/jwts` - save those JWTs into `production.env` and reconnect StreamElements. Same write rule as the other mutating routes
 - `POST /api/settings` - toggle native backup, ignore-missing-JWT, 30-day drop, translate, and per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on)
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
 - `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted

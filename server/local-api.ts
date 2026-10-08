@@ -6,10 +6,19 @@ import type { NextFunction, Request, Response } from 'express'
 /**
  * Local control API helpers: hardening and URL allowlists for the docks.
  *
- * This API is the dangerous control surface — it can open URLs in the local
- * browser, so it is loopback-bound by default and gated by three allowlists:
- * CORS origins, the bearer token (`RELAY_API_TOKEN`), and the trusted
- * senders/ports that may submit requests. HTTP only, no TLS.
+ * The process binds to loopback unless LAN is opted in (`RELAY_BIND` not
+ * loopback, or `RELAY_LAN=1`). Off this computer:
+ * - A watch token (query `token` or `relay_watch` cookie) can only read
+ *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
+ *   moderate, open links, or read JWTs. Neighbors on the Wi-Fi do not get
+ *   that token unless the streamer shares the watch URL.
+ * - `RELAY_API_TOKEN` is a header secret for tools (`x-relay-token` or
+ *   `Authorization: Bearer`). It is never read from the query string, so a
+ *   watch URL cannot be reused as a write credential. A matching Origin is
+ *   not permission to write.
+ * - Shutdown, the companion, and the operator docks stay on this computer
+ *   even with the API token. OAuth from another device requires the header.
+ * HTTP only, no TLS.
  */
 
 export type LocalApiOptions = {
@@ -17,6 +26,9 @@ export type LocalApiOptions = {
   bindHost: string
   lanEnabled: boolean
   apiToken?: string
+  watchToken?: string
+  /** Test seam. Production leaves this unset and uses the socket address. */
+  peerAddress?: (request: Request) => string | undefined
 }
 
 export type ControlRequestInfo = {
@@ -26,8 +38,17 @@ export type ControlRequestInfo = {
   origin?: string
   referer?: string
   host?: string
+  /** Header secret only (`x-relay-token` or Bearer). Never a query value. */
   token?: string
+  watchToken?: string
+  watchTokenFrom?: 'query' | 'cookie'
 }
+
+export type AccessClass = 'public' | 'read' | 'write' | 'secret' | 'operator' | 'oauth'
+
+export const WATCH_COOKIE = 'relay_watch'
+const WATCH_TOKEN_PATTERN = /^[A-Za-z0-9_-]{8,128}$/
+const PUBLIC_FILE = /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|woff2?|txt|webmanifest)$/i
 
 const PROFILE_HOSTS = {
   twitch: new Set(['www.twitch.tv', 'twitch.tv']),
@@ -45,8 +66,8 @@ export function isLoopbackHost(host: string) {
 
 /**
  * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
- * (or any non-loopback `RELAY_BIND`) switches to the LAN, which forces the
- * bearer-token requirement downstream.
+ * (or any non-loopback `RELAY_BIND`) switches to the LAN. Writes from off this
+ * computer then require `RELAY_API_TOKEN`; the watch link uses its own view token.
  */
 export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   const raw = String(env.RELAY_BIND || '').trim()
@@ -93,27 +114,163 @@ function safeEqual(left: string, right: string) {
 }
 
 /**
- * The core authorization gate. Order of trust: valid CORS origin, then bearer
- * token, then loopback caller; on the LAN a request must pass BOTH the origin
- * check and the token. Anything else gets a 403 explaining what is missing.
+ * Route class for the guard. Operator pages and unknown GETs stay on this
+ * computer so a LAN client cannot load `/` and use the dock. Static assets
+ * stay public so `/watch` can load the same bundle.
  */
-export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true } | { ok: false; status: number; error: string } {
+export function classifyAccess(method: string, rawPath: string): AccessClass {
+  const verb = method.toUpperCase() === 'HEAD' ? 'GET' : method.toUpperCase()
+  const path = rawPath.split('?')[0].replace(/\/+$/, '') || '/'
+  if (verb === 'OPTIONS') return 'public'
+  if (path === '/oauth' || path.startsWith('/oauth/')) return 'oauth'
+  if (path === '/api/shutdown' || path === '/api/logs' || path === '/events/logs' || path === '/api/console' || path.startsWith('/api/console/')) return 'operator'
+  if (path === '/api/jwts' && verb === 'GET') return 'secret'
+  if (path.startsWith('/api/categories')) return 'secret'
+  if (path.startsWith('/api/') && verb !== 'GET') return 'write'
+  if (path === '/api/state' || path === '/events' || path === '/api/media' || path === '/watch') return 'read'
+  if (verb === 'GET' && (path.startsWith('/assets/') || PUBLIC_FILE.test(path))) return 'public'
+  if (verb === 'GET') return 'operator'
+  return 'write'
+}
+
+/** Accept a view secret that is safe in a URL and a cookie. Empty and oversized values are ignored. */
+export function normalizeWatchToken(raw: string | undefined) {
+  const token = String(raw || '').trim()
+  if (!WATCH_TOKEN_PATTERN.test(token)) return
+  return token
+}
+
+/**
+ * View secret for the watch URL. `RELAY_WATCH_TOKEN` wins when it is valid and
+ * distinct from `RELAY_API_TOKEN`. Otherwise reuse `data/watch-token`, or
+ * return a new value the caller should persist. LAN off means no secret.
+ */
+export function resolveWatchSecret(input: {
+  lanEnabled: boolean
+  envToken?: string
+  apiToken?: string
+  stored?: string
+  create?: () => string
+}): { token?: string; source?: 'env' | 'file' | 'generated'; persist?: string; warning?: string } {
+  if (!input.lanEnabled) return {}
+  const envRaw = String(input.envToken || '').trim()
+  const envToken = normalizeWatchToken(envRaw)
+  if (envRaw && !envToken) return { warning: 'RELAY_WATCH_TOKEN was ignored. Use 8–128 letters, numbers, "_" or "-".', ...keptWatchSecret(input) }
+  if (envToken && input.apiToken && envToken === input.apiToken) {
+    return { warning: 'RELAY_WATCH_TOKEN matches RELAY_API_TOKEN. A different view token was kept so the watch link cannot be reused as a write secret.', ...keptWatchSecret(input) }
+  }
+  if (envToken) return { token: envToken, source: 'env' }
+  return keptWatchSecret(input)
+}
+
+function keptWatchSecret(input: { apiToken?: string; stored?: string; create?: () => string }): { token?: string; source?: 'file' | 'generated'; persist?: string } {
+  const stored = normalizeWatchToken(input.stored)
+  if (stored && stored !== input.apiToken) return { token: stored, source: 'file' }
+  const created = normalizeWatchToken(input.create?.())
+  if (!created || created === input.apiToken) return {}
+  return { token: created, source: 'generated', persist: created }
+}
+
+export type LanNic = { address: string; family: string | number; internal: boolean }
+
+function isPrivateIPv4(address: string) {
+  const parts = address.split('.')
+  if (parts.length !== 4) return false
+  const nums = parts.map((part) => Number(part))
+  if (nums.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [a, b] = nums
+  if (a === 10) return true
+  if (a === 192 && b === 168) return true
+  return a === 172 && b >= 16 && b <= 31
+}
+
+/** Address to put in the shared watch URL. An explicit non-loopback bind wins; otherwise the first private IPv4. */
+export function pickLanIPv4(bindHost: string, interfaces: Record<string, readonly LanNic[] | undefined>) {
+  const bound = bindHost.trim()
+  if (bound && bound !== '0.0.0.0' && bound !== '::' && bound !== '*' && !isLoopbackHost(bound)) return bound.replace(/^\[|\]$/g, '')
+  const found: { address: string; rank: number }[] = []
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      const v4 = entry.family === 4 || entry.family === 'IPv4'
+      if (!v4 || entry.internal || !isPrivateIPv4(entry.address)) continue
+      const rank = entry.address.startsWith('192.168.') ? 0 : entry.address.startsWith('10.') ? 1 : 2
+      found.push({ address: entry.address, rank })
+    }
+  }
+  found.sort((left, right) => left.rank - right.rank || left.address.localeCompare(right.address))
+  return found[0]?.address
+}
+
+export function watchUrlFor(host: string | undefined, port: number, token: string | undefined) {
+  if (!host || !token) return
+  const hostname = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+  return `http://${hostname}:${port}/watch?token=${encodeURIComponent(token)}`
+}
+
+export function lanWatchUrl(input: { bindHost: string; port: number; token?: string; interfaces: Record<string, readonly LanNic[] | undefined> }) {
+  return watchUrlFor(pickLanIPv4(input.bindHost, input.interfaces), input.port, input.token)
+}
+
+export function watchCookieHeader(token: string) {
+  return `${WATCH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`
+}
+
+/** Query `token` wins so a freshly shared link works before the cookie exists. The cookie covers later `/events` calls. */
+export function watchTokenFromRequest(queryToken: unknown, cookieHeader: string | undefined): { token: string; from: 'query' | 'cookie' } | undefined {
+  const query = typeof queryToken === 'string' ? queryToken.trim() : Array.isArray(queryToken) ? String(queryToken[0] || '').trim() : ''
+  if (query) return { token: query, from: 'query' }
+  for (const part of String(cookieHeader || '').split(';')) {
+    const [name, ...rest] = part.trim().split('=')
+    if (name !== WATCH_COOKIE) continue
+    try {
+      const token = decodeURIComponent(rest.join('=')).trim()
+      if (token) return { token, from: 'cookie' }
+    } catch { /* ignore a malformed cookie */ }
+  }
+}
+
+function tokenMatches(expected: string | undefined, presented: string | undefined) {
+  if (!expected || !presented) return false
+  return safeEqual(presented, expected)
+}
+
+function limitedToThisComputer(): { ok: false; status: 403; error: string } {
+  return { ok: false, status: 403, error: 'Watch is off. Turn it on in the Relay Chat Dock window to share a readonly link.' }
+}
+
+/**
+ * Authorization gate. Loopback is the operator. Off-box, a trusted Origin is
+ * only a cross-origin check — it never grants write, secret, or operator
+ * access. The watch token is read-only. The API token is header-only.
+ */
+export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true; watchCookie?: boolean } | { ok: false; status: number; error: string } {
+  const kind = classifyAccess(request.method, request.path)
+  if (kind === 'public') {
+    if (options.lanEnabled || isLoopbackAddress(request.ip)) return { ok: true }
+    return limitedToThisComputer()
+  }
   const origin = String(request.origin || '').trim()
   const referer = String(request.referer || '').trim()
   const source = origin || referer
   if (source && !isTrustedOrigin(source, options, request.host)) {
     return { ok: false, status: 403, error: 'Cross-origin control requests are blocked' }
   }
-  if (options.apiToken && request.token && safeEqual(request.token, options.apiToken)) return { ok: true }
   if (isLoopbackAddress(request.ip)) return { ok: true }
-  if (options.lanEnabled && source && isTrustedOrigin(source, options, request.host)) return { ok: true }
-  return {
-    ok: false,
-    status: 403,
-    error: options.lanEnabled
-      ? 'LAN control requests require RELAY_API_TOKEN'
-      : 'Local control API is limited to this computer. Set RELAY_BIND=0.0.0.0 to allow LAN access.',
+  if (!options.lanEnabled) return limitedToThisComputer()
+  const apiOk = tokenMatches(options.apiToken, request.token)
+  const watchOk = tokenMatches(options.watchToken, request.watchToken)
+  if (kind === 'operator') return { ok: false, status: 403, error: 'Companion and dock controls stay on this computer' }
+  if (kind === 'oauth') {
+    if (apiOk) return { ok: true }
+    return { ok: false, status: 403, error: 'OAuth stays on this computer' }
   }
+  if (kind === 'write' || kind === 'secret') {
+    if (apiOk) return { ok: true }
+    return { ok: false, status: 403, error: 'LAN control requests require RELAY_API_TOKEN' }
+  }
+  if (apiOk) return { ok: true }
+  if (watchOk) return { ok: true, watchCookie: request.watchTokenFrom === 'query' }
+  return { ok: false, status: 403, error: 'This watch link needs its view token' }
 }
 
 function requestToken(request: Request) {
@@ -122,21 +279,33 @@ function requestToken(request: Request) {
   return header || bearer
 }
 
-/** Express middleware that only intercepts mutating `/api/*` requests and runs them through `authorizeLocalControl`. */
+function denyControl(request: Request, response: Response, error: string) {
+  const path = request.path.replace(/\/+$/, '') || '/'
+  const api = path.startsWith('/api') || path.startsWith('/events') || path.startsWith('/oauth')
+  if (api) return response.status(403).json({ error })
+  const message = path === '/watch'
+    ? 'This watch link is missing or has the wrong token. Copy it again from the Relay Chat Dock window.'
+    : 'This page stays on the streaming PC. Copy the watch link from the Relay Chat Dock window.'
+  return response.status(403).type('html').send(`<!doctype html><meta charset="utf-8"><title>Relay Chat Dock</title><body style="margin:0;padding:28px;background:#111416;color:#eef1f0;font:15px sans-serif"><p>${message}</p></body>`)
+}
+
+/** Express middleware for every route. GET is not a free pass: JWTs, state, and the operator pages are classified. */
 export function createControlGuard(options: LocalApiOptions) {
   return (request: Request, response: Response, next: NextFunction) => {
-    if (request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS') return next()
-    if (!request.path.startsWith('/api')) return next()
+    const presented = watchTokenFromRequest(request.query.token, request.get('cookie'))
     const result = authorizeLocalControl({
       method: request.method,
       path: request.path,
-      ip: request.socket.remoteAddress,
+      ip: options.peerAddress?.(request) || request.socket.remoteAddress,
       origin: request.get('origin'),
       referer: request.get('referer'),
       host: request.get('host'),
       token: requestToken(request),
+      watchToken: presented?.token,
+      watchTokenFrom: presented?.from,
     }, options)
-    if (!result.ok) return response.status(result.status).json({ error: result.error })
+    if (!result.ok) return denyControl(request, response, result.error)
+    if (result.watchCookie && options.watchToken) response.setHeader('Set-Cookie', watchCookieHeader(options.watchToken))
     next()
   }
 }
