@@ -6,11 +6,14 @@ import express from 'express'
 import {
   authorizeLocalControl,
   browserOpenPlan,
+  closeListeningServer,
   createControlGuard,
   createOpenHandler,
   isSafeExternalUrl,
   isSafeMediaUrl,
   isTrustedOrigin,
+  listenHostFor,
+  listenOn,
   parseOpenUrl,
   resolveBindHost,
 } from '../server/local-api.js'
@@ -36,6 +39,26 @@ describe('local control authorization', () => {
     assert.deepEqual(resolveBindHost({}), { host: '127.0.0.1', lanEnabled: false })
     assert.deepEqual(resolveBindHost({ RELAY_BIND: '0.0.0.0' }), { host: '0.0.0.0', lanEnabled: true })
     assert.deepEqual(resolveBindHost({ RELAY_LAN: '1' }), { host: '0.0.0.0', lanEnabled: true })
+    assert.equal(listenHostFor(false), '127.0.0.1')
+    assert.equal(listenHostFor(false, '0.0.0.0'), '127.0.0.1')
+    assert.equal(listenHostFor(true), '0.0.0.0')
+    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
+    assert.equal(listenHostFor(true, '127.0.0.1'), '0.0.0.0')
+    assert.equal(listenHostFor(true, '192.168.1.20'), '192.168.1.20')
+  })
+
+  it('closes and re-listens so Watch can bind and unbind the LAN', async () => {
+    const server = createServer((_request, response) => response.end('ok'))
+    await listenOn(server, 0, '127.0.0.1')
+    const first = (server.address() as AddressInfo).port
+    const hit = await fetch(`http://127.0.0.1:${first}/`)
+    assert.equal(hit.status, 200)
+    assert.equal(await hit.text(), 'ok')
+    await closeListeningServer(server)
+    await listenOn(server, first, '127.0.0.1')
+    const again = await fetch(`http://127.0.0.1:${first}/`)
+    assert.equal(again.status, 200)
+    await closeListeningServer(server)
   })
 
   it('blocks cross-origin control even from loopback', () => {

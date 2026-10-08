@@ -10,9 +10,12 @@ import {
   classifyAccess,
   createControlGuard,
   lanWatchUrl,
+  listenHostFor,
   pickLanIPv4,
   resolveWatchSecret,
+  watchLogLine,
   watchTokenFromRequest,
+  watchUrlForLog,
 } from '../server/local-api.js'
 
 const lan = { port: 4173, bindHost: '0.0.0.0', lanEnabled: true, apiToken: 'write-secret', watchToken: 'view-secret' }
@@ -153,6 +156,10 @@ describe('LAN watch access', () => {
     assert.equal(pickLanIPv4('0.0.0.0', interfaces), '192.168.1.20')
     assert.equal(pickLanIPv4('10.1.1.1', interfaces), '10.1.1.1')
     assert.equal(lanWatchUrl({ bindHost: '0.0.0.0', port: 4173, token: 'view-secret', interfaces }), 'http://192.168.1.20:4173/watch?token=view-secret')
+    assert.equal(watchUrlForLog('http://192.168.1.20:4173/watch?token=view-secret'), 'http://192.168.1.20:4173/watch')
+    assert.equal(watchLogLine('http://192.168.1.20:4173/watch?token=view-secret'), 'Watch          http://192.168.1.20:4173/watch')
+    assert.equal(watchLogLine(undefined), 'Watch is on, but no private IPv4 address was found for a watch link.')
+    assert.equal(listenHostFor(false, '0.0.0.0'), '127.0.0.1')
   })
 
   it('mounts /watch instead of the operator docks', () => {

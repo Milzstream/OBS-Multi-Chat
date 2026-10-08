@@ -1,13 +1,16 @@
 import crypto from 'node:crypto'
 import path from 'node:path'
 import { spawn, type SpawnOptions } from 'node:child_process'
+import type { Server } from 'node:http'
 import type { NextFunction, Request, Response } from 'express'
 
 /**
  * Local control API helpers: hardening and URL allowlists for the docks.
  *
- * The process binds to loopback unless LAN is opted in (`RELAY_BIND` not
- * loopback, or `RELAY_LAN=1`). Off this computer:
+ * The HTTP socket binds to loopback while Watch is off. Turning Watch on
+ * (companion button, `settings.lanWatch`, `RELAY_LAN=1`, or a non-loopback
+ * `RELAY_BIND`) rebinds to the LAN; turning it off returns to loopback.
+ * Off this computer:
  * - A watch token (query `token` or `relay_watch` cookie) can only read
  *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
  *   moderate, open links, or read JWTs. Neighbors on the Wi-Fi do not get
@@ -66,8 +69,9 @@ export function isLoopbackHost(host: string) {
 
 /**
  * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
- * (or any non-loopback `RELAY_BIND`) switches to the LAN. Writes from off this
+ * (or any non-loopback `RELAY_BIND`) starts with Watch on. Writes from off this
  * computer then require `RELAY_API_TOKEN`; the watch link uses its own view token.
+ * The companion Watch button rebinds this at runtime via `listenHostFor`.
  */
 export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   const raw = String(env.RELAY_BIND || '').trim()
@@ -75,6 +79,63 @@ export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: s
   if (lanFlag) return { host: raw || '0.0.0.0', lanEnabled: true }
   if (raw) return { host: raw, lanEnabled: !isLoopbackHost(raw) }
   return { host: '127.0.0.1', lanEnabled: false }
+}
+
+/**
+ * Socket bind for the current Watch state. Watch off is always loopback, even
+ * if `RELAY_BIND=0.0.0.0` is set. Watch on uses that env host when it is a LAN
+ * address, otherwise all interfaces.
+ */
+export function listenHostFor(lanEnabled: boolean, envBind = '') {
+  if (!lanEnabled) return '127.0.0.1'
+  const bound = envBind.trim()
+  if (bound && !isLoopbackHost(bound)) return bound
+  return '0.0.0.0'
+}
+
+/** Watch URL without the view secret, for the companion log. */
+export function watchUrlForLog(url: string | undefined) {
+  if (!url) return
+  try {
+    const parsed = new URL(url)
+    parsed.search = ''
+    parsed.hash = ''
+    return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '') || parsed.origin
+  } catch {
+    return
+  }
+}
+
+export function watchLogLine(url: string | undefined) {
+  const safe = watchUrlForLog(url)
+  return safe
+    ? `Watch          ${safe}`
+    : 'Watch is on, but no private IPv4 address was found for a watch link.'
+}
+
+export function closeListeningServer(server: Server, drop?: () => void): Promise<void> {
+  drop?.()
+  try { server.closeAllConnections() } catch { /* Node < 18.2 has no closeAllConnections */ }
+  if (!server.listening) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve())
+  })
+}
+
+export function listenOn(server: Server, port: number, host: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (error: Error) => reject(error)
+    server.once('error', onError)
+    try {
+      server.listen(port, host, () => {
+        server.off('error', onError)
+        resolve()
+      })
+    } catch (error) {
+      server.off('error', onError)
+      reject(error)
+    }
+  })
 }
 
 export function isLoopbackAddress(address?: string | null) {

@@ -17,8 +17,9 @@ import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, ST
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, openInDefaultBrowser, resolveBindHost, resolveWatchSecret } from './local-api.js'
+import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, watchLogLine } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
+import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion, isDesktopPackaged } from './check-update.js'
@@ -146,6 +147,7 @@ import type {
  */
 const relayLogs = createLogBuffer()
 relayLogs.capture()
+let flushRelayLog = () => {}
 const YOUTUBE_QUOTA_PAGE = 'https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com'
 
 process.removeAllListeners('warning')
@@ -165,6 +167,7 @@ function shutdownCompanion(): never {
     companionShutdown = true
     try { flushChatSave() } catch { /* ignore */ }
     try { ingestLog.flush() } catch { /* ignore */ }
+    try { flushRelayLog() } catch { /* ignore */ }
     try { companionChild?.kill() } catch { /* ignore */ }
   }
   process.exit(0)
@@ -172,10 +175,12 @@ function shutdownCompanion(): never {
 process.on('exit', () => {
   try { flushChatSave() } catch { /* ignore */ }
   try { ingestLog.flush() } catch { /* ignore */ }
+  try { flushRelayLog() } catch { /* ignore */ }
   try { companionChild?.kill() } catch { /* ignore */ }
 })
 
 function holdConsoleAndExit(code = 1, message?: string): never {
+  try { flushRelayLog() } catch { /* ignore */ }
   process.exitCode = code
   const text = message || 'Relay Chat Dock failed to start.'
   if (process.versions.electron) {
@@ -198,6 +203,10 @@ process.on('unhandledRejection', (error) => {
 
 try { fs.mkdirSync(filesDir, { recursive: true }) } catch { /* ignore */ }
 try { fs.unlinkSync(path.join(filesDir, 'launch.log')) } catch { /* ignore */ }
+const relayLogFile = createLogFile({ filePath: resolveLogFilePath(filesDir) })
+for (const line of relayLogs.lines()) relayLogFile.writeLine(line)
+relayLogs.subscribe((line) => relayLogFile.writeLine(line))
+flushRelayLog = () => relayLogFile.flush()
 const envPath = resolveEnvFilePath(filesDir)
 const envTemplatePath = resolveEnvTemplatePath(exeDir)
 let envKeysAdded: string[] = []
@@ -238,9 +247,10 @@ type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMes
 
 const port = Number(process.env.PORT || 4173)
 const { lanEnabled: envLanEnabled } = resolveBindHost()
-const bindHost = '0.0.0.0'
+/** LAN listen address while Watch is on. Watch off always rebinds to 127.0.0.1. */
+const envBindHost = String(process.env.RELAY_BIND || '').trim()
 const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
-const localApi = { port, bindHost, lanEnabled: envLanEnabled, apiToken, watchToken: undefined as string | undefined }
+const localApi = { port, bindHost: '127.0.0.1', lanEnabled: envLanEnabled, apiToken, watchToken: undefined as string | undefined }
 const app = express()
 const httpServer = createServer(app)
 httpServer.requestTimeout = 0
@@ -253,6 +263,7 @@ const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
 const settings = loadSettings()
 if (typeof settings.lanWatch === 'boolean') localApi.lanEnabled = settings.lanWatch
+localApi.bindHost = listenHostFor(localApi.lanEnabled, envBindHost)
 // View secret for the shared watch URL. Kept distinct from RELAY_API_TOKEN so that link cannot write.
 const watchTokenFile = path.join(dataDir, 'watch-token')
 let storedWatchToken = ''
@@ -454,7 +465,7 @@ app.get('/api/state', (_request, response) => {
 function currentWatchUrl() {
   if (!localApi.lanEnabled) return
   ensureWatchToken()
-  return lanWatchUrl({ bindHost, port, token: localApi.watchToken, interfaces: os.networkInterfaces() })
+  return lanWatchUrl({ bindHost: localApi.bindHost, port, token: localApi.watchToken, interfaces: os.networkInterfaces() })
 }
 app.get('/api/console', (_request, response) => {
   const base = `http://127.0.0.1:${port}`
@@ -642,9 +653,10 @@ app.post('/api/stream-info', async (request, response) => {
   broadcast()
   response.json({ streamInfo: state.streamInfo, results })
 })
-app.post('/api/settings', (request, response) => {
+app.post('/api/settings', async (request, response) => {
   const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean }
   let changed = false
+  let watchError = ''
   const turnedOn: Platform[] = []
   if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
     settings.activityFallback = body.activityFallback
@@ -675,14 +687,15 @@ app.post('/api/settings', (request, response) => {
   }
   let watchChanged = false
   if (typeof body.lanWatch === 'boolean' && body.lanWatch !== localApi.lanEnabled) {
-    settings.lanWatch = body.lanWatch
-    localApi.lanEnabled = body.lanWatch
-    if (body.lanWatch) ensureWatchToken()
-    watchChanged = true
-    const url = currentWatchUrl()
-    console.log(body.lanWatch
-      ? (url ? `Watch          ${url}` : 'Watch is on, but no private IPv4 address was found.')
-      : 'Watch is off. Other devices cannot open the relay.')
+    const rebound = await rebindForWatch(body.lanWatch)
+    if (rebound.ok) {
+      settings.lanWatch = body.lanWatch
+      watchChanged = true
+      console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : 'Watch is off. Other devices cannot open the relay.')
+    } else {
+      watchError = rebound.error
+      console.error(watchError)
+    }
   }
   if (body.autoLiveCheck && typeof body.autoLiveCheck === 'object') {
     const next = mergeAutoLiveCheck(settings.autoLiveCheck, body.autoLiveCheck)
@@ -699,7 +712,7 @@ app.post('/api/settings', (request, response) => {
   }
   if (changed || watchChanged) saveSettings()
   if (changed) broadcast()
-  response.json({
+  const payload = {
     activityFallback: settings.activityFallback,
     ignoreMissingJwt: settings.ignoreMissingJwt,
     dropOldAlerts: settings.dropOldAlerts,
@@ -708,12 +721,14 @@ app.post('/api/settings', (request, response) => {
     streamelements: state.streamelements,
     lanEnabled: localApi.lanEnabled,
     watchUrl: currentWatchUrl() || null,
-  })
+  }
   // Turning Auto back on should notice a live change without waiting out YouTube's slow interval.
   for (const platform of turnedOn) {
     if (!tokens[platform]) continue
     void checkLiveNow(platform).catch((error) => console.error(`${platform} live check:`, error instanceof Error ? error.message : error))
   }
+  if (watchError) return response.status(503).json({ error: watchError, ...payload })
+  response.json(payload)
 })
 app.get('/api/jwts', (_request, response) => {
   const slots = streamElementsJwtSlots()
@@ -830,31 +845,63 @@ if (fs.existsSync(distPath)) {
   app.use(express.static(distPath))
   app.get('*', (_request, response) => response.sendFile(path.join(distPath, 'index.html')))
 }
-httpServer.on('error', (error: NodeJS.ErrnoException) => {
-  const message = error.code === 'EADDRINUSE'
+function dropSseClients() {
+  for (const response of [...clients]) {
+    try { response.end() } catch { /* ignore */ }
+  }
+  clients.clear()
+}
+
+/** Watch on binds the LAN; Watch off returns to loopback. A failed LAN bind restores the previous socket. */
+async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const nextHost = listenHostFor(enabled, envBindHost)
+  if (enabled === localApi.lanEnabled && nextHost === localApi.bindHost && httpServer.listening) return { ok: true }
+  const previousHost = localApi.bindHost
+  const previousEnabled = localApi.lanEnabled
+  try {
+    await closeListeningServer(httpServer, dropSseClients)
+    await listenOn(httpServer, port, nextHost)
+    localApi.bindHost = nextHost
+    localApi.lanEnabled = enabled
+    if (enabled) ensureWatchToken()
+    return { ok: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    try {
+      if (!httpServer.listening) await listenOn(httpServer, port, previousHost)
+      localApi.bindHost = previousHost
+      localApi.lanEnabled = previousEnabled
+    } catch {
+      try {
+        await listenOn(httpServer, port, '127.0.0.1')
+        localApi.bindHost = '127.0.0.1'
+        localApi.lanEnabled = false
+      } catch { /* last-resort bind failed; the next request will error */ }
+    }
+    return { ok: false, error: `Could not ${enabled ? 'listen on the LAN' : 'return to this computer only'}: ${message}` }
+  }
+}
+
+function listenFailureMessage(error: NodeJS.ErrnoException) {
+  return error.code === 'EADDRINUSE'
     ? `Relay Chat Dock is already running on port ${port}. Use the window that is already open.`
     : `Relay backend failed to start: ${error.message}`
-  console.error(message)
-  holdConsoleAndExit(1, message)
-})
-export const relayReady = new Promise<number>((resolve, reject) => {
-  httpServer.once('listening', () => resolve(port))
-  httpServer.once('error', reject)
-})
-httpServer.listen(port, bindHost, () => {
+}
+
+function printListenBanner() {
   ensureYouTubeQuotaDay()
   collapseYouTubeHydrationDuplicates()
   const base = `http://127.0.0.1:${port}`
   const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
   console.log(`Relay Chat Dock v${getCurrentVersion()}`)
   console.log(`Data  ${dataDir}`)
+  console.log(`Log   ${resolveLogFilePath(filesDir)}`)
   if (process.env.RELAY_ELECTRON !== '1') {
     console.log(`Chat dock      ${base}`)
     console.log(`Activity dock  ${base}/activity`)
   }
   if (localApi.lanEnabled) {
-    const watchUrl = currentWatchUrl()
-    console.log(watchUrl ? `Watch          ${watchUrl}` : 'Watch is on, but no private IPv4 address was found for a watch link.')
+    console.log(watchLogLine(currentWatchUrl()))
     console.log(apiToken
       ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
       : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
@@ -872,6 +919,18 @@ httpServer.listen(port, bindHost, () => {
     console.error('')
   }
   openCompanionWindow()
+}
+
+export const relayReady = new Promise<number>((resolve, reject) => {
+  void listenOn(httpServer, port, localApi.bindHost).then(() => {
+    printListenBanner()
+    resolve(port)
+  }, (error: NodeJS.ErrnoException) => {
+    const message = listenFailureMessage(error)
+    console.error(message)
+    reject(error)
+    holdConsoleAndExit(1, message)
+  })
 })
 function openCompanionWindow() {
   if (!serverShouldOpenWindow({ packaged: isPackaged, platform: process.platform, argv: process.argv, env: process.env })) return
@@ -906,6 +965,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
     flushChatSave()
     ingestLog.flush()
+    flushRelayLog()
     process.exit(0)
   })
 }
