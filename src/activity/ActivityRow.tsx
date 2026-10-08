@@ -69,7 +69,7 @@ export function profileHref(event: ActivityEvent, channelLogin?: string) {
   return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }, channelLogin) || event.profileUrl
 }
 
-export function ActivityRow({ event, age, channelLogin }: { event: ActivityEvent; age: string; channelLogin?: string }) {
+export function ActivityRow({ event, age, channelLogin, openIn = 'dock' }: { event: ActivityEvent; age: string; channelLogin?: string; openIn?: 'dock' | 'browser' }) {
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
@@ -79,8 +79,11 @@ export function ActivityRow({ event, age, channelLogin }: { event: ActivityEvent
     if (!href) return
     openDockUrl(href)
   }
-  return (
-    <button type="button" className={href ? 'activity-row activity-row-link' : 'activity-row'} style={{ ['--row-color' as string]: color }} title={href ? profileLinkTitle(source) : undefined} onClick={href ? openProfile : undefined}>
+  const className = href ? 'activity-row activity-row-link' : 'activity-row'
+  const style = { ['--row-color' as string]: color }
+  const title = href ? profileLinkTitle(source) : undefined
+  const body = (
+    <>
       <span className="activity-icon" style={{ color: platformColor[source] }} title={source}><PlatformMark platform={source} /></span>
       <span className="activity-icon" style={{ color }}><KindIcon kind={event.kind} /></span>
       <div className="activity-copy">
@@ -89,6 +92,8 @@ export function ActivityRow({ event, age, channelLogin }: { event: ActivityEvent
       </div>
       <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{kindLabel[event.kind]}</span>
       <time className="activity-age">{age}</time>
-    </button>
+    </>
   )
+  if (href && openIn === 'browser') return <a className={className} style={style} title={title} href={href} target="_blank" rel="noopener noreferrer">{body}</a>
+  return <button type="button" className={className} style={style} title={title} onClick={href ? openProfile : undefined}>{body}</button>
 }

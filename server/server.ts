@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import dotenv from 'dotenv'
@@ -16,7 +17,7 @@ import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, ST
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { corsOriginDelegate, createControlGuard, createOpenHandler, isLoopbackAddress, isSafeMediaUrl, isTrustedOrigin, openInDefaultBrowser, resolveBindHost } from './local-api.js'
+import { corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, openInDefaultBrowser, resolveBindHost, resolveWatchSecret } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
 import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
@@ -238,7 +239,7 @@ type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMes
 const port = Number(process.env.PORT || 4173)
 const { host: bindHost, lanEnabled } = resolveBindHost()
 const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
-const localApi = { port, bindHost, lanEnabled, apiToken }
+const localApi = { port, bindHost, lanEnabled, apiToken, watchToken: undefined as string | undefined }
 const app = express()
 const httpServer = createServer(app)
 httpServer.requestTimeout = 0
@@ -246,6 +247,22 @@ httpServer.headersTimeout = 0
 httpServer.timeout = 0
 const clients = new Set<express.Response>()
 const dataDir = resolveDataDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd(), env: process.env })
+// View secret for the shared watch URL. Kept distinct from RELAY_API_TOKEN so that link cannot write.
+const watchTokenFile = path.join(dataDir, 'watch-token')
+let storedWatchToken = ''
+try { storedWatchToken = fs.readFileSync(watchTokenFile, 'utf8') } catch { /* created on the first LAN run */ }
+const watchSecret = resolveWatchSecret({
+  lanEnabled,
+  envToken: process.env.RELAY_WATCH_TOKEN,
+  apiToken,
+  stored: storedWatchToken,
+  create: () => crypto.randomBytes(24).toString('base64url'),
+})
+if (watchSecret.persist) {
+  try { writeTextAtomic(watchTokenFile, `${watchSecret.persist}\n`) }
+  catch (error) { console.error(`Could not save the watch token: ${error instanceof Error ? error.message : error}`) }
+}
+localApi.watchToken = watchSecret.token
 const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
@@ -425,23 +442,19 @@ app.get('/api/state', (_request, response) => {
   state.activity = activityStore.list()
   response.json({ seq: sseSeq, ...state })
 })
-function localCompanionOnly(request: express.Request, response: express.Response) {
-  if (isLoopbackAddress(request.socket.remoteAddress)) return false
-  response.status(403).json({ error: 'Companion stays on this computer' })
-  return true
+function currentWatchUrl() {
+  if (!lanEnabled) return
+  return lanWatchUrl({ bindHost, port, token: localApi.watchToken, interfaces: os.networkInterfaces() })
 }
-app.get('/api/console', (request, response) => {
-  if (localCompanionOnly(request, response)) return
+app.get('/api/console', (_request, response) => {
   const base = `http://127.0.0.1:${port}`
-  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity` })
+  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, lanEnabled, watchUrl: currentWatchUrl() || null })
 })
 app.get('/api/logs', (request, response) => {
-  if (localCompanionOnly(request, response)) return
   const after = Number(request.query.after || 0)
   response.json({ lines: Number.isFinite(after) && after > 0 ? relayLogs.since(after) : relayLogs.lines() })
 })
 app.get('/events/logs', (request, response) => {
-  if (!isLoopbackAddress(request.socket.remoteAddress)) return response.status(403).end()
   const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
   response.writeHead(200, headers)
   const write = (line: { id: number }) => {
@@ -818,7 +831,14 @@ httpServer.listen(port, bindHost, () => {
     console.log(`Chat dock      ${base}`)
     console.log(`Activity dock  ${base}/activity`)
   }
-  if (lanEnabled) console.log(apiToken ? `Listening on ${bindHost}:${port} (LAN).` : `Listening on ${bindHost}:${port} (LAN, no token).`)
+  if (lanEnabled) {
+    const watchUrl = currentWatchUrl()
+    console.log(watchUrl ? `Watch          ${watchUrl}` : 'LAN is on, but no private IPv4 address was found for a watch link.')
+    console.log(apiToken
+      ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
+      : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
+  }
+  if (watchSecret.warning) console.warn(watchSecret.warning)
   if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
   if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)
   listenForYouTubeQuotaInput()

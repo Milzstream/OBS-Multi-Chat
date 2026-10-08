@@ -3,20 +3,19 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import ActivityApp from './activity/ActivityApp'
 import ConsoleApp from './ConsoleApp'
+import { dockView } from './dock-view'
+import WatchApp from './WatchApp'
 import './styles.css'
 
 /**
- * React entry point for the docks. Picks the activity dock or the chat dock
- * from the URL (path `/activity` or `?view=activity`), then mounts it into
- * `#root`.
+ * React entry point. `/` is the chat dock, `/activity` the activity dock,
+ * `/console` the companion, and `/watch` the readonly LAN page.
  */
 
-const path = location.pathname.replace(/\/$/, '') || '/'
-const activity = path === '/activity' || new URLSearchParams(location.search).get('view') === 'activity'
-const companion = path === '/console'
+const view = dockView(location.pathname, location.search)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {companion ? <ConsoleApp /> : activity ? <ActivityApp /> : <App />}
+    {view === 'companion' ? <ConsoleApp /> : view === 'watch' ? <WatchApp /> : view === 'activity' ? <ActivityApp /> : <App />}
   </StrictMode>,
 )
