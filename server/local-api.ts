@@ -324,10 +324,14 @@ export function authorizeLocalControl(request: ControlRequestInfo, options: Loca
   const origin = String(request.origin || '').trim()
   const referer = String(request.referer || '').trim()
   const source = origin || referer
-  if (source && !isTrustedOrigin(source, options, request.host)) {
+  const loopback = isLoopbackAddress(request.ip)
+  // YouTube, Twitch, and Kick send the browser back to /oauth/callback with
+  // their own Referer. That is still this computer. A foreign Referer must
+  // not block it, and must not unlock anything else.
+  if (source && !isTrustedOrigin(source, options, request.host) && !(kind === 'oauth' && loopback)) {
     return { ok: false, status: 403, error: 'Cross-origin control requests are blocked' }
   }
-  if (isLoopbackAddress(request.ip)) return { ok: true }
+  if (loopback) return { ok: true }
   if (!options.lanEnabled) return limitedToThisComputer()
   const apiOk = tokenMatches(options.apiToken, request.token)
   const watchOk = tokenMatches(options.watchToken, request.watchToken)

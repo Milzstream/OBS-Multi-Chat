@@ -126,6 +126,37 @@ describe('LAN watch access', () => {
     }, { ...lan, lanEnabled: true, watchToken: 'view-secret' }).ok, false)
   })
 
+  it('lets this computer finish YouTube, Twitch, and Kick OAuth after the provider redirect', () => {
+    for (const referer of ['https://accounts.google.com/o/oauth2/v2/auth', 'https://id.twitch.tv/oauth2/authorize', 'https://id.kick.com/oauth/authorize']) {
+      assert.equal(authorizeLocalControl({
+        method: 'GET',
+        path: '/oauth/callback',
+        ip: '127.0.0.1',
+        referer,
+        host: 'localhost:4173',
+      }, lan).ok, true, referer)
+      assert.equal(authorizeLocalControl({
+        method: 'GET',
+        path: '/oauth/youtube',
+        ip: '::ffff:127.0.0.1',
+        referer,
+      }, lan).ok, true, referer)
+    }
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/oauth/callback',
+      ip: '192.168.1.20',
+      referer: 'https://accounts.google.com/',
+      host: '192.168.1.20:4173',
+    }, lan).ok, false)
+    assert.equal(authorizeLocalControl({
+      method: 'POST',
+      path: '/api/messages',
+      ip: '127.0.0.1',
+      referer: 'https://accounts.google.com/',
+    }, lan).ok, false)
+  })
+
   it('keeps a view token that is not the write secret', () => {
     assert.deepEqual(resolveWatchSecret({ lanEnabled: false, create: () => 'generated-token-value' }), {})
     assert.equal(resolveWatchSecret({ lanEnabled: true, envToken: 'short' }).warning?.includes('ignored'), true)
@@ -176,6 +207,28 @@ describe('LAN watch access', () => {
     assert.equal(source.includes('openDockUrl'), false)
     assert.equal(/fetch\(\s*['"]\/api\/(?:open|messages|moderate|settings|shutdown)/.test(source), false)
     assert.equal(source.includes('openIn="browser"'), true)
+  })
+
+  it('accepts a loopback OAuth callback that carries the provider Referer', async () => {
+    const options = { port: 4173, bindHost: '0.0.0.0', lanEnabled: false }
+    const app = express()
+    app.use(createControlGuard(options))
+    app.get('/oauth/callback', (_request, response) => response.send('exchanged'))
+    app.get('/oauth/:platform', (request, response) => response.send(request.params.platform))
+    const server = await listen(app)
+    options.port = server.port
+    try {
+      for (const [path, referer] of [
+        ['/oauth/callback?code=1&state=1', 'https://accounts.google.com/o/oauth2/v2/auth'],
+        ['/oauth/twitch', 'https://id.twitch.tv/oauth2/authorize'],
+        ['/oauth/kick', 'https://id.kick.com/oauth/authorize'],
+      ] as const) {
+        const response = await fetch(`${server.url}${path}`, { headers: { Referer: referer } })
+        assert.equal(response.status, 200, referer)
+      }
+    } finally {
+      await server.close()
+    }
   })
 
   it('rejects a LAN JWT read and a forged-origin write, and accepts the watch token for state', async () => {
