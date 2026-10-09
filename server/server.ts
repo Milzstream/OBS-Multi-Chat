@@ -17,7 +17,9 @@ import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, ST
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
-import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isSafeMediaUrl, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
+import { fetchTimed } from './fetch-timed.js'
+import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
+import { fetchMedia } from './media-proxy.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
@@ -508,16 +510,14 @@ app.post('/api/console/quota-page', (_request, response) => {
   response.json({ ok: true })
 })
 app.get('/api/media', async (request, response) => {
-  const raw = String(request.query.u || '')
-  if (!isSafeMediaUrl(raw)) return response.status(400).end()
   try {
-    const upstream = await fetchTimed(raw, { headers: { Accept: 'image/*' } }, 8_000)
-    if (!upstream.ok) return response.status(upstream.status).end()
-    response.setHeader('Content-Type', upstream.headers.get('content-type') || 'image/webp')
+    const result = await fetchMedia(String(request.query.u || ''))
+    if (!result.ok) return response.status(result.status).end()
+    response.setHeader('Content-Type', result.contentType)
     response.setHeader('Cache-Control', 'public, max-age=86400')
-    response.end(Buffer.from(await upstream.arrayBuffer()))
+    response.end(result.body)
   } catch {
-    response.status(502).end()
+    if (!response.headersSent) response.status(502).end()
   }
 })
 app.get('/events', (request, response) => {
@@ -1094,19 +1094,6 @@ function restorePlatformConnection(platform: Platform) {
   const account = state.accounts.find((item) => item.platform === platform)
   if (account && token) Object.assign(account, { connected: true, handle: token.user || account.handle || platform })
   if (isTokenRefreshHealthMessage(state.health[platform].message)) setHealth(platform, 'ok')
-}
-
-async function fetchTimed(url: string, options: RequestInit = {}, ms = 8_000) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
-  try {
-    return await fetch(url, { ...options, signal: controller.signal })
-  } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') throw new Error(`Request timed out after ${ms}ms`)
-    throw error
-  } finally {
-    clearTimeout(timer)
-  }
 }
 
 async function twitchApi(endpoint: string, token: Token, options: RequestInit = {}, networkRetried = false, authRetried = false): Promise<any> {
