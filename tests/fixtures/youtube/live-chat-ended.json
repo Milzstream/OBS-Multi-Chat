@@ -1,0 +1,17 @@
+{
+  "name": "missing continuation means the live chat ended",
+  "kind": "chat",
+  "videoId": "abcdefghijk",
+  "payload": {
+    "continuationContents": {
+      "liveChatContinuation": {
+        "actions": [],
+        "continuations": []
+      }
+    }
+  },
+  "expect": {
+    "messages": [],
+    "continuation": { "continuation": null, "ended": true }
+  }
+}

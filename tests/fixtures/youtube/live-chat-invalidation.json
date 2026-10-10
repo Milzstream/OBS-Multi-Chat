@@ -1,0 +1,16 @@
+{
+  "name": "poll continuation falls back to invalidationContinuationData",
+  "kind": "chat",
+  "videoId": "abcdefghijk",
+  "payload": {
+    "continuationContents": {
+      "liveChatContinuation": {
+        "actions": [],
+        "continuations": [{ "invalidationContinuationData": { "continuation": "INVALIDATE", "timeoutMs": 2000 } }]
+      }
+    }
+  },
+  "expect": {
+    "continuation": { "continuation": "INVALIDATE", "ended": false }
+  }
+}

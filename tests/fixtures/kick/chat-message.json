@@ -1,0 +1,27 @@
+{
+  "name": "chat message with inline emote and badge",
+  "frame": {
+    "event": "App\\Events\\ChatMessageEvent",
+    "channel": "chatrooms.44.v2",
+    "data": "{\"id\":\"m1\",\"content\":\"hello [emote:42:Cat]\",\"sender\":{\"id\":9,\"username\":\"Ada\",\"slug\":\"ada\",\"identity\":{\"color\":\"#00FF00\",\"badges\":[{\"type\":\"moderator\",\"text\":\"Mod\"}]},\"profile_picture\":\"https://files.kick.com/images/user/1/a.webp\"}}"
+  },
+  "expect": {
+    "handshake": null,
+    "message": {
+      "id": "m1",
+      "user": "Ada",
+      "text": "hello [emote:42:Cat]",
+      "userId": "9",
+      "slug": "ada",
+      "color": "#00FF00",
+      "avatar": "https://files.kick.com/images/user/1/a.webp",
+      "badges": ["MOD"],
+      "parts": [
+        { "type": "text", "text": "hello " },
+        { "type": "emote", "name": "Cat" }
+      ]
+    },
+    "moderation": null,
+    "activity": null
+  }
+}

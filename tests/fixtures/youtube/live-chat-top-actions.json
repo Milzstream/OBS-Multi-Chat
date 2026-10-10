@@ -1,0 +1,26 @@
+{
+  "name": "chat actions at the payload root",
+  "kind": "chat",
+  "videoId": "abcdefghijk",
+  "payload": {
+    "actions": [
+      {
+        "addChatItemAction": {
+          "item": {
+            "liveChatTextMessageRenderer": {
+              "id": "t1",
+              "timestampUsec": "1690000000000000",
+              "authorName": { "simpleText": "Ada" },
+              "message": { "runs": [{ "text": "root action" }] }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expect": {
+    "messages": [
+      { "user": "Ada", "text": "root action" }
+    ]
+  }
+}

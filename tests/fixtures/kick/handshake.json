@@ -1,0 +1,14 @@
+{
+  "name": "pusher subscribe ack is not chat",
+  "frame": {
+    "event": "pusher_internal:subscription_succeeded",
+    "channel": "chatrooms.44.v2",
+    "data": "{}"
+  },
+  "expect": {
+    "handshake": "subscribed",
+    "message": null,
+    "moderation": null,
+    "activity": null
+  }
+}

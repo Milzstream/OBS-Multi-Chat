@@ -1,0 +1,11 @@
+{
+  "name": "follower-list refresh without a user is not a follow",
+  "frame": {
+    "event": "App\\Events\\FollowersUpdated",
+    "data": {}
+  },
+  "expect": {
+    "activity": null,
+    "moderation": null
+  }
+}

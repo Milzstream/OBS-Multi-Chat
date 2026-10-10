@@ -1,0 +1,31 @@
+{
+  "name": "chat actions nested under liveChatRenderer",
+  "kind": "chat",
+  "videoId": "abcdefghijk",
+  "payload": {
+    "contents": {
+      "liveChatRenderer": {
+        "actions": [
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatTextMessageRenderer": {
+                  "id": "r1",
+                  "timestampUsec": "1690000000000000",
+                  "authorName": { "simpleText": "Ada" },
+                  "message": { "runs": [{ "text": "from the renderer list" }] }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "messages": [
+      { "user": "Ada", "text": "from the renderer list", "activityKind": null }
+    ],
+    "moderation": []
+  }
+}

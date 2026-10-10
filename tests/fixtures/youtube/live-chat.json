@@ -1,0 +1,103 @@
+{
+  "name": "InnerTube live chat, paid events, and moderation",
+  "kind": "chat",
+  "videoId": "abcdefghijk",
+  "payload": {
+    "continuationContents": {
+      "liveChatContinuation": {
+        "actions": [
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatTextMessageRenderer": {
+                  "id": "m1",
+                  "timestampUsec": "1690000000000000",
+                  "authorExternalChannelId": "UC1234567890123456789012",
+                  "authorName": { "simpleText": "@Ada" },
+                  "authorPhoto": { "thumbnails": [{ "url": "https://yt3.ggpht.com/a=s88" }] },
+                  "message": {
+                    "runs": [
+                      { "text": "hi " },
+                      { "emoji": { "shortcuts": [":y:"], "image": { "thumbnails": [{ "url": "https://yt.example/e.png" }] } } }
+                    ]
+                  },
+                  "authorBadges": [{ "liveChatAuthorBadgeRenderer": { "icon": { "iconType": "OWNER" } } }]
+                }
+              }
+            }
+          },
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatPaidMessageRenderer": {
+                  "id": "m2",
+                  "timestampUsec": "1690000001000000",
+                  "authorName": { "simpleText": "Pat" },
+                  "purchaseAmountText": { "simpleText": "$5.00" },
+                  "message": { "runs": [{ "text": "nice" }] }
+                }
+              }
+            }
+          },
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatPaidStickerRenderer": {
+                  "id": "m3",
+                  "timestampUsec": "1690000002000000",
+                  "authorName": { "simpleText": "Sam" },
+                  "purchaseAmountText": { "simpleText": "$2.00" }
+                }
+              }
+            }
+          },
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatMembershipItemRenderer": {
+                  "id": "m4",
+                  "timestampUsec": "1690000003000000",
+                  "authorName": { "simpleText": "Mel" },
+                  "headerSubtext": { "runs": [{ "text": "Welcome!" }] }
+                }
+              }
+            }
+          },
+          {
+            "addChatItemAction": {
+              "item": {
+                "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer": {
+                  "id": "m5",
+                  "timestampUsec": "1690000004000000",
+                  "header": {
+                    "liveChatSponsorshipsHeaderRenderer": {
+                      "authorName": { "simpleText": "Pat" },
+                      "primaryText": { "runs": [{ "text": "gifted memberships" }] }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          { "markChatItemAsDeletedAction": { "targetItemId": "m1" } },
+          { "markChatItemsByAuthorAsDeletedAction": { "externalChannelId": "UC1234567890123456789012" } }
+        ],
+        "continuations": [{ "timedContinuationData": { "continuation": "NEXT", "timeoutMs": 4000 } }]
+      }
+    }
+  },
+  "expect": {
+    "messages": [
+      { "user": "Ada", "text": "hi", "userId": "UC1234567890123456789012", "activityKind": null, "amount": null, "badges": ["HOST"] },
+      { "user": "Pat", "text": "[$5.00] nice", "activityKind": "superchat", "amount": "$5.00" },
+      { "user": "Sam", "text": "[$2.00]", "activityKind": "superchat", "amount": "$2.00" },
+      { "user": "Mel", "text": "Welcome!", "activityKind": "membership" },
+      { "user": "Pat", "text": "gifted memberships", "activityKind": "gift" }
+    ],
+    "moderation": [
+      { "action": "delete", "messageId": "m1" },
+      { "action": "ban", "userId": "UC1234567890123456789012" }
+    ],
+    "continuation": { "continuation": "NEXT", "ended": false }
+  }
+}

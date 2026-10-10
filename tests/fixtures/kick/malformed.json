@@ -1,0 +1,5 @@
+{
+  "name": "malformed socket frame",
+  "raw": "{nope",
+  "expect": null
+}

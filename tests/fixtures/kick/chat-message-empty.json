@@ -1,0 +1,12 @@
+{
+  "name": "chat event with no text is ignored",
+  "frame": {
+    "event": "App\\Events\\ChatMessageEvent",
+    "data": { "sender": { "username": "Ada" } }
+  },
+  "expect": {
+    "message": null,
+    "moderation": null,
+    "activity": null
+  }
+}

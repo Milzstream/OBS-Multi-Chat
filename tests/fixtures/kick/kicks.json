@@ -1,0 +1,10 @@
+{
+  "name": "kicks gift",
+  "frame": {
+    "event": "App\\Events\\KicksGifted",
+    "data": { "username": "Mel", "amount": 100, "message": "yo" }
+  },
+  "expect": {
+    "activity": { "kind": "cheer", "user": "Mel", "amount": "100 Kicks", "message": "yo" }
+  }
+}

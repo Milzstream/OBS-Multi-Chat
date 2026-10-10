@@ -1,0 +1,10 @@
+{
+  "name": "subscription months",
+  "frame": {
+    "event": "App\\Events\\SubscriptionEvent",
+    "data": { "username": "Ada", "months": 3, "slug": "ada" }
+  },
+  "expect": {
+    "activity": { "kind": "subscription", "user": "Ada", "months": 3, "slug": "ada" }
+  }
+}
