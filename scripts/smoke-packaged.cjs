@@ -26,15 +26,41 @@ function killTree(pid) {
   spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
 }
 
-function cleanup() {
-  if (cleaned) return
-  cleaned = true
-  for (const child of children) killTree(child.pid)
-  fs.rmSync(temp, { recursive: true, force: true })
+function releaseDir(dir) {
+  const file = path.join(temp, 'release-dir.ps1')
+  const escaped = dir.replace(/'/g, "''")
+  fs.writeFileSync(file, [
+    `$root = '${escaped}'`,
+    'Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {',
+    '  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue',
+    '}',
+  ].join('\n'))
+  spawnSync('powershell.exe', ['-NoProfile', '-File', file], { windowsHide: true, stdio: 'ignore' })
 }
 
-process.on('SIGINT', () => { cleanup(); process.exit(1) })
-process.on('SIGTERM', () => { cleanup(); process.exit(1) })
+async function removeDir(dir) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    releaseDir(dir)
+    try {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+      return
+    } catch (error) {
+      if (!error || (error.code !== 'EBUSY' && error.code !== 'EPERM' && error.code !== 'ENOTEMPTY')) throw error
+      await sleep(250)
+    }
+  }
+  fs.rmSync(dir, { recursive: true, force: true })
+}
+
+async function cleanup() {
+  if (cleaned) return
+  for (const child of children) killTree(child.pid)
+  await removeDir(temp)
+  cleaned = true
+}
+
+process.on('SIGINT', () => { void cleanup().finally(() => process.exit(1)) })
+process.on('SIGTERM', () => { void cleanup().finally(() => process.exit(1)) })
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -227,7 +253,7 @@ async function smokeInstalledUpdate() {
   fs.mkdirSync(dataDir, { recursive: true })
   fs.writeFileSync(path.join(dataDir, 'smoke-keep.json'), '{"ok":true}\n')
 
-  fs.rmSync(appDir, { recursive: true, force: true })
+  await removeDir(appDir)
   copyApp(appDir)
   fs.writeFileSync(path.join(appDir, 'installed.origin'), 'installer\n')
   const nextPort = await freePort()
@@ -249,12 +275,14 @@ async function smokeInstalledUpdate() {
 
 smokePortable()
   .then(() => smokeInstalledUpdate())
+  .then(() => cleanup())
   .then(() => {
-    cleanup()
     console.log('Packaging smoke test passed')
   })
-  .catch((error) => {
+  .catch(async (error) => {
     console.error(error instanceof Error ? error.stack || error.message : error)
-    cleanup()
+    try { await cleanup() } catch (cleanupError) {
+      console.error(cleanupError instanceof Error ? cleanupError.message : cleanupError)
+    }
     process.exit(1)
   })
