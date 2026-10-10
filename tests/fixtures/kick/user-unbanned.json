@@ -1,0 +1,10 @@
+{
+  "name": "unban",
+  "frame": {
+    "event": "App\\Events\\UserUnbannedEvent",
+    "data": { "user": { "id": 9, "username": "Ada", "slug": "ada" } }
+  },
+  "expect": {
+    "moderation": { "action": "unban", "userId": "9", "user": "Ada", "slug": "ada" }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "ban carries user id, name, and slug",
+  "frame": {
+    "event": "App\\Events\\UserBannedEvent",
+    "data": { "user": { "id": 9, "username": "Ada", "slug": "ada" } }
+  },
+  "expect": {
+    "moderation": { "action": "ban", "userId": "9", "user": "Ada", "slug": "ada" }
+  }
+}

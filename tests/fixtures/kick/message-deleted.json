@@ -1,0 +1,12 @@
+{
+  "name": "deleted message id nested under message",
+  "frame": {
+    "event": "App\\Events\\MessageDeletedEvent",
+    "data": { "message": { "id": "m1" } }
+  },
+  "expect": {
+    "message": null,
+    "moderation": { "action": "delete", "messageId": "m1" },
+    "activity": null
+  }
+}

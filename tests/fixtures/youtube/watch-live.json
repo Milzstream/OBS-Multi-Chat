@@ -1,0 +1,17 @@
+{
+  "name": "live watch page",
+  "kind": "watch",
+  "html": "<link rel=\"canonical\" href=\"https://www.youtube.com/watch?v=abcdefghijk\"><meta name=\"title\" content=\"Night stream - YouTube\">\"INNERTUBE_API_KEY\":\"AIzaFixtureKey\"\"INNERTUBE_CLIENT_VERSION\":\"2.20260101.00.00\"\"VISITOR_DATA\":\"CgtFixtureVisitor\"\"reloadContinuationData\":{\"continuation\":\"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\"}\"concurrentViewers\":\"1234\"\"isLiveNow\":true",
+  "expect": {
+    "session": {
+      "videoId": "abcdefghijk",
+      "apiKey": "AIzaFixtureKey",
+      "clientVersion": "2.20260101.00.00",
+      "continuation": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+      "visitorData": "CgtFixtureVisitor"
+    },
+    "videoId": "abcdefghijk",
+    "viewers": 1234,
+    "title": "Night stream"
+  }
+}

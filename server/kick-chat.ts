@@ -45,6 +45,41 @@ export function parseJson(value: unknown) {
   return value as any
 }
 
+export type KickSocketFrame = {
+  event: string
+  channel?: string
+  handshake?: 'connect' | 'ping' | 'subscribed'
+  message?: KickChatMessage
+  moderation?: KickModeration
+  activity?: KickActivity
+}
+
+export function readKickSocketFrame(raw: unknown): KickSocketFrame | undefined {
+  const payload = typeof raw === 'string' ? parseJson(raw) : raw
+  if (!payload || typeof payload !== 'object') return
+  const event = String((payload as { event?: unknown }).event || '')
+  if (!event) return
+  const channelValue = (payload as { channel?: unknown }).channel
+  const channel = channelValue ? String(channelValue) : undefined
+  if (event === 'pusher:connection_established') return { event, channel, handshake: 'connect' }
+  if (event === 'pusher:ping') return { event, channel, handshake: 'ping' }
+  if (event === 'pusher_internal:subscription_succeeded') return { event, channel, handshake: 'subscribed' }
+  const data = parseJson((payload as { data?: unknown }).data)
+  if (/ChatMessage/i.test(event)) {
+    const message = parseKickChatMessage(data)
+    return message ? { event, channel, message } : { event, channel }
+  }
+  const moderation = kickEventToModeration(event, data)
+  const activity = kickEventToActivity(event, data)
+  const rawTime = data?.created_at || data?.createdAt || data?.timestamp
+  return {
+    event,
+    channel,
+    moderation,
+    activity: activity && rawTime ? { ...activity, time: String(rawTime) } : activity,
+  }
+}
+
 export function chatroomIdFrom(payload: any): number | undefined {
   const id = payload?.chatroom?.id ?? payload?.chatroom_id ?? payload?.data?.chatroom?.id
   const numeric = Number(id)
@@ -436,39 +471,26 @@ export class KickChat {
 
   /** Handle the raw Pusher protocol: connect/subscribe handshake, pings, then chat/activity/moderation events. */
   private handle(raw: string) {
-    let payload: any
-    try { payload = JSON.parse(raw) } catch { return }
-    const event = String(payload?.event || '')
-    // Pusher handshake: first subscribe, then keep the socket alive with pings
-    if (event === 'pusher:connection_established') {
-      // Chatroom id resolves to two channels depending on client version; subscribe to both
+    const frame = readKickSocketFrame(raw)
+    if (!frame) return
+    if (frame.handshake === 'connect') {
       this.ws?.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${this.chatroomId}.v2` } }))
       this.ws?.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatroom_${this.chatroomId}` } }))
       this.startPing()
       return
     }
-    if (event === 'pusher:ping') {
+    if (frame.handshake === 'ping') {
       this.ws?.send(JSON.stringify({ event: 'pusher:pong', data: {} }))
       return
     }
-    if (event === 'pusher_internal:subscription_succeeded') {
+    if (frame.handshake === 'subscribed') {
       this.attempt = 0
-      if (String(payload?.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
+      if (String(frame.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
       return
     }
-    const data = parseJson(payload.data)
-    if (/ChatMessage/i.test(event)) {
-      const message = parseKickChatMessage(data)
-      if (message) this.onMessage?.(message)
-      return
-    }
-    const moderation = kickEventToModeration(event, data)
-    if (moderation) this.onModeration?.(moderation)
-    const activity = kickEventToActivity(event, data)
-    if (activity) {
-      const raw = data?.created_at || data?.createdAt || data?.timestamp
-      this.onActivity?.(raw ? { ...activity, time: String(raw) } : activity)
-    }
+    if (frame.message) this.onMessage?.(frame.message)
+    if (frame.moderation) this.onModeration?.(frame.moderation)
+    if (frame.activity) this.onActivity?.(frame.activity)
   }
 
   private startPing() {

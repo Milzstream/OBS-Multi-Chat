@@ -1,0 +1,10 @@
+{
+  "name": "gifted subscriptions",
+  "frame": {
+    "event": "App\\Events\\GiftedSubscriptionsEvent",
+    "data": { "gifter_username": "Pat", "gifted_usernames": ["a", "b"] }
+  },
+  "expect": {
+    "activity": { "kind": "gift", "user": "Pat", "amount": "2 gifts" }
+  }
+}

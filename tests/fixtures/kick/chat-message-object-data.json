@@ -1,0 +1,34 @@
+{
+  "name": "chat message whose Pusher data is already an object",
+  "frame": {
+    "event": "App\\Events\\ChatMessageEvent",
+    "channel": "chatrooms.44.v2",
+    "data": {
+      "id": "m2",
+      "content": "hey Cat",
+      "sender": {
+        "id": 9,
+        "username": "Ada",
+        "slug": "ada",
+        "identity": {
+          "color": "#fff",
+          "profile_pic": { "url": "https://files.kick.com/images/user/1/b.webp" }
+        }
+      },
+      "emotes": [{ "id": "9", "name": "Cat", "positions": [{ "s": 4, "e": 6 }] }]
+    }
+  },
+  "expect": {
+    "message": {
+      "id": "m2",
+      "user": "Ada",
+      "text": "hey Cat",
+      "avatar": "https://files.kick.com/images/user/1/b.webp",
+      "parts": [
+        { "type": "text", "text": "hey " },
+        { "type": "emote", "name": "Cat" }
+      ]
+    },
+    "moderation": null
+  }
+}

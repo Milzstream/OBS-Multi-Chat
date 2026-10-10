@@ -1,0 +1,10 @@
+{
+  "name": "ended watch page is not live",
+  "kind": "watch",
+  "html": "<link rel=\"canonical\" href=\"https://www.youtube.com/watch?v=abcdefghijk\"><meta name=\"title\" content=\"Night stream - YouTube\">LIVE_STREAM_OFFLINE \"INNERTUBE_API_KEY\":\"AIzaFixtureKey\"",
+  "expect": {
+    "session": null,
+    "videoId": null,
+    "title": "Night stream"
+  }
+}

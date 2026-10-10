@@ -1,0 +1,10 @@
+{
+  "name": "host or raid",
+  "frame": {
+    "event": "App\\Events\\StreamHost",
+    "data": { "username": "Host", "viewers": 12 }
+  },
+  "expect": {
+    "activity": { "kind": "raid", "user": "Host", "viewers": 12 }
+  }
+}

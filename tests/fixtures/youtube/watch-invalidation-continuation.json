@@ -1,0 +1,15 @@
+{
+  "name": "watch page continuation falls back to invalidationContinuationData and clientVersion",
+  "kind": "watch",
+  "html": "<link rel=\"canonical\" href=\"https://www.youtube.com/watch?v=abcdefghijk\">\"isLiveNow\":true \"INNERTUBE_API_KEY\":\"AIzaFixtureKey\"\"clientVersion\":\"2.20260101.01.00\"\"invalidationContinuationData\":{\"continuation\":\"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD\"}",
+  "expect": {
+    "session": {
+      "videoId": "abcdefghijk",
+      "apiKey": "AIzaFixtureKey",
+      "clientVersion": "2.20260101.01.00",
+      "continuation": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+      "visitorData": null
+    },
+    "videoId": "abcdefghijk"
+  }
+}
