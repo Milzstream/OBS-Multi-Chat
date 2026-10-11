@@ -46,7 +46,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 - SSE updates from the backend to OBS
 - Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
 
-- Activity dock (StreamElements as source of truth, optional native backup)
+- Activity dock (StreamElements as source of truth, optional native backup). YouTube subscribers are new in 0.9.3. Earlier builds did not show them: StreamElements sends those as subscriber events, and the dock used to store them as members, so a new YouTube subscriber never appeared as its own alert. They now show as **SUBSCRIBER**. YouTube members stay **MEMBER**.
 - Windows app window for the log, account connections, translate, and StreamElements JWTs. Closing that window stops the docks
 - Companion crash log in `logs/relay.log` (rotated to `relay.log.bak`), same folder as `production.env`. Watch tokens, JWTs, and OAuth secrets are redacted
 
@@ -121,7 +121,7 @@ Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a 
 
 If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
 
-We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
+We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only, and they were not shown before 0.9.3. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
 
 If a YouTube broadcast is unlisted or private, the companion window and the chat dock each show that broadcast's title (`YouTube “Night stream” is unlisted.`). That can be intentional, or a leftover from reusing an unlisted stream. **Make public** sets only that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that video's warning until the app restarts; the next broadcast still warns. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
 
@@ -231,18 +231,18 @@ Newest alerts stay at the top; older rows drop down. Each row shows the platform
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
-**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership on both feeds, not a follow.
+**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership. A YouTube subscriber is its own alert, not a member. Right-click an activity pill to slide out the delete button. Click that X to remove it from the dock and from `activity.json`. Right-click again, or wait 5 seconds, to hide the X. Left-click still opens the profile.
 
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 
-Activity test rows from `/api/activity/test` are in-memory only and are not saved to disk.
+The flask fires a StreamElements mock activity, the same call the overlay editor makes when Preview LIVE on stream is checked. The row shows up when that event comes back on the activities socket, and it is saved like any other alert. A replay of an alert already in history is dropped, because StreamElements reuses the activity id.
 
 Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Installer copies keep `production.env` and `data\` under `%LOCALAPPDATA%\Relay Chat Dock`. Portable zips keep those files beside the exe. Development runs keep them under the project directory. `RELAY_DATA_DIR` overrides any of those. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
 
 ### Testing alerts
 
-1. Open the Activity dock and click the flask icon. That injects a local test row through `/api/activity/test`. It proves the dock and filters without hitting platform APIs, and it is not persisted.
-2. With JWTs in `production.env`, replay an event from the SE dashboard activity feed. Overlay **Emulate** usually only hits the overlay iframe, not this dock.
+1. Open the Activity dock and click the flask icon. That posts a StreamElements emulate (`POST /activities/{channel}/mock`) for the platform's JWT. The live overlay plays it, and the dock shows the row when the activities socket delivers it. This needs the matching StreamElements JWT.
+2. Overlay **Emulate** with **Preview LIVE on stream** checked is the same call. Without that box, Emulate stays in the editor tab and this dock does not see it. Replaying an activity already in the feed is dropped here, because the id does not change.
 3. Native backup (if the settings checkbox is on): reconnect Twitch so follow/sub/bits EventSub is granted, then follow from an alt. Kick follows/subs appear on the public chat socket. YouTube Super Chats/memberships appear in live chat. YouTube subscribers are SE-only.
 
 ## Run the Windows app
@@ -285,7 +285,8 @@ Loopback (this computer) can call every route with no token. Off this computer t
 - `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
 - `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
 - `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
-- `POST /api/activity/test` - inject a local test activity row (not persisted)
+- `POST /api/activity/test` - fire a StreamElements emulate for that platform and kind. The overlay plays it. The dock row arrives on the activities socket, not as a local inject. YouTube subscriber uses kind `subscription`
+- `POST /api/activity/delete` - remove one stored activity by id. This computer only
 - `GET /api/categories/:platform` - search Twitch or Kick categories
 - `POST /api/stream-info/:platform` - apply title/category/tags to one platform
 - `POST /api/stream-info` - apply shared title plus per-platform Twitch/Kick category and tags

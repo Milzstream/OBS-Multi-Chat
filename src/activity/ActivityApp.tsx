@@ -16,16 +16,19 @@ import { ACTIVITY_ROW_ESTIMATE, useVirtualWindow } from '../virtualList'
 
 type Filter = ActivityFilter
 
-const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind; amount?: string; viewers?: number; message: string; source?: ActivityPlatform }[] = [
-  { label: 'Twitch follow', platform: 'Twitch', kind: 'follow', message: 'Test follow' },
-  { label: 'Kick follow', platform: 'Kick', kind: 'follow', message: 'Test follow' },
-  { label: 'YouTube subscribe', platform: 'YouTube', kind: 'follow', message: 'Test YouTube subscriber' },
-  { label: 'YouTube Super Chat', platform: 'YouTube', kind: 'superchat', amount: '$4.99', message: 'Test Super Chat' },
-  { label: 'Twitch sub', platform: 'Twitch', kind: 'subscription', message: 'Test sub' },
-  { label: 'Twitch cheer', platform: 'Twitch', kind: 'cheer', amount: '100 Bits', message: 'Test cheer' },
-  { label: 'Twitch raid', platform: 'Twitch', kind: 'raid', viewers: 42, message: 'Test raid' },
-  { label: 'SE donation', platform: 'StreamElements', kind: 'donation', amount: '$5.00', message: 'Test donation', source: 'Twitch' },
-  { label: 'SE merch', platform: 'StreamElements', kind: 'merch', amount: 'Hoodie', message: 'Test shop sale' },
+const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind }[] = [
+  { label: 'Twitch follow', platform: 'Twitch', kind: 'follow' },
+  { label: 'Kick follow', platform: 'Kick', kind: 'follow' },
+  { label: 'Kick sub', platform: 'Kick', kind: 'subscription' },
+  { label: 'Kick KICKs', platform: 'Kick', kind: 'cheer' },
+  { label: 'YouTube subscriber', platform: 'YouTube', kind: 'subscription' },
+  { label: 'YouTube member', platform: 'YouTube', kind: 'membership' },
+  { label: 'YouTube Super Chat', platform: 'YouTube', kind: 'superchat' },
+  { label: 'Twitch sub', platform: 'Twitch', kind: 'subscription' },
+  { label: 'Twitch cheer', platform: 'Twitch', kind: 'cheer' },
+  { label: 'Twitch raid', platform: 'Twitch', kind: 'raid' },
+  { label: 'SE donation', platform: 'StreamElements', kind: 'donation' },
+  { label: 'SE merch', platform: 'StreamElements', kind: 'merch' },
 ]
 
 type BackendState = {
@@ -174,11 +177,12 @@ export default function ActivityApp() {
     void fetch('/api/activity/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platform: item.platform, kind: item.kind, user: 'TestUser', amount: item.amount, viewers: item.viewers, message: item.message, source: item.source || item.platform }),
+      body: JSON.stringify({ platform: item.platform, kind: item.kind }),
     }).then(async (response) => {
-      setTestStatus(response.ok ? `Sent ${item.label}` : 'Test failed')
-      window.setTimeout(() => setTestStatus(''), 2500)
-    }).catch(() => setTestStatus('Test failed'))
+      const result = await response.json().catch(() => ({})) as { error?: string; name?: string }
+      setTestStatus(response.ok ? `Emulated ${result.name || item.label}. It plays on stream.` : (result.error || 'Emulate failed'))
+      window.setTimeout(() => setTestStatus(''), 4000)
+    }).catch(() => setTestStatus('Emulate failed'))
   }
 
   return (
@@ -218,7 +222,7 @@ export default function ActivityApp() {
       ) : null}
       {showTests ? (
         <div className="activity-test-menu">
-          <p>Injects a local test row. Does not hit Twitch, Kick, YouTube, or StreamElements.</p>
+          <p>Fires that StreamElements emulate with Preview LIVE on. Your overlay will play it.</p>
           {tests.map((item) => (
             <button key={item.label} type="button" onClick={() => sendTest(item)}>
               <span style={{ color: platformColor[item.platform] }}>{platformIcon(item.platform, 12)}</span>
@@ -236,7 +240,12 @@ export default function ActivityApp() {
             <>
               <div className="virtual-spacer" style={{ height: padTop }} aria-hidden="true" />
               {visible.slice(start, end).map((event) => (
-                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} channelLogin={twitchChannel} />
+                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} channelLogin={twitchChannel} onDelete={(id) => {
+                  setEvents((current) => current.filter((item) => item.id !== id))
+                  void fetch('/api/activity/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).then((response) => {
+                    if (!response.ok) setTestStatus('Could not delete that alert')
+                  }).catch(() => setTestStatus('Could not delete that alert'))
+                }} />
               ))}
               <div className="virtual-spacer" style={{ height: padBottom }} aria-hidden="true" />
             </>

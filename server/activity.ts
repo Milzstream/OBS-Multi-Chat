@@ -196,6 +196,13 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
       }
       return events
     },
+    remove(id: string) {
+      const next = events.filter((event) => event.id !== id)
+      if (next.length === events.length) return false
+      events = next
+      try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
+      return true
+    },
     add(incoming: ActivityEvent) {
       const user = String(incoming.user || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
       const source = incoming.source || incoming.platform

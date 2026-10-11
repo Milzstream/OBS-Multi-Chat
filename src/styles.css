@@ -154,6 +154,10 @@ img.emote { display: inline-block; width: 24px; height: 24px; margin: 0 1px; ver
 .activity-list { min-height: 0; flex: 1; overflow: auto; padding: 8px 8px 10px; scrollbar-color: #374044 transparent; scrollbar-width: thin; }
 .scroll-paused { position: absolute; z-index: 4; top: 50%; left: 50%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 8px; background: rgba(12, 14, 16, .88); color: #eef1f0; font: 700 10px 'DM Mono', monospace; letter-spacing: .08em; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
 .scroll-paused:hover { background: rgba(20, 24, 26, .94); }
+.activity-row-wrap { position: relative; overflow: hidden; margin-bottom: 6px; border-radius: 6px; }
+.activity-row-wrap .activity-row { margin-bottom: 0; }
+.activity-delete { position: absolute; top: 0; right: 0; bottom: 0; width: 36px; display: grid; place-items: center; border: 0; border-radius: 0 6px 6px 0; background: #8d2b32; color: #fff; transform: translateX(100%); opacity: 0; pointer-events: none; transition: transform .18s ease, opacity .18s ease; }
+.activity-row-wrap.armed .activity-delete { transform: translateX(0); opacity: 1; pointer-events: auto; }
 .activity-row { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 6px; padding: 8px 10px; border-radius: 6px; border-left: 3px solid var(--row-color); background: linear-gradient(90deg, color-mix(in srgb, var(--row-color) 28%, #14181b), color-mix(in srgb, var(--row-color) 10%, #14181b) 55%, #14181b); animation: reveal .35s ease both; color: inherit; text-align: left; }
 .activity-row-link { cursor: pointer; }
 .activity-row-link:hover { filter: brightness(1.08); }

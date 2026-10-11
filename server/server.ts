@@ -23,7 +23,7 @@ import { fetchMedia } from './media-proxy.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
-import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
+import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements, postStreamElementsMock, streamElementsEmulateName, streamElementsEmulatePlan, streamElementsMockActivity } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion, isDesktopPackaged } from './check-update.js'
 import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
 import {
@@ -778,25 +778,35 @@ app.post('/api/jwts', async (request, response) => {
   })
 })
 app.post('/api/open', createOpenHandler(openInDefaultBrowser))
-app.post('/api/activity/test', (request, response) => {
+app.post('/api/activity/delete', (request, response) => {
+  const id = String((request.body as { id?: string } | undefined)?.id || '').trim()
+  if (!id) return response.status(400).json({ error: 'id is required' })
+  if (!activityStore.remove(id)) return response.status(404).json({ error: 'Activity not found' })
+  state.activity = activityStore.list()
+  broadcast()
+  response.json({ ok: true })
+})
+app.post('/api/activity/test', async (request, response) => {
   const body = request.body as Partial<ActivityEvent>
   const platform = body.platform
   const kind = body.kind
   if (!platform || !kind) return response.status(400).json({ error: 'platform and kind are required' })
-  const event: ActivityEvent = {
-    id: `test-${crypto.randomUUID()}`,
-    platform,
-    kind,
-    user: String(body.user || 'TestUser'),
-    amount: body.amount,
-    months: body.months,
-    viewers: body.viewers,
-    message: body.message || 'Test alert',
-    time: new Date().toISOString(),
-    source: body.source,
+  const plan = streamElementsEmulatePlan(platform, kind)
+  if (!plan) return response.status(400).json({ error: 'That test is not a StreamElements emulate option' })
+  try {
+    const channel = await streamElementsChannelFor(plan.provider, platform === 'StreamElements')
+    if (!channel) return response.status(400).json({ error: `Connect StreamElements for ${plan.provider} first` })
+    const provider = (channel.provider || plan.provider).toLowerCase()
+    const name = streamElementsEmulateName()
+    const activity = streamElementsMockActivity({ ...plan, provider, name })
+    await postStreamElementsMock(channel, activity)
+    console.log(`StreamElements emulate: ${provider} ${plan.type} (${name})`)
+    response.json({ ok: true, name, type: plan.type })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'StreamElements emulate failed'
+    console.error(message)
+    response.status(502).json({ error: message })
   }
-  addActivity(event)
-  response.json({ ok: true, event })
 })
 app.post('/api/disconnect/:platform', (request, response) => {
   const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
@@ -2037,6 +2047,24 @@ function addActivity(event: ActivityEvent) {
 function addNativeActivity(event: ActivityEvent) {
   if (!settings.activityFallback) return
   addActivity(event)
+}
+
+async function streamElementsChannelFor(provider: string, anyChannel = false) {
+  const wanted = provider.toLowerCase()
+  const loaded = streamElements.loadedChannels.find((channel) => (channel.provider || '').toLowerCase() === wanted)
+  if (loaded) return loaded
+  if (anyChannel && streamElements.loadedChannels[0]) return streamElements.loadedChannels[0]
+  const jwtPlatform = wanted === 'kick' ? 'Kick' : wanted === 'youtube' ? 'YouTube' : 'Twitch'
+  const jwt = String(process.env[STREAMELEMENTS_JWT_KEYS[jwtPlatform]] || '').trim()
+  if (!jwt && anyChannel) {
+    for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
+      const fallback = String(process.env[STREAMELEMENTS_JWT_KEYS[platform]] || '').trim()
+      if (!fallback) continue
+      return hydrateStreamElements(fallback)
+    }
+  }
+  if (!jwt) return
+  return hydrateStreamElements(jwt)
 }
 
 function streamElementsJwtSlots() {

@@ -29,11 +29,11 @@ const SE_ONLY_TYPES = new Set(['tip', 'merch', 'purchase', 'redemption', 'charit
  * Every StreamElements API call is bounded, so a hung request cannot leave the
  * companion waiting on a JWT (and the dock on “Connecting…”) indefinitely.
  */
-async function fetchApi(url: string, headers: Record<string, string>, ms = 8_000) {
+async function fetchApi(url: string, headers: Record<string, string>, ms = 8_000, fetchImpl: typeof fetch = fetch, init: RequestInit = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ms)
   try {
-    return await fetch(url, { headers, signal: controller.signal })
+    return await fetchImpl(url, { ...init, headers: { ...headers, ...init.headers }, signal: controller.signal })
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw new Error(`StreamElements request timed out after ${ms}ms`)
     throw error
@@ -85,9 +85,9 @@ function platformFromProvider(provider: string, type: string): ActivityPlatform 
 
 function kindFromSe(type: string, platform: ActivityPlatform): ActivityKind | undefined {
   if (type === 'follow' || type === 'follower' || type === 'fan') return 'follow'
-  if (type === 'subscriber') return platform === 'YouTube' ? 'membership' : 'subscription'
+  if (type === 'subscriber' || type === 'subscription') return 'subscription'
   if (type === 'communitygiftpurchase') return 'gift'
-  if (type === 'cheer' || type === 'cheerpurchase') return 'cheer'
+  if (type === 'cheer' || type === 'cheerpurchase' || type === 'kicks') return 'cheer'
   if (type === 'raid' || type === 'host') return 'raid'
   if (type === 'sponsor' || type === 'supporter') return 'membership'
   if (type === 'superchat') return 'superchat'
@@ -121,10 +121,11 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
   const currency = inner?.currency || root?.donation?.currency || inner?.donation?.currency
   const gifted = Number(inner?.gifted || inner?.amount || inner?.quantity)
   const months = Number(inner?.months || inner?.amount)
-  const viewers = Number(inner?.viewers || inner?.raiders)
+  const viewers = Number(inner?.viewers || inner?.raiders || (kind === 'raid' ? amountValue : undefined))
   const item = inner?.item?.name || inner?.item || inner?.product
   let amount: string | undefined
   if (kind === 'donation' || kind === 'superchat') amount = formatAmount(amountValue, currency) || undefined
+  else if (type === 'kicks' && amountValue != null) amount = `${amountValue} Kicks`
   else if (kind === 'cheer' && amountValue != null) amount = `${amountValue} Bits`
   else if (kind === 'gift' && Number.isFinite(gifted) && gifted > 0) amount = `${gifted} gift${gifted === 1 ? '' : 's'}`
   else if (kind === 'merch') amount = [item, amountValue != null ? formatAmount(amountValue, currency) : ''].filter(Boolean).join(' · ') || undefined
@@ -144,6 +145,103 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
     message: String(inner?.message || inner?.comment || root?.donation?.message || '').trim() || undefined,
     time: parseActivityTime(root?.createdAt || inner?.createdAt || payload?.ts),
   }
+}
+
+const EMULATE_NAMES = ['Ada', 'Mel', 'Pat', 'Nissa', 'Willow', 'Faustina', 'Stephana', 'Bonnie', 'Olivia', 'Rosa', 'Harriett', 'Frederica']
+
+/** A random display name, same idea as the overlay editor's emulate list. */
+export function streamElementsEmulateName(random: () => number = Math.random) {
+  const index = Math.min(EMULATE_NAMES.length - 1, Math.floor(random() * EMULATE_NAMES.length))
+  return EMULATE_NAMES[index]
+}
+
+export type StreamElementsEmulatePlan = {
+  provider: 'twitch' | 'kick' | 'youtube'
+  type: string
+  amount?: number
+  viewers?: number
+  message?: string
+  items?: { name: string; price: number; quantity: number }[]
+}
+
+/**
+ * Map a dock flask row to the event the StreamElements editor emulates.
+ * YouTube "subscribe" is `subscriber` there. Kick cheers are `kicks`.
+ */
+export function streamElementsEmulatePlan(platform: string, kind: string): StreamElementsEmulatePlan | undefined {
+  const key = `${platform}:${kind}`
+  const plans: Record<string, StreamElementsEmulatePlan> = {
+    'Twitch:follow': { provider: 'twitch', type: 'follow' },
+    'Kick:follow': { provider: 'kick', type: 'follow' },
+    'YouTube:follow': { provider: 'youtube', type: 'subscriber' },
+    'YouTube:subscription': { provider: 'youtube', type: 'subscriber' },
+    'YouTube:membership': { provider: 'youtube', type: 'sponsor', amount: 1 },
+    'YouTube:superchat': { provider: 'youtube', type: 'superchat', amount: 50 },
+    'Twitch:subscription': { provider: 'twitch', type: 'subscriber', amount: 1 },
+    'Kick:subscription': { provider: 'kick', type: 'subscriber', amount: 1 },
+    'Twitch:cheer': { provider: 'twitch', type: 'cheer', amount: 100 },
+    'Kick:cheer': { provider: 'kick', type: 'kicks', amount: 100 },
+    'Twitch:raid': { provider: 'twitch', type: 'raid', amount: 42, viewers: 42 },
+    'StreamElements:donation': { provider: 'twitch', type: 'tip', amount: 5, message: 'Test tip' },
+    'StreamElements:merch': { provider: 'twitch', type: 'merch', items: [{ name: 'Shirt', price: 20, quantity: 1 }] },
+  }
+  return plans[key]
+}
+
+/**
+ * Body for `POST /activities/{channelId}/mock`. That is what the overlay editor
+ * sends when Preview LIVE on stream is checked. The activities socket then
+ * delivers it here, and the live overlay plays it.
+ */
+export function streamElementsMockActivity(input: {
+  provider: string
+  type: string
+  name: string
+  amount?: number
+  viewers?: number
+  message?: string
+  items?: { name: string; price: number; quantity: number }[]
+  now?: Date
+}) {
+  const displayName = input.name.replace(/^@+/, '') || 'Ada'
+  const data: Record<string, unknown> = {
+    displayName,
+    username: displayName.toLowerCase(),
+    avatar: 'https://cdn.streamelements.com/assets/dashboard/my-overlays/overlay-default-preview-2.jpg',
+  }
+  if (input.amount != null) data.amount = input.amount
+  if (input.viewers != null) data.viewers = input.viewers
+  if (input.items) data.items = input.items
+  if (input.type === 'subscriber' && input.provider === 'twitch') data.tier = '1000'
+  if (input.type === 'cheer' && input.amount != null) data.message = `Cheer${input.amount}`
+  else if (input.message) data.message = input.message
+  if (input.type === 'superchat' || input.type === 'tip') data.currency = 'USD'
+  return {
+    createdAt: (input.now || new Date()).toISOString(),
+    flagged: false,
+    provider: input.provider,
+    isMock: true,
+    type: input.type,
+    data,
+  }
+}
+
+export function streamElementsMockActivityUrl(channelId: string) {
+  return `${API_BASE}/activities/${encodeURIComponent(channelId)}/mock`
+}
+
+export async function postStreamElementsMock(channel: StreamElementsChannel, body: unknown, fetchImpl: typeof fetch = fetch) {
+  const response = await fetchApi(streamElementsMockActivityUrl(channel.channelId), {
+    Authorization: `Bearer ${channel.jwt}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }, 8_000, fetchImpl, { method: 'POST', body: JSON.stringify(body) })
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    const detail = text.replace(/\s+/g, ' ').trim().slice(0, 160)
+    throw new Error(detail ? `StreamElements emulate ${response.status}: ${detail}` : `StreamElements emulate ${response.status}`)
+  }
+  return response
 }
 
 export async function hydrateStreamElements(jwt: string): Promise<StreamElementsChannel> {
@@ -235,6 +333,9 @@ export class StreamElementsClient {
   }
 
   get connected() { return this.subscribed && Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
+
+  /** Channels hydrated for the current socket. Used to emulate on the matching JWT. */
+  get loadedChannels() { return this.channels }
 
   async start(channels: StreamElementsChannel[], onActivity: (event: ActivityEvent) => void, onStatus?: (message?: string) => void) {
     this.channels = channels

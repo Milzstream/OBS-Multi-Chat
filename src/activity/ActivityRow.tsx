@@ -1,6 +1,7 @@
-import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, Youtube, Zap } from 'lucide-react'
+import { useEffect, useState, type MouseEvent } from 'react'
+import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, X, Youtube, Zap } from 'lucide-react'
 import { chatProfileUrl, openDockUrl, profileLinkTitle } from '../chat-helpers'
-import { activitySubtitle, kindLabel } from './format'
+import { activityKindLabel, activitySubtitle } from './format'
 
 /**
  * One activity row for the dock: platform and kind icons, user, subtitle,
@@ -69,15 +70,26 @@ export function profileHref(event: ActivityEvent, channelLogin?: string) {
   return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }, channelLogin) || event.profileUrl
 }
 
-export function ActivityRow({ event, age, channelLogin, openIn = 'dock' }: { event: ActivityEvent; age: string; channelLogin?: string; openIn?: 'dock' | 'browser' }) {
+export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelete }: { event: ActivityEvent; age: string; channelLogin?: string; openIn?: 'dock' | 'browser'; onDelete?: (id: string) => void }) {
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
   const detail = activitySubtitle(event)
   const href = profileHref(event, source === 'Twitch' ? channelLogin : undefined)
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const timer = window.setTimeout(() => setArmed(false), 5_000)
+    return () => window.clearTimeout(timer)
+  }, [armed])
   const openProfile = () => {
     if (!href) return
     openDockUrl(href)
+  }
+  const revealDelete = (click: MouseEvent) => {
+    if (!onDelete) return
+    click.preventDefault()
+    setArmed((current) => !current)
   }
   const className = href ? 'activity-row activity-row-link' : 'activity-row'
   const style = { ['--row-color' as string]: color }
@@ -90,10 +102,20 @@ export function ActivityRow({ event, age, channelLogin, openIn = 'dock' }: { eve
         <strong>{event.user}</strong>
         {detail ? <small>{detail}</small> : null}
       </div>
-      <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{kindLabel[event.kind]}</span>
+      <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{activityKindLabel(event)}</span>
       <time className="activity-age">{age}</time>
     </>
   )
-  if (href && openIn === 'browser') return <a className={className} style={style} title={title} href={href} target="_blank" rel="noopener noreferrer">{body}</a>
-  return <button type="button" className={className} style={style} title={title} onClick={href ? openProfile : undefined}>{body}</button>
+  const row = href && openIn === 'browser'
+    ? <a className={className} style={style} title={title} href={href} target="_blank" rel="noopener noreferrer">{body}</a>
+    : <button type="button" className={className} style={style} title={title} onClick={href ? openProfile : undefined}>{body}</button>
+  if (!onDelete) return row
+  return (
+    <div className={armed ? 'activity-row-wrap armed' : 'activity-row-wrap'} onContextMenu={revealDelete}>
+      {row}
+      <button type="button" className="activity-delete" aria-label={`Delete ${event.user}`} title="Delete alert" onClick={(click) => { click.stopPropagation(); onDelete(event.id) }}>
+        <X size={14} />
+      </button>
+    </div>
+  )
 }

@@ -7,7 +7,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { activityIsDuplicate, createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
-import { activityFromStreamElements, StreamElementsClient } from '../server/streamelements.js'
+import { activityFromStreamElements, postStreamElementsMock, streamElementsEmulatePlan, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { profileHref } from '../src/activity/ActivityRow.tsx'
 import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
@@ -55,6 +55,9 @@ describe('activity store', () => {
       const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string }[]
       assert.equal(saved.some((event) => event.id === 'test-row'), false)
       assert.equal(saved.some((event) => event.id === 'follow-1'), true)
+      assert.equal(store.remove('follow-1'), true)
+      assert.equal(store.list().some((event) => event.id === 'follow-1'), false)
+      assert.equal(store.remove('missing'), false)
       assert.equal(activityIsDuplicate(
         { id: 'native', platform: 'Twitch', kind: 'follow', user: 'cooluser', userId: '9', time: '2026-09-02T12:00:00.000Z' },
         { id: 'se', platform: 'Twitch', kind: 'follow', user: 'Cool User', handle: 'cooluser', userId: '9', time: '2026-09-01T12:00:00.000Z' },
@@ -126,15 +129,48 @@ describe('StreamElements activity', () => {
     assert.match(tip?.amount || '', /\$5/)
     const follow = activityFromStreamElements({ type: 'follow', provider: 'youtube', data: { displayName: 'Mel' }, _id: 'f1' })
     assert.equal(follow?.kind, 'follow')
-    const member = activityFromStreamElements({ type: 'subscriber', provider: 'youtube', data: { displayName: 'Mel', username: 'mel' }, _id: 'mem1' })
+    const subscriber = activityFromStreamElements({ type: 'subscriber', provider: 'youtube', data: { displayName: 'Mel', username: 'mel' }, _id: 'sub1' })
+    assert.equal(subscriber?.kind, 'subscription')
+    assert.equal(subscriber?.platform, 'YouTube')
+    assert.equal(subscriber?.handle, 'mel')
+    const member = activityFromStreamElements({ type: 'sponsor', provider: 'youtube', data: { displayName: 'Mel', username: 'mel' }, _id: 'mem1' })
     assert.equal(member?.kind, 'membership')
-    assert.equal(member?.handle, 'mel')
     assert.equal(follow?.platform, 'YouTube')
     const cheer = activityFromStreamElements({ type: 'cheer', provider: 'twitch', data: { username: 'Pat', amount: 50 }, _id: 'c1' })
     assert.equal(cheer?.amount, '50 Bits')
     const merch = activityFromStreamElements({ type: 'merch', provider: 'streamelements', data: { username: 'Ada', item: { name: 'Hat' }, amount: 20, currency: 'USD' }, _id: 'm1' })
     assert.equal(merch?.kind, 'merch')
     assert.equal(activityFromStreamElements({ type: 'hypetrainstart' }), undefined)
+    const kicks = activityFromStreamElements({ type: 'kicks', provider: 'kick', data: { displayName: 'Ada', amount: 100 }, _id: 'k1' })
+    assert.equal(kicks?.platform, 'Kick')
+    assert.equal(kicks?.amount, '100 Kicks')
+  })
+
+  it('builds the overlay editor mock activity for a Kick follow', async () => {
+    const plan = streamElementsEmulatePlan('Kick', 'follow')
+    assert.equal(plan?.provider, 'kick')
+    assert.equal(plan?.type, 'follow')
+    const body = streamElementsMockActivity({ provider: 'kick', type: 'follow', name: 'Faustina', now: new Date('2026-10-11T12:00:00.000Z') })
+    assert.equal(body.type, 'follow')
+    assert.equal(body.isMock, true)
+    assert.equal(body.provider, 'kick')
+    assert.equal((body.data as { displayName: string }).displayName, 'Faustina')
+    assert.equal(streamElementsMockActivityUrl('channel-1'), 'https://api.streamelements.com/kappa/v2/activities/channel-1/mock')
+    let posted = ''
+    const response = await postStreamElementsMock(
+      { channelId: 'channel-1', handle: 'Milz', jwt: 'jwt', provider: 'kick' },
+      body,
+      async (url, init) => {
+        posted = `${url} ${init?.method} ${init?.body}`
+        return new Response('{}', { status: 201 })
+      },
+    )
+    assert.equal(response.status, 201)
+    assert.match(posted, /\/activities\/channel-1\/mock POST/)
+    assert.match(posted, /"isMock":true/)
+    assert.equal(streamElementsEmulatePlan('Kick', 'cheer')?.type, 'kicks')
+    assert.equal(streamElementsEmulatePlan('YouTube', 'subscription')?.type, 'subscriber')
+    assert.equal(streamElementsEmulatePlan('YouTube', 'membership')?.type, 'sponsor')
   })
 
   it('explains missing JWTs', () => {
