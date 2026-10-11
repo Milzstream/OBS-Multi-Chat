@@ -17,6 +17,7 @@ export const kindLabel = {
 
 export function activityKindLabel(event: { platform: string; kind: string }) {
   if (event.platform === 'YouTube' && event.kind === 'subscription') return 'SUBSCRIBER'
+  if (event.platform === 'Kick' && event.kind === 'cheer') return 'KICKS'
   return kindLabel[event.kind as keyof typeof kindLabel] || event.kind.toUpperCase()
 }
 

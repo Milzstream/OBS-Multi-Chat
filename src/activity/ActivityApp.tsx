@@ -18,15 +18,15 @@ type Filter = ActivityFilter
 
 const tests: { label: string; platform: ActivityPlatform; kind: ActivityKind }[] = [
   { label: 'Twitch follow', platform: 'Twitch', kind: 'follow' },
+  { label: 'Twitch sub', platform: 'Twitch', kind: 'subscription' },
+  { label: 'Twitch cheer', platform: 'Twitch', kind: 'cheer' },
+  { label: 'Twitch raid', platform: 'Twitch', kind: 'raid' },
   { label: 'Kick follow', platform: 'Kick', kind: 'follow' },
   { label: 'Kick sub', platform: 'Kick', kind: 'subscription' },
   { label: 'Kick KICKs', platform: 'Kick', kind: 'cheer' },
   { label: 'YouTube subscriber', platform: 'YouTube', kind: 'subscription' },
   { label: 'YouTube member', platform: 'YouTube', kind: 'membership' },
   { label: 'YouTube Super Chat', platform: 'YouTube', kind: 'superchat' },
-  { label: 'Twitch sub', platform: 'Twitch', kind: 'subscription' },
-  { label: 'Twitch cheer', platform: 'Twitch', kind: 'cheer' },
-  { label: 'Twitch raid', platform: 'Twitch', kind: 'raid' },
   { label: 'SE donation', platform: 'StreamElements', kind: 'donation' },
   { label: 'SE merch', platform: 'StreamElements', kind: 'merch' },
 ]
