@@ -164,12 +164,13 @@ export function syncEnvFile(envPath: string, templatePath: string) {
   const template = fs.readFileSync(templatePath, 'utf8')
   if (!fs.existsSync(envPath)) {
     fs.mkdirSync(path.dirname(envPath), { recursive: true })
-    fs.writeFileSync(envPath, template, { encoding: 'utf8' })
+    // writeFileSync truncates first. A crash while appending a new template key used to wipe client secrets.
+    writeTextAtomic(envPath, template)
     return { added: [...envKeys(template)], written: true }
   }
   const existing = fs.readFileSync(envPath, 'utf8')
   const merged = mergeEnvTemplate(existing, template)
   if (!merged.added.length) return { added: [] as string[], written: false }
-  fs.writeFileSync(envPath, merged.text, { encoding: 'utf8' })
+  writeTextAtomic(envPath, merged.text)
   return { added: merged.added, written: true }
 }

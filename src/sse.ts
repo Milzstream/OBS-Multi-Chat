@@ -60,6 +60,11 @@ export function sseSeqFromState(lastSeq: number | null, incoming: number) {
   return lastSeq
 }
 
+/** The cursor helper keeps the higher seq, but the payload must not be applied either. */
+export function sseStateIsStale(lastSeq: number | null, incoming: number) {
+  return lastSeq != null && Number.isFinite(incoming) && incoming < lastSeq
+}
+
 export function activityDockFields(remote: Record<string, unknown>) {
   return {
     activity: Array.isArray(remote.activity) ? remote.activity : undefined,
@@ -135,7 +140,10 @@ export function subscribeDockSse(handlers: {
       if (!response.ok) throw new Error('state')
       const remote = await response.json() as Record<string, unknown>
       if (gen !== resyncGen) return
-      lastSeq = sseSeqFromState(lastSeq, Number(remote.seq))
+      const incomingSeq = Number(remote.seq)
+      // A slower /api/state must not replace chat or activity that a newer SSE frame already showed.
+      if (sseStateIsStale(lastSeq, incomingSeq)) return
+      lastSeq = sseSeqFromState(lastSeq, incomingSeq)
       lastEventAt = Date.now()
       frameGen += 1
       handlers.onSnapshot(remote)

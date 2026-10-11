@@ -114,6 +114,7 @@ describe('sync env file', () => {
       assert.match(text, /TWITCH_CLIENT_ID=secret/)
       assert.match(text, /# RELAY_ACTIVITY_MAX=5000/)
       assert.equal(resolveEnvFilePath(dir), envPath)
+      assert.deepEqual(fs.readdirSync(dir).filter((name) => name.includes('.tmp')), [])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

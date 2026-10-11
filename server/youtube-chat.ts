@@ -94,16 +94,22 @@ export function extractVideoId(html: string) {
     || html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/)?.[1]
 }
 
-/** Extract the current viewer count from YouTube's page HTML. YouTube puts this in several different places depending on the template. */
+/**
+ * Concurrent viewers only. `viewCount` / `videoDetails.viewCount` are lifetime
+ * views and used to keep the tile LIVE with a huge number after the stream ended.
+ */
 export function parseYouTubeViewers(html: string) {
   const watching = html.match(/([\d,.]+)\s+watching now/i)?.[1]
   if (watching) return Number(watching.replace(/,/g, ''))
   const concurrent = html.match(/"concurrentViewers":"(\d+)"/)?.[1]
   if (concurrent) return Number(concurrent)
-  const runs = html.match(/"viewCount":\{"runs":\[\{"text":"([\d,.]+)"/)?.[1]
-  if (runs) return Number(runs.replace(/,/g, ''))
-  const details = html.match(/"videoDetails":\{[^}]{0,400}"viewCount":"(\d+)"/)?.[1]
-  if (details) return Number(details)
+}
+
+/** A page scrape may update the count while we already believe the broadcast is live. It must not flip an offline tile to live. */
+export function youtubeViewersWhileLive(live: boolean, currentViewers: number, scraped: number | undefined) {
+  if (!live || typeof scraped !== 'number' || !Number.isFinite(scraped)) return
+  if (currentViewers === scraped) return
+  return { viewers: scraped }
 }
 
 export function unescapeYouTubeText(value: string) {

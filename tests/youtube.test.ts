@@ -9,7 +9,9 @@ import {
   isStoredChatMessage,
   isTruncatedText,
   labelYouTubeTargets,
+  applyOutgoingSendResult,
   mergeIncomingChat,
+  youtubeInsertedMessageId,
   parseYouTubeQuotaInput,
   preferChatText,
   quotaWarnAt,
@@ -45,6 +47,7 @@ import {
   parseModerationActions,
   parseYouTubeTitle,
   parseYouTubeViewers,
+  youtubeViewersWhileLive,
   expandRunText,
   runLinkUrl,
   runsToParts,
@@ -325,6 +328,52 @@ describe('YouTube message ingest', () => {
     assert.equal(afterShorts.messages[0].sourceLabel, undefined)
   })
 
+  it('keeps a second identical own send instead of folding it into the first', () => {
+    const first = chat({ id: 'local-1', platform: 'Twitch', platforms: ['Twitch'], user: 'Host', text: 'lol', time: '2026-09-02T12:00:00.000Z' })
+    const second = chat({ id: 'local-2', platform: 'Twitch', platforms: ['Twitch'], user: 'Host', text: 'lol', time: '2026-09-02T12:00:05.000Z' })
+    const recent = [
+      { id: 'local-1', text: 'lol', platforms: ['Twitch'] as const, at: Date.parse(first.time) },
+      { id: 'local-2', text: 'lol', platforms: ['Twitch'] as const, at: Date.parse(second.time) },
+    ]
+    const inserted = mergeIncomingChat([first], second, undefined, { ownHandles: own('Host'), recentOutgoing: recent })
+    assert.equal(inserted.messages.length, 2)
+    assert.deepEqual(inserted.messages.map((item) => item.id), ['local-1', 'local-2'])
+    const echo = chat({ id: 'helix-2', platform: 'Twitch', user: 'Host', text: 'lol', time: '2026-09-02T12:00:06.000Z' })
+    const echoed = mergeIncomingChat(inserted.messages, echo, undefined, { ownHandles: own('Host'), recentOutgoing: recent })
+    assert.equal(echoed.messages.length, 2)
+    assert.equal(echoed.messages[0].id, 'local-1')
+    assert.equal(echoed.messages[1].id, 'helix-2')
+  })
+
+  it('does not delete an earlier own line when a later identical send fails', () => {
+    const messages = [
+      chat({ id: 'local-1', platform: 'Twitch', user: 'Host', text: 'lol', time: '2026-09-02T12:00:00.000Z' }),
+      chat({ id: 'local-2', platform: 'Twitch', user: 'Host', text: 'lol', time: '2026-09-02T12:00:05.000Z' }),
+    ]
+    const failed = applyOutgoingSendResult(messages, 'local-2', [{ platform: 'Twitch', ok: false, error: 'timed out' }])
+    assert.deepEqual(failed.messages.map((item) => item.id), ['local-1'])
+    const missing = applyOutgoingSendResult(messages, 'already-echoed', [{ platform: 'Twitch', ok: false }])
+    assert.equal(missing.changed, false)
+    assert.equal(missing.messages.length, 2)
+  })
+
+  it('stores the platform message id on the row this send created', () => {
+    const messages = [
+      chat({ id: 'local-1', platform: 'Twitch', user: 'Host', text: 'lol', time: '2026-09-02T12:00:00.000Z' }),
+      chat({ id: 'local-2', platform: 'Twitch', platforms: ['Twitch', 'YouTube'], user: 'Host', text: 'lol', time: '2026-09-02T12:00:05.000Z' }),
+    ]
+    const applied = applyOutgoingSendResult(messages, 'local-2', [
+      { platform: 'Twitch', ok: true, id: 'helix-2' },
+      { platform: 'YouTube', ok: true, sent: [{ id: 'yt-live', sourceId: 'CHAT_LIVE' }, { id: 'yt-shorts', sourceId: 'CHAT_SHORTS' }] },
+    ])
+    assert.equal(applied.messages[0].id, 'local-1')
+    const sent = applied.messages[1]
+    assert.deepEqual(sent.platforms, ['Twitch', 'YouTube'])
+    assert.deepEqual(sent.copies?.map((copy) => copy.id), ['helix-2', 'yt-live', 'yt-shorts'])
+    assert.equal(youtubeInsertedMessageId('{"id":"LCC.abc","snippet":{"liveChatId":"CHAT_LIVE"}}'), 'LCC.abc')
+    assert.equal(youtubeInsertedMessageId('not-json'), undefined)
+  })
+
   it('merges own Live and Shorts YouTube copies without a dock send', () => {
     const youtubeTargets = [
       { videoId: 'videoLive01', liveChatId: 'CHAT_LIVE' },
@@ -377,6 +426,11 @@ describe('YouTube InnerTube parsing', () => {
     const html = `<link rel="canonical" href="https://www.youtube.com/watch?v=abcdefghijk"><meta name="title" content="Night stream - YouTube">"concurrentViewers":"1,234"`
     assert.equal(extractVideoId(html), 'abcdefghijk')
     assert.equal(parseYouTubeViewers('1,234 watching now'), 1234)
+    assert.equal(parseYouTubeViewers('"concurrentViewers":"42"'), 42)
+    assert.equal(parseYouTubeViewers('"videoDetails":{"viewCount":"9000"}'), undefined)
+    assert.equal(youtubeViewersWhileLive(false, 0, 9000), undefined)
+    assert.deepEqual(youtubeViewersWhileLive(true, 3, 12), { viewers: 12 })
+    assert.equal(youtubeViewersWhileLive(true, 12, 12), undefined)
     assert.equal(parseYouTubeTitle(html), 'Night stream')
     assert.equal(extractVideoId('"isReplay":true ' + html), undefined)
     assert.equal(extractVideoId('<link rel="canonical" href="https://www.youtube.com/watch?v=mPDDhBtFW_Jw">'), undefined)

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
-import { activityDockFields, applyActivitySlice, chatDockFields, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap } from '../src/sse.ts'
+import { activityDockFields, applyActivitySlice, chatDockFields, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap, sseStateIsStale } from '../src/sse.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 import { ConnectionSettings } from '../src/ConnectionSettings.tsx'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
@@ -189,6 +189,9 @@ describe('SSE seq gaps', () => {
     assert.equal(sseReconnectStillNeeded(3, 4), false)
     assert.equal(sseSeqFromState(8, 4), 8)
     assert.equal(sseSeqFromState(8, 9), 9)
+    assert.equal(sseStateIsStale(8, 4), true)
+    assert.equal(sseStateIsStale(8, 8), false)
+    assert.equal(sseStateIsStale(null, 4), false)
     assert.deepEqual(applyActivitySlice([{ id: 'a1' }], slice), [{ id: 'a1' }])
     const snapshot = activityDockFields({
       seq: 1,

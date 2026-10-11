@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   applyChatModeration,
   kickBadges,
+  kickChannelPollFailure,
   kickModerationBanPayload,
   kickEmoteUrl,
   looksLikePlaceholder,
@@ -34,6 +35,7 @@ import {
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
   twitchEventSubRetryDelay,
+  twitchEventSubSubscribeStillCurrent,
   twitchEventSubWatchdogShouldClose,
   shareInFlight,
   restoreYouTubeQuotaBlock,
@@ -64,6 +66,15 @@ describe('Twitch IRC', () => {
     assert.equal(parsed.badges?.[0].url, 'https://badge.example/host.png')
     assert.equal(parsed.parts?.[1].type, 'emote')
     assert.equal(parsed.emotes?.[0], '25')
+  })
+
+  it('unescapes IRCv3 tag values in display names', () => {
+    const now = new Date('2026-09-02T12:00:00.000Z')
+    const line = '@display-name=Cool\\sUser;color=#1\\:2 :cooluser!cooluser@cooluser.tmi.twitch.tv PRIVMSG #ada :hi'
+    const parsed = parseTwitchChatLine(line, { now })
+    assert.ok(parsed && parsed !== 'ping')
+    assert.equal(parsed.user, 'Cool User')
+    assert.equal(parsed.color, '#1;2')
   })
 
   it('returns ping for PING lines and ignores noise', () => {
@@ -130,6 +141,13 @@ describe('YouTube chat memory', () => {
 })
 
 describe('Kick chat and activity', () => {
+  it('treats a non-OK Kick status response as a failed check, not as offline', () => {
+    assert.equal(kickChannelPollFailure(200), undefined)
+    assert.equal(kickChannelPollFailure(401)?.refresh, true)
+    assert.match(kickChannelPollFailure(500)?.message || '', /500/)
+    assert.equal(kickChannelPollFailure(500)?.refresh, false)
+  })
+
   it('reads chatroom ids and names from mixed payloads', () => {
     assert.equal(chatroomIdFrom({ chatroom: { id: '44' } }), 44)
     assert.equal(chatroomIdFrom({ data: { chatroom: { id: 0 } } }), undefined)
@@ -273,6 +291,9 @@ describe('Twitch EventSub reconnect', () => {
     assert.equal(twitchEventSubWatchdogShouldClose(false, 1, 100_000, 10_000), false)
     assert.equal(twitchEventSubWatchdogShouldClose(true, 0, 100_000, 10_000), false)
     assert.equal(twitchEventSubWatchdogShouldClose(true, 1, 20_000, 10_000), true)
+    assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 5, 'session-a'), true)
+    assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 6, 'session-a'), false)
+    assert.equal(twitchEventSubSubscribeStillCurrent(5, '', 5, ''), false)
   })
 })
 

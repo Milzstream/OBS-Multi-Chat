@@ -423,6 +423,20 @@ export function youtubeLiveChatMessageBody(liveChatId: string, text: string) {
   return { snippet: { liveChatId, type: 'textMessageEvent', textMessageDetails: { messageText: text } } }
 }
 
+/**
+ * `liveChatMessages.insert` returns a `liveChatMessage` resource whose `id`
+ * is what delete needs. A non-JSON or id-less body is not a failed send —
+ * the caller already checked HTTP ok. Echo ingest can still supply the id.
+ */
+export function youtubeInsertedMessageId(text: string) {
+  try {
+    const parsed = JSON.parse(text) as { id?: unknown }
+    return typeof parsed.id === 'string' && parsed.id ? parsed.id : undefined
+  } catch {
+    return
+  }
+}
+
 /** Twitch Helix `reason` max. Kick accepts the same string; a blank reason is omitted rather than defaulted. */
 export const MODERATION_REASON_MAX = 500
 
@@ -443,6 +457,18 @@ export function twitchModerationBanData(userId: string, action: string, duration
   if (cleaned) data.reason = cleaned
   if (action === 'timeout') data.duration = Math.max(1, Number(duration || 60))
   return data
+}
+
+/**
+ * A non-OK Kick `/channels` poll is not a successful live check and must not
+ * be treated as "offline". 401 still means "try a refresh", then fail the check.
+ */
+export function kickChannelPollFailure(status: number) {
+  if (status >= 200 && status < 300) return
+  return {
+    refresh: status === 401,
+    message: status === 401 ? 'Kick status poll needs a token refresh' : `Kick status poll failed (${status})`,
+  }
 }
 
 /** Kick ban/timeout body. Duration is minutes; the dock sends seconds. Unban omits duration and reason. */
@@ -719,16 +745,53 @@ export function chatMessageCopies(message: Pick<ChatMessage, 'platform' | 'id' |
   return [{ platform: message.platform, id: message.id, userId: message.userId, sourceId: message.sourceId }]
 }
 
-/** Keep one id and user id per platform so a merged row can be moderated on each icon it shows. */
-export function mergeChatCopies(current: ChatMessage, incoming: ChatMessage): ChatMessageCopy[] | undefined {
-  const merged = new Map<Platform, ChatMessageCopy>()
+/**
+ * One moderation target per platform, except YouTube: Live and Shorts are the
+ * same platform but different chats, and delete needs both message ids.
+ * An optimistic dock id loses to the platform id once the echo arrives.
+ */
+export function chatCopyKey(copy: Pick<ChatMessageCopy, 'platform' | 'sourceId'>) {
+  return copy.platform === 'YouTube' && copy.sourceId ? `YouTube:${copy.sourceId}` : copy.platform
+}
+
+export function mergeChatCopies(current: ChatMessage, incoming: ChatMessage, optimisticIds?: ReadonlySet<string>): ChatMessageCopy[] | undefined {
+  const merged = new Map<string, ChatMessageCopy>()
   for (const copy of [...chatMessageCopies(current), ...chatMessageCopies(incoming)]) {
-    const existing = merged.get(copy.platform)
-    if (!existing) merged.set(copy.platform, { ...copy })
-    else merged.set(copy.platform, { platform: copy.platform, id: existing.id || copy.id, userId: existing.userId || copy.userId, sourceId: existing.sourceId || copy.sourceId })
+    const key = chatCopyKey(copy)
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { ...copy })
+      continue
+    }
+    const incomingIdWins = Boolean(copy.id && optimisticIds?.has(existing.id) && !optimisticIds.has(copy.id))
+    merged.set(key, {
+      platform: copy.platform,
+      id: incomingIdWins ? copy.id : (existing.id || copy.id),
+      userId: existing.userId || copy.userId,
+      sourceId: existing.sourceId || copy.sourceId,
+    })
   }
   const copies = [...merged.values()]
   return copies.length > 1 ? copies : undefined
+}
+
+/** Closest optimistic send in the window. The first "lol" is not this echo if a newer send is closer. */
+export function closestRecentOutgoing<T extends { text: string; at: number }>(
+  recent: T[],
+  message: ChatMessage | string,
+  incomingTime: number,
+  windowMs = 20_000,
+) {
+  let best: T | undefined
+  let bestDelta = windowMs
+  for (const item of recent) {
+    if (!chatTextMatches(item.text, message)) continue
+    const delta = Math.abs(incomingTime - item.at)
+    if (delta >= bestDelta) continue
+    best = item
+    bestDelta = delta
+  }
+  return best
 }
 
 export function mergeIncomingChat(
@@ -752,13 +815,17 @@ export function mergeIncomingChat(
   const incomingTime = Date.parse(message.time) || Date.now()
   const incomingPlatforms = message.platforms?.length ? message.platforms : [message.platform]
   const incomingIsOwn = isOwnChatMessage(message, ctx)
-  const tracked = ctx.recentOutgoing.find((item) => chatTextMatches(item.text, message) && Math.abs(incomingTime - item.at) < 20_000)
+  // This id was just remembered by the dock send. It is a new line, not the echo of an older one.
+  const incomingIsThisSend = ctx.recentOutgoing.some((item) => item.id === message.id)
+  const tracked = closestRecentOutgoing(ctx.recentOutgoing, message, incomingTime)
+  const optimisticIds = new Set(ctx.recentOutgoing.map((item) => item.id))
   const incomingIngest = options?.ingest
   const targets = ctx.targets || []
 
   let mergeAt = -1
   let mergeDelta = Infinity
-  for (let index = 0; index < messages.length; index++) {
+  // A dock insert uses the id we just remembered. Folding it into an older own row is what swallowed the second "lol".
+  if (!incomingIsThisSend) for (let index = 0; index < messages.length; index++) {
     const item = messages[index]
     if (!chatTextMatches(item, message)) continue
     const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
@@ -771,10 +838,10 @@ export function mergeIncomingChat(
     const ownYouTube = youtubePair && (incomingIsOwn || itemIsOwn)
     let match = youtubePair && sameYouTubeChat && delta <= 2_000
     if (!match && ownYouTube && !sameYouTubeChat && delta <= 20_000) match = true
-    if (!match && tracked && delta <= 20_000 && (item.id === tracked.id || (incomingIsOwn && itemIsOwn))) match = true
-    else if (!match && incomingIsOwn && itemIsOwn && delta <= 90_000) {
-      const samePlatforms = incomingPlatforms.every((platform) => itemPlatforms.includes(platform)) && itemPlatforms.every((platform) => incomingPlatforms.includes(platform))
-      match = !samePlatforms || Boolean(youtubePair && !sameYouTubeChat)
+    // Echoes merge only into the optimistic row for that send. Any other own row with the same text is a separate line.
+    if (!match && tracked && item.id === tracked.id && delta <= 20_000) match = true
+    else if (!match && incomingIsOwn && itemIsOwn && delta <= 90_000 && youtubePair && !sameYouTubeChat) {
+      match = true
     }
     if (!match || delta >= mergeDelta) continue
     mergeAt = index
@@ -791,7 +858,9 @@ export function mergeIncomingChat(
     const parts = current.parts?.some((part) => part.type === 'emote')
       ? current.parts
       : takeIncomingParts && message.parts?.length ? message.parts : current.parts
-    const takeIncomingId = Boolean(message.sourceId && !current.sourceId)
+    // YouTube's first sighting fills sourceId. Twitch and Kick echoes have no sourceId, so the optimistic UUID has to yield to the platform id or Delete calls the API with a UUID.
+    const echoReplacesOptimisticId = Boolean(tracked && current.id === tracked.id && message.id && optimisticIds.has(current.id) && !optimisticIds.has(message.id))
+    const takeIncomingId = Boolean((message.sourceId && !current.sourceId) || echoReplacesOptimisticId)
     const sourceLabel = mergedSourceLabel(current, message, targets)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
     if (current.id) seenIds.push(current.id)
@@ -803,7 +872,7 @@ export function mergeIncomingChat(
     if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged) {
       return { messages, changed: false, seenIds }
     }
-    const copies = mergeChatCopies(current, message)
+    const copies = mergeChatCopies(current, message, optimisticIds)
     return {
       messages: messages.map((item, index) => index === mergeAt ? {
         ...item,
@@ -832,6 +901,56 @@ export function mergeIncomingChat(
   return { messages: [...messages, stored].slice(-(ctx.max ?? CHAT_MAX)), changed: true, added: stored, seenIds }
 }
 
+export type OutgoingSendResult = {
+  platform: Platform
+  ok: boolean
+  id?: string
+  sourceId?: string
+  /** YouTube can acknowledge more than one live chat for a single platform send. */
+  sent?: { id?: string; sourceId?: string }[]
+}
+
+function sendResultCopies(row: ChatMessage, sent: OutgoingSendResult[]): ChatMessageCopy[] {
+  const copies: ChatMessageCopy[] = []
+  for (const result of sent) {
+    const extras = (result.sent || []).filter((item) => item.id)
+    if (extras.length) {
+      for (const extra of extras) {
+        if (!extra.id) continue
+        copies.push({ platform: result.platform, id: extra.id, sourceId: extra.sourceId, userId: row.userId })
+      }
+      continue
+    }
+    if (result.id) copies.push({ platform: result.platform, id: result.id, sourceId: result.sourceId, userId: row.userId })
+  }
+  return copies
+}
+
+/**
+ * Apply a dock send after the platform calls return.
+ * Failure deletes only `localId` — never an older own row that happens to have the same text.
+ * Success writes the platform message ids so Delete does not call Helix/Kick/YouTube with the local UUID.
+ * If the echo already replaced `localId`, this is a no-op; that merge stored the platform id.
+ */
+export function applyOutgoingSendResult(messages: ChatMessage[], localId: string, results: OutgoingSendResult[]) {
+  const index = messages.findIndex((item) => item.id === localId)
+  if (index < 0) return { messages, changed: false }
+  const sent = results.filter((result) => result.ok)
+  if (!sent.length) return { messages: messages.filter((item) => item.id !== localId), changed: true }
+  const row = messages[index]
+  const sentPlatforms = [...new Set(sent.map((result) => result.platform))]
+  const idCopies = sendResultCopies(row, sent)
+  const next: ChatMessage = { ...row, platform: sentPlatforms[0] || row.platform, platforms: sentPlatforms.length ? sentPlatforms : row.platforms }
+  if (idCopies.length === 1) {
+    next.id = idCopies[0].id
+    next.sourceId = idCopies[0].sourceId || row.sourceId
+    next.copies = undefined
+  } else if (idCopies.length > 1) {
+    next.copies = idCopies
+  }
+  return { messages: messages.map((item, itemIndex) => itemIndex === index ? next : item), changed: true }
+}
+
 /** Map a Twitch badge set name to a short dock label (`broadcaster`→`HOST`, `moderator`→`MOD`, etc.). */
 export function twitchBadgeLabel(set: string) {
   const name = set.toLowerCase()
@@ -847,10 +966,25 @@ export function twitchBadgeLabel(set: string) {
   return ''
 }
 
+/**
+ * IRCv3 tag escapes: `\s` space, `\:` semicolon, `\\` backslash, `\r` CR, `\n` LF.
+ * Unknown sequences are left intact so a display name is not eaten.
+ */
+export function unescapeIrcTag(value: string) {
+  return value.replace(/\\(.)/g, (match, ch: string) => {
+    if (ch === 's') return ' '
+    if (ch === ':') return ';'
+    if (ch === '\\') return '\\'
+    if (ch === 'r') return '\r'
+    if (ch === 'n') return '\n'
+    return match
+  })
+}
+
 export function parseIrcTags(raw: string) {
   return Object.fromEntries((raw || '').split(';').filter(Boolean).map((item) => {
     const index = item.indexOf('=')
-    return index === -1 ? [item, ''] : [item.slice(0, index), item.slice(index + 1)]
+    return index === -1 ? [item, ''] : [item.slice(0, index), unescapeIrcTag(item.slice(index + 1))]
   }))
 }
 
@@ -1540,6 +1674,14 @@ export function twitchEventSubRetryDelay(attempt: number) {
 export function twitchEventSubWatchdogShouldClose(ready: boolean, lastMessageAt: number, now: number, keepaliveMs: number) {
   if (!ready || !lastMessageAt) return false
   return now - lastMessageAt > keepaliveMs + 2_000
+}
+
+/**
+ * Subscribe completion must not mark a socket ready after a newer session won.
+ * A stale completion used to set ready and close IRC for a session that was already gone.
+ */
+export function twitchEventSubSubscribeStillCurrent(startedGeneration: number, startedSessionId: string, generation: number, sessionId: string) {
+  return startedGeneration === generation && startedSessionId !== '' && startedSessionId === sessionId
 }
 
 export function twitchEventSubCloseAction(socketIsCurrent: boolean, generation: number, currentGeneration: number, resumeInFlight = false, isResumeSocket = false) {
