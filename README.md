@@ -4,7 +4,9 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 ![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshot.png)
 
-![Activity dock with follows, donations, and platform icons](docs/activity.png)
+![OBS with Relay Chat and Relay Activity docks](docs/obs.png)
+
+![Activity dock with follows, donations, and platform icons. Right-click a pill to delete it.](docs/activity.png)
 
 ![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
 
@@ -227,11 +229,13 @@ The banner waits before it complains. StreamElements hydrates its JWTs over the 
 
 The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
 
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
+Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Left-click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
+
+**Right-click a pill to delete it.** An X slides out from the right side. Click the X to remove that alert from the dock and from `activity.json`. Right-click again, or wait 5 seconds, and the X hides without deleting. Emulated alerts are saved like real ones, so this is how you clear a test. The watch page does not get this control.
 
 **Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
 
-**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership. A YouTube subscriber is its own alert, not a member. Right-click an activity pill to slide out the delete button. Click that X to remove it from the dock and from `activity.json`. Right-click again, or wait 5 seconds, to hide the X. Left-click still opens the profile.
+**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership. A YouTube subscriber is its own alert, not a member. Subscribers were not shown before 0.9.3.
 
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 
