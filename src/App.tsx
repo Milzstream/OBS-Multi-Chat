@@ -2,9 +2,9 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from './virtualList'
-import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
+import { applyExactCategory, assignTagPlatforms, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, streamTitleTip, tagAssignments, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
-import { chatDockFields, subscribeDockSse } from './sse'
+import { chatDockFields, chatSliceStamp, sameHealth, samePrivacy, sameQuota, sameStringList, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
 
 /**
@@ -79,7 +79,8 @@ function App() {
   const twitchGame = streamDetails.Twitch.category
   const kickGame = streamDetails.Kick.category
   const headerGame = preferredCategory(twitchGame, kickGame)
-  const headerTip = [headerTitle, twitchGame && `Twitch: ${twitchGame}`, kickGame && `Kick: ${kickGame}`].filter(Boolean).join('\n')
+  const youtubeChannelId = connections.find((connection) => connection.platform === 'YouTube')?.channelId
+  const headerTip = streamTitleTip(headerTitle, twitchGame, kickGame)
   const visibleMessages = visibleChatMessages(messages, activeFilter)
   const chatListRef = useRef<HTMLDivElement>(null)
   // Auto-scroll: keeps the feed pinned to the bottom while the user is not
@@ -110,22 +111,25 @@ function App() {
     const applySnapshot = (remote: BackendState) => {
       const fields = chatDockFields(remote as unknown as Record<string, unknown>)
       if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)
-      if (fields.messages) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(fields.messages) ? fields.messages as ChatMessage[] : prev)
+      if (fields.messages) {
+        const messages = fields.messages as ChatMessage[]
+        setMessages((prev) => chatSliceStamp(prev) === chatSliceStamp(messages) ? prev : messages)
+      }
       if (fields.health) {
         const health = fields.health as Record<Platform, Health>
-        setHealth((prev) => JSON.stringify(prev) !== JSON.stringify(health) ? health : prev)
+        setHealth((prev) => sameHealth(prev, health) ? prev : health)
       }
       if (fields.chatWarnings) {
         const chatWarnings = fields.chatWarnings as string[]
-        setChatWarnings((prev) => JSON.stringify(prev) !== JSON.stringify(chatWarnings) ? chatWarnings : prev)
+        setChatWarnings((prev) => sameStringList(prev, chatWarnings) ? prev : chatWarnings)
       }
       if (fields.youtubePrivacy) {
         const youtubePrivacy = fields.youtubePrivacy as YoutubePrivacyNotice[]
-        setYoutubePrivacy((prev) => JSON.stringify(prev) !== JSON.stringify(youtubePrivacy) ? youtubePrivacy : prev)
+        setYoutubePrivacy((prev) => samePrivacy(prev, youtubePrivacy) ? prev : youtubePrivacy)
       }
       if (fields.youtubeQuota) {
         const youtubeQuota = fields.youtubeQuota as YoutubeQuotaStatus
-        setYoutubeQuota((prev) => JSON.stringify(prev) !== JSON.stringify(youtubeQuota) ? youtubeQuota : prev)
+        setYoutubeQuota((prev) => sameQuota(prev, youtubeQuota) ? prev : youtubeQuota)
       }
       if (typeof remote.translateChat === 'boolean') {
         const translateChat = remote.translateChat
@@ -147,7 +151,7 @@ function App() {
       onSnapshot: (data) => applySnapshot(asState(data)),
       onChat: (data) => {
         const messages = data.messages as ChatMessage[] | undefined
-        if (Array.isArray(messages)) setMessages((prev) => JSON.stringify(prev) !== JSON.stringify(messages) ? messages : prev)
+        if (Array.isArray(messages)) setMessages((prev) => chatSliceStamp(prev) === chatSliceStamp(messages) ? prev : messages)
       },
       onPresence: (data) => applySnapshot(asState(data)),
       onSettings: (data) => applySnapshot(asState(data)),
@@ -232,10 +236,14 @@ function App() {
   return (
     <main className={compactMode ? 'app compact' : 'app'}>
       <header className="topbar"><button type="button" className="stream-ref" title={headerTip} onClick={() => {
-        void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://studio.youtube.com/livestreaming' }) }).catch((error) => console.error('Failed to open dashboard:', error))
+        void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: youtubeStudioUrl(youtubeChannelId) }) }).then(async (response) => {
+          if (response.ok) return
+          const data = await response.json().catch(() => ({})) as { error?: string }
+          setSendStatus(data.error || 'Could not open YouTube Studio')
+        }).catch(() => setSendStatus('Could not open YouTube Studio'))
       }}><span className="stream-title">{headerTitle}</span>{headerGame ? <span className="stream-game">{headerGame}</span> : null}</button><div className="header-actions"><button className="icon-button" aria-label="Stream controls" onClick={() => setShowControls((open) => !open)}><Gamepad2 size={16} /></button></div></header>
       <section className="presence-panel"><div className="platform-rollup">{connections.map((connection) => <PlatformStat key={connection.platform} connection={connection} title={streamDetails[connection.platform]?.title} health={health[connection.platform]} quota={connection.platform === 'YouTube' ? youtubeQuota : undefined} onOpenDashboard={() => { void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: streamDashboardUrl(connection.platform, connection) }) }).catch((error) => console.error('Failed to open dashboard:', error)) }} />)}</div><div className="viewer-total"><Users size={15} /><span><b>{combinedViewers.toLocaleString()}</b> combined viewers</span><span className={hasChat ? 'live-pill' : 'offline-pill'}><span /> {hasChat ? 'LIVE' : 'OFFLINE'}</span><span className="pulse-line" /></div>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const item = health[platform]; return item.status !== 'ok' && item.message ? <div key={platform} className={`health-banner ${item.status}`}>{item.message}</div> : null })}{chatWarnings.map((message) => <div key={message} className="health-banner warn">{message}</div>)}{youtubePrivacy.map((item) => <YoutubePrivacyBanner key={item.videoId} notice={item} className="health-banner warn youtube-privacy" onPublic={() => { void postYoutubePrivacy([item.videoId]).catch((error) => setSendStatus(error instanceof Error ? error.message : 'Could not make the video public')) }} onDismiss={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setSendStatus('Could not dismiss the YouTube privacy warning')) }} />)}</section>
-      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message) => <MessageItem key={message.id} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
+      <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message, offset) => <MessageItem key={message.id} rowIndex={chatStart + offset} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={sending || selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
       {menu && <ModMenu menu={menu} onModerate={moderate} onClose={() => setMenu(null)} />}
@@ -306,7 +314,7 @@ function Avatar({ name, src, color }: { name: string; src?: string; color: strin
   return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
 }
 
-function MessageItem({ message, channelLogin, showTranslationMark, onModerate }: { message: ChatMessage; channelLogin?: string; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
+function MessageItem({ message, rowIndex, channelLogin, showTranslationMark, onModerate }: { message: ChatMessage; rowIndex: number; channelLogin?: string; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
   const platforms = message.platforms || [message.platform]
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
@@ -316,7 +324,7 @@ function MessageItem({ message, channelLogin, showTranslationMark, onModerate }:
     event.stopPropagation()
     openDockUrl(profileUrl)
   }
-  return <article className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} title={profileUrl ? profileLinkTitle(message.platform) : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={dockAvatarSrc(part.url)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}{message.deleted && parts.some((part) => part.type === 'emote') && (message.platform === 'Kick' || (message.platforms || []).includes('Kick')) ? <span className="deleted-note" title="Banned by a moderator">(Banned)</span> : null}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
+  return <article data-row-index={rowIndex} className={message.deleted ? 'message deleted' : 'message'} onContextMenu={(event) => onModerate(event, message)}><Avatar name={name} src={dockAvatarSrc(message.avatar)} color={message.color || platformMeta[platforms[0]].color} /><div className="message-body"><div className="message-meta"><span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>{message.sourceLabel ? <span className="source-tag">{message.sourceLabel}</span> : null}{(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" onError={(event) => { event.currentTarget.style.display = 'none' }} /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}<strong style={message.color ? { color: message.color } : undefined} title={profileUrl ? profileLinkTitle(message.platform) : undefined} onClick={profileUrl ? openProfile : undefined} className={profileUrl ? 'clickable-username' : ''}>{name}</strong><time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></div><p title={showTranslationMark ? message.originalText || undefined : undefined}>{parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={dockAvatarSrc(part.url)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}{message.deleted && parts.some((part) => part.type === 'emote') && (message.platform === 'Kick' || (message.platforms || []).includes('Kick')) ? <span className="deleted-note" title="Banned by a moderator">(Banned)</span> : null}{showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}</p></div></article>
 }
 
 /** Twitch/Kick category field. Arrow keys only move the open list; closed input keeps default caret behavior. */
@@ -362,11 +370,11 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
       setOpen(false)
     }
   }
-  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange({ ...details, category: event.target.value, categoryId: options.find((option) => option.name === event.target.value)?.id }) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange(commitTypedCategory(details, event.target.value)) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
 }
 
 /** Combined Twitch+Kick category search. Shared names are one row; platform-only hits keep their icon. */
-function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChange }: { twitch: StreamDetails; kick: StreamDetails; twitchEnabled: boolean; kickEnabled: boolean; onChange: (next: { Twitch: StreamDetails; Kick: StreamDetails }) => void }) {
+function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChange }: { twitch: StreamDetails; kick: StreamDetails; twitchEnabled: boolean; kickEnabled: boolean; onChange: (next: { Twitch: StreamDetails; Kick: StreamDetails }, note?: string) => void }) {
   const [query, setQuery] = useState(preferredCategory(twitch.category, kick.category))
   const [options, setOptions] = useState<MergedCategory[]>([])
   const [open, setOpen] = useState(false)
@@ -408,7 +416,7 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
     onChange({
       Twitch: option.twitchId ? { ...twitch, category: option.name, categoryId: option.twitchId } : twitch,
       Kick: option.kickId ? { ...kick, category: option.name, categoryId: option.kickId } : kick,
-    })
+    }, categoryPickNote(option.name, option.twitchId, option.kickId))
   }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!open || visible.length === 0) return
@@ -426,7 +434,7 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
   return (
     <div className="stream-fields">
       <div className="stream-fields-heading"><strong>Category</strong><small>Twitch + Kick</small></div>
-      <input disabled={!twitchEnabled && !kickEnabled} autoComplete="off" value={query} onChange={(event) => { pickedRef.current = false; typingRef.current = true; setQuery(event.target.value) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder="Category / game" aria-expanded={open} aria-autocomplete="list" />
+      <input disabled={!twitchEnabled && !kickEnabled} autoComplete="off" value={query} onChange={(event) => { pickedRef.current = false; typingRef.current = true; const text = event.target.value; setQuery(text); onChange({ Twitch: commitTypedCategory(twitch, text), Kick: commitTypedCategory(kick, text) }) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder="Category / game" aria-expanded={open} aria-autocomplete="list" />
       {open && visible.length > 0 && (
         <ul className="category-options" role="listbox">
           {visible.map((option, index) => (
@@ -496,43 +504,13 @@ function TagEditor({ tags, disabled, connected, onChange }: { tags: TagAssignmen
   )
 }
 
-function isMoreSpecificCategory(specific: string, general: string) {
-  const a = specific.trim().toLowerCase()
-  const b = general.trim().toLowerCase()
-  if (!a || !b || a === b || !a.startsWith(b)) return false
-  const next = a[b.length]
-  return next === ' ' || next === ':' || next === '-' || next === '('
-}
-
-function bestCategoryMatch(query: string, options: CategoryOption[]) {
-  const lower = query.trim().toLowerCase()
-  if (!options.length) return
-  const exact = options.find((option) => option.name.toLowerCase() === lower)
-  if (exact) return exact
-  const moreSpecific = options.filter((option) => isMoreSpecificCategory(option.name, query))
-    .sort((left, right) => left.name.length - right.name.length)
-  if (moreSpecific.length) return moreSpecific[0]
-  const containsQuery = options.filter((option) => option.name.toLowerCase().includes(lower))
-    .sort((left, right) => Math.abs(left.name.length - query.length) - Math.abs(right.name.length - query.length))
-  return containsQuery[0]
-}
-
-function applyResolvedCategory(current: StreamDetails, match?: CategoryOption): StreamDetails {
-  if (!match) return current
-  const currentName = current.category.trim()
-  if (!currentName) return { ...current, category: match.name, categoryId: match.id }
-  if (match.name.toLowerCase() === currentName.toLowerCase()) return { ...current, category: match.name, categoryId: match.id }
-  if (isMoreSpecificCategory(currentName, match.name)) return current
-  return { ...current, category: match.name, categoryId: match.id }
-}
-
 async function resolveCategory(platform: StreamPlatform, query: string) {
   const text = query.trim()
   if (text.length < 2) return
   try {
     const response = await fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(text)}`)
     if (!response.ok) return
-    return bestCategoryMatch(text, await response.json() as CategoryOption[])
+    return exactCategoryMatch(text, await response.json() as CategoryOption[])
   } catch {
     return
   }
@@ -566,8 +544,8 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       ])
       if (cancelled || editedRef.current) return
       setDraftDetails((current) => ({
-        Twitch: applyResolvedCategory(current.Twitch, twitchMatch),
-        Kick: applyResolvedCategory(current.Kick, kickMatch),
+        Twitch: applyExactCategory(current.Twitch, twitchMatch),
+        Kick: applyExactCategory(current.Kick, kickMatch),
         YouTube: current.YouTube,
       }))
     })()
@@ -575,7 +553,17 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   }, [title, details])
   const save = async () => {
     setSaving(true)
-    const result = await onSave(draftTitle, draftDetails)
+    const [twitchMatch, kickMatch] = await Promise.all([
+      draftDetails.Twitch.categoryId || !draftDetails.Twitch.category.trim() ? undefined : resolveCategory('Twitch', draftDetails.Twitch.category),
+      draftDetails.Kick.categoryId || !draftDetails.Kick.category.trim() ? undefined : resolveCategory('Kick', draftDetails.Kick.category),
+    ])
+    const next = {
+      ...draftDetails,
+      Twitch: applyExactCategory(draftDetails.Twitch, twitchMatch),
+      Kick: applyExactCategory(draftDetails.Kick, kickMatch),
+    }
+    setDraftDetails(next)
+    const result = await onSave(draftTitle, next)
     setStatus({ text: result.message, kind: result.ok ? (result.warn ? 'warn' : 'ok') : 'error' })
     if (result.ok) editedRef.current = false
     setSaving(false)
@@ -606,7 +594,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       </div>
       {splitCategories
         ? (['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => <StreamFields key={platform} platform={platform} details={draftDetails[platform]} disabled={!connections.find((connection) => connection.platform === platform)?.connected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, [platform]: next })) }} />)
-        : <UnifiedCategoryField twitch={draftDetails.Twitch} kick={draftDetails.Kick} twitchEnabled={twitchConnected} kickEnabled={kickConnected} onChange={(next) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, ...next })) }} />}
+        : <UnifiedCategoryField twitch={draftDetails.Twitch} kick={draftDetails.Kick} twitchEnabled={twitchConnected} kickEnabled={kickConnected} onChange={(next, note) => { editedRef.current = true; setDraftDetails((current) => ({ ...current, ...next })); if (note) setStatus({ text: note, kind: 'warn' }) }} />}
       <button type="button" className="controls-link" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
       <div className="stream-fields">
         <div className="stream-fields-heading"><strong>Tags</strong></div>

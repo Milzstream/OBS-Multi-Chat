@@ -50,7 +50,7 @@ import {
   kickStreamDetails,
   normalizeTags,
   twitchTagsForApi,
-  kickTagsForApi,
+  kickChannelPatch,
   looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
@@ -98,7 +98,9 @@ import {
   youtubeApiErrorReason,
   youtubeBadges,
   youtubeChatLabel,
+  loadYoutubeBanIds,
   youtubeBanChatIds,
+  youtubeBanRecord,
   youtubeLiveChatBanSnippet,
   youtubeLiveChatCursor,
   youtubeLiveChatListQuery,
@@ -2803,8 +2805,11 @@ async function moderateKick(body: { action: string; messageId?: string; userId?:
   return { ok: true, ...(body.action !== 'unban' && payload.reason ? { reason: payload.reason } : {}) }
 }
 
-// Remember the ban ids YouTube handed back so the dock can unban what it banned (YouTube unban needs the original ban id)
-const youtubeBanIds = new Map<string, string[]>()
+const youtubeBanFile = path.join(dataDir, 'youtube-bans.json')
+const youtubeBanIds = loadYoutubeBanIds(readJsonFile(youtubeBanFile, {}))
+function saveYoutubeBans() {
+  writeJsonAtomic(youtubeBanFile, youtubeBanRecord(youtubeBanIds))
+}
 
 /** Sending via the official YouTube Data API: delete a message, unban by the ban id we stored, or ban/timeout across every live chat we have. */
 async function moderateYouTube(body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
@@ -2823,7 +2828,10 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
     if (!ids.length) return { ok: false, error: 'Unban this chatter on YouTube. Relay only has a ban id after banning from this dock.' }
     const results = await Promise.all(ids.map((id) => youtubeRequest(`/liveChat/bans?id=${encodeURIComponent(id)}`, token, { method: 'DELETE' })))
     const failed = results.filter((result) => !result.ok)
-    if (!failed.length) youtubeBanIds.delete(body.userId.toLowerCase())
+    if (!failed.length) {
+      youtubeBanIds.delete(body.userId.toLowerCase())
+      saveYoutubeBans()
+    }
     return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
   }
   const chatIds = youtubeBanChatIds(body.sourceId, youtubeTargets, token)
@@ -2843,7 +2851,10 @@ async function moderateYouTube(body: { action: string; messageId?: string; userI
       if (id) remembered.push(String(id))
     } catch { /* ignore */ }
   }
-  if (remembered.length) youtubeBanIds.set(userId.toLowerCase(), remembered)
+  if (remembered.length) {
+    youtubeBanIds.set(userId.toLowerCase(), remembered)
+    saveYoutubeBans()
+  }
   return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
 }
 
@@ -2898,10 +2909,11 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
     }
   }
   if (platform === 'Kick') {
-    const tags = kickTagsForApi(info.tags)
+    const patch = kickChannelPatch({ title: info.title, category: info.category, categoryId: info.categoryId, tags: info.tags })
     try {
-      const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stream_title: info.title, ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}), ...(tags ? { custom_tags: tags } : {}) }) })
-      return { platform, ok: response.ok, error: response.ok ? undefined : await response.text() }
+      const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch.body) })
+      if (!response.ok) return { platform, ok: false, error: await response.text() }
+      return { platform, ok: true, ...(patch.warning ? { warning: patch.warning } : {}) }
     } catch (error) {
       return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
     }

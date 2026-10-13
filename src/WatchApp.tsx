@@ -163,7 +163,7 @@ export default function WatchApp() {
               {visibleMessages.length ? (
                 <>
                   <div className="virtual-spacer" style={{ height: chatWindow.padTop }} aria-hidden="true" />
-                  {visibleMessages.slice(chatWindow.start, chatWindow.end).map((message) => <WatchMessage key={message.id} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} token={token} />)}
+                  {visibleMessages.slice(chatWindow.start, chatWindow.end).map((message, offset) => <WatchMessage key={message.id} rowIndex={chatWindow.start + offset} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} token={token} />)}
                   <div className="virtual-spacer" style={{ height: chatWindow.padBottom }} aria-hidden="true" />
                 </>
               ) : (
@@ -220,13 +220,13 @@ function WatchAvatar({ name, src, color }: { name: string; src?: string; color: 
   return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
 }
 
-function WatchMessage({ message, channelLogin, showTranslationMark, token }: { message: ChatMessage; channelLogin?: string; showTranslationMark: boolean; token: string }) {
+function WatchMessage({ message, rowIndex, channelLogin, showTranslationMark, token }: { message: ChatMessage; rowIndex: number; channelLogin?: string; showTranslationMark: boolean; token: string }) {
   const platforms = message.platforms || [message.platform]
   const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
   const name = message.user.replace(/^@+/, '')
   const profileUrl = chatProfileUrl(message, channelLogin)
   return (
-    <article className={message.deleted ? 'message deleted' : 'message'}>
+    <article data-row-index={rowIndex} className={message.deleted ? 'message deleted' : 'message'}>
       <WatchAvatar name={name} src={watchMediaSrc(message.avatar, token)} color={message.color || platformMeta[platforms[0]].color} />
       <div className="message-body">
         <div className="message-meta">

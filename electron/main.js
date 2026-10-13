@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { isAppWindowUrl } from './window-policy.js'
+import { externalOpenAllowed, isAppWindowUrl } from './window-policy.js'
 
 process.env.RELAY_ELECTRON = '1'
 process.env.RELAY_PACKAGED = app.isPackaged ? '1' : '0'
@@ -28,13 +28,13 @@ function createWindow(port) {
   win.setMenuBarVisibility(false)
   win.webContents.setBackgroundThrottling(false)
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (externalOpenAllowed(url, port)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   win.webContents.on('will-navigate', (event, url) => {
-    if (isAppWindowUrl(url)) return
+    if (isAppWindowUrl(url, port)) return
     event.preventDefault()
-    shell.openExternal(url)
+    if (externalOpenAllowed(url, port)) void shell.openExternal(url)
   })
   win.loadURL(`http://127.0.0.1:${port}/console`)
   win.on('closed', () => {

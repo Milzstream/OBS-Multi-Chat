@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { createLogBuffer, formatLogArgs } from '../server/log-buffer.js'
-import { isAppWindowUrl } from '../electron/window-policy.js'
+import { externalOpenAllowed, isAppWindowUrl } from '../electron/window-policy.js'
 import { consoleWindowPlan, createHostSession, findAppBrowser, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, shouldOpenConsoleWindow, windowsMessageBoxPlan } from '../server/console-window.js'
 
 describe('companion window launch', () => {
@@ -18,14 +18,21 @@ describe('companion window launch', () => {
   })
 
   it('keeps only the console page inside the app window', () => {
-    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/console'), true)
-    assert.equal(isAppWindowUrl('http://localhost:4173/console/'), true)
-    assert.equal(isAppWindowUrl('http://[::1]:4173/console'), true)
+    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/console', 4173), true)
+    assert.equal(isAppWindowUrl('http://localhost:4173/console/', 4173), true)
+    assert.equal(isAppWindowUrl('http://[::1]:4173/console', 4173), true)
     assert.equal(isAppWindowUrl('http://127.0.0.1:4173/'), false)
-    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/oauth/twitch'), false)
-    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/activity'), false)
-    assert.equal(isAppWindowUrl('https://id.twitch.tv/oauth2/authorize'), false)
-    assert.equal(isAppWindowUrl('not a url'), false)
+    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/oauth/twitch', 4173), false)
+    assert.equal(isAppWindowUrl('http://127.0.0.1:4173/activity', 4173), false)
+    assert.equal(isAppWindowUrl('https://127.0.0.1:4173/console', 4173), false)
+    assert.equal(isAppWindowUrl('http://127.0.0.1:9999/console', 4173), false)
+    assert.equal(isAppWindowUrl('https://id.twitch.tv/oauth2/authorize', 4173), false)
+    assert.equal(isAppWindowUrl('not a url', 4173), false)
+    assert.equal(externalOpenAllowed('http://127.0.0.1:4173/oauth/twitch', 4173), true)
+    assert.equal(externalOpenAllowed('http://127.0.0.1:9/oauth/twitch', 4173), false)
+    assert.equal(externalOpenAllowed('https://studio.youtube.com/livestreaming', 4173), true)
+    assert.equal(externalOpenAllowed('file:///C:/Windows/system.ini', 4173), false)
+    assert.equal(externalOpenAllowed('https://evil.example/Ada', 4173), false)
   })
 
   it('prefers the companion exe so the taskbar icon is ours', () => {

@@ -3,14 +3,15 @@ import fs from 'node:fs'
 import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { applyExactCategory, assignTagPlatforms, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, streamTitleTip, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { applySettingsPatch, mergeJwtDraft, mergePolledSettings, restoreSettingsKeys, settingsInFlightKeys, settingsSaveError } from '../src/ConsoleApp.tsx'
-import { activityDockFields, applyActivitySlice, chatDockFields, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap, sseStateIsStale } from '../src/sse.ts'
+import { activityDockFields, applyActivitySlice, chatDockFields, chatSliceStamp, sameHealth, sameStringList, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap, sseStateIsStale } from '../src/sse.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 import { ConnectionSettings } from '../src/ConnectionSettings.tsx'
 import { ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, parseStoredStringSet } from '../src/dock-prefs.ts'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from '../src/activity/format.ts'
-import { virtualWindow } from '../src/virtualList.ts'
+import { nextPinState } from '../src/autoScroll.tsx'
+import { indexFromRows, scrollTopForIndex, virtualWindow } from '../src/virtualList.ts'
 
 describe('chat dock helpers', () => {
   it('proxies Kick CDN avatars through the local media route', () => {
@@ -225,6 +226,37 @@ describe('auto live check toggle', () => {
   })
 })
 
+describe('stream category commit', () => {
+  it('commits typed text, keeps an exact id, and does not replace a name with a longer near-match', () => {
+    assert.equal(exactCategoryMatch('minecraft', [{ id: '1', name: 'Minecraft' }, { id: '2', name: 'Minecraft Dungeons' }])?.id, '1')
+    assert.equal(exactCategoryMatch('Mine', [{ id: '2', name: 'Minecraft' }]), undefined)
+    const typed = commitTypedCategory({ category: 'Old', categoryId: '9' }, 'Minecraft')
+    assert.equal(typed.category, 'Minecraft')
+    assert.equal(typed.categoryId, undefined)
+    const kept = commitTypedCategory({ category: 'Minecraft', categoryId: '1' }, 'minecraft')
+    assert.equal(kept.categoryId, '1')
+    const resolved = applyExactCategory({ category: 'Just Chatting', categoryId: undefined }, { id: '3', name: 'Just Chatting (IRL)' })
+    assert.equal(resolved.category, 'Just Chatting')
+    assert.equal(resolved.categoryId, undefined)
+    const exact = applyExactCategory({ category: 'Minecraft' }, { id: '1', name: 'Minecraft' })
+    assert.equal(exact.categoryId, '1')
+    assert.match(categoryPickNote('Just Chatting', '1', undefined), /Kick was not changed/)
+    assert.equal(categoryPickNote('IRL', '1', '2'), '')
+    assert.match(streamTitleTip('Friday', 'IRL', ''), /Opens YouTube Studio/)
+  })
+})
+
+describe('chat frame compare', () => {
+  it('changes when the tail, a delete, or translated text changes, without matching a full stringify', () => {
+    const previous = [{ id: '1', text: 'hi' }, { id: '2', text: 'yo' }]
+    assert.equal(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'yo' }]))
+    assert.notEqual(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'yo', deleted: true }]))
+    assert.notEqual(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'hello' }]))
+    assert.equal(sameStringList(['a'], ['a']), true)
+    assert.equal(sameHealth({ Twitch: { status: 'ok', message: '' } }, { Twitch: { status: 'warn', message: 'down' } }), false)
+  })
+})
+
 describe('dock moderation confirm', () => {
   it('asks for a YouTube ban in the dock and leaves Twitch on the reason prompt', () => {
     assert.equal(moderationNeedsDockConfirm('ban', ['YouTube'], undefined), true)
@@ -328,5 +360,12 @@ describe('virtual list window', () => {
     assert.ok(paused.end < 100)
     assert.ok(paused.padTop > 0)
     assert.ok(paused.padBottom > 0)
+    const past = virtualWindow({ count: 100, scrollTop: 100_000, viewportHeight: 320, estimate: 56, pin: 'bottom', live: false })
+    assert.equal(past.start, 99)
+    assert.equal(past.end, 100)
+    assert.equal(indexFromRows(80, [{ index: 4, top: 40, height: 70 }, { index: 5, top: 110, height: 40 }], 0), 4)
+    assert.equal(scrollTopForIndex(4, 56), 224)
+    assert.equal(nextPinState(false, true, true), true)
+    assert.equal(nextPinState(false, false, true), false)
   })
 })

@@ -1312,6 +1312,43 @@ export function kickTagsForApi(tags?: string[]) {
   return (normalizeTags(tags) || []).filter(isKickTag)
 }
 
+export function kickCategorySkipped(category?: string, categoryId?: string) {
+  return Boolean(category?.trim()) && !String(categoryId || '').trim()
+}
+
+export function kickChannelPatch(info: { title: string; category?: string; categoryId?: string; tags?: string[] }) {
+  const tags = kickTagsForApi(info.tags)
+  return {
+    body: {
+      stream_title: info.title,
+      ...(info.categoryId ? { category_id: Number(info.categoryId) } : {}),
+      ...(tags?.length ? { custom_tags: tags } : {}),
+    },
+    warning: kickCategorySkipped(info.category, info.categoryId) ? 'Kick category was not updated. Pick a category from the list.' : undefined,
+  }
+}
+
+export function youtubeBanRecord(entries: Iterable<[string, string[]]>) {
+  const record: Record<string, string[]> = {}
+  for (const [userId, ids] of entries) {
+    const key = userId.trim().toLowerCase()
+    const clean = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))]
+    if (key && clean.length) record[key] = clean
+  }
+  return record
+}
+
+export function loadYoutubeBanIds(raw: unknown) {
+  const map = new Map<string, string[]>()
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return map
+  for (const [userId, ids] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(ids)) continue
+    const clean = ids.map((id) => String(id).trim()).filter(Boolean)
+    if (userId.trim() && clean.length) map.set(userId.trim().toLowerCase(), clean)
+  }
+  return map
+}
+
 export function tagsEqual(left?: string[], right?: string[]) {
   const a = normalizeTags(left) || []
   const b = normalizeTags(right) || []

@@ -20,6 +20,45 @@ export function sseSeqIsGap(lastSeq: number | null, incoming: number, type: stri
   return incoming !== lastSeq + 1
 }
 
+function mixStamp(hash: number, value: string) {
+  let next = hash
+  for (let i = 0; i < value.length; i++) next = (Math.imul(next, 33) + value.charCodeAt(i)) >>> 0
+  return next
+}
+
+export function chatSliceStamp(messages: { id: string; deleted?: boolean; text?: string }[]) {
+  let hash = messages.length >>> 0
+  for (const message of messages) {
+    hash = mixStamp(hash, message.id)
+    hash = mixStamp(hash, message.deleted ? '1' : '0')
+    hash = mixStamp(hash, message.text || '')
+  }
+  return hash
+}
+
+export function sameStringList(prev: string[], next: string[]) {
+  if (prev.length !== next.length) return false
+  for (let i = 0; i < prev.length; i++) if (prev[i] !== next[i]) return false
+  return true
+}
+
+export function sameHealth(prev: Record<string, { status?: string; message?: string }>, next: Record<string, { status?: string; message?: string }>) {
+  for (const key of ['Twitch', 'Kick', 'YouTube']) {
+    if (prev[key]?.status !== next[key]?.status || prev[key]?.message !== next[key]?.message) return false
+  }
+  return true
+}
+
+export function samePrivacy(prev: { videoId: string }[], next: { videoId: string }[]) {
+  if (prev.length !== next.length) return false
+  for (let i = 0; i < prev.length; i++) if (prev[i].videoId !== next[i].videoId) return false
+  return true
+}
+
+export function sameQuota(prev: { used: number; limit: number }, next: { used: number; limit: number }) {
+  return prev.used === next.used && prev.limit === next.limit
+}
+
 export function chatDockFields(remote: Record<string, unknown>) {
   return {
     messages: Array.isArray(remote.messages) ? remote.messages : undefined,

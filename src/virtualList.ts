@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject, type UIEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject, type UIEvent } from 'react'
 
 /**
  * Window a long list to the on-screen slice plus overscan. Spacers keep
@@ -30,9 +30,30 @@ export function virtualWindow(options: {
     return { start, end: count, padTop: start * estimate, padBottom: 0 }
   }
   const scrollTop = Math.max(0, options.scrollTop)
-  const start = Math.max(0, Math.floor(scrollTop / estimate) - overscan)
+  const rawStart = Math.max(0, Math.floor(scrollTop / estimate) - overscan)
+  const start = count === 0 ? 0 : Math.min(rawStart, count - 1)
   const end = Math.min(count, start + visible + overscan * 2)
   return { start, end, padTop: start * estimate, padBottom: Math.max(0, (count - end) * estimate) }
+}
+
+export function scrollTopForIndex(index: number, estimate: number) {
+  return Math.max(0, index) * Math.max(1, estimate)
+}
+
+export function indexFromRows(scrollTop: number, rows: { index: number; top: number; height: number }[], fallback: number) {
+  for (const row of rows) {
+    if (row.top + row.height > scrollTop + 1) return row.index
+  }
+  return fallback
+}
+
+export function indexOnScreen(list: HTMLElement, estimate: number, fallback: number) {
+  const rows = [...list.querySelectorAll<HTMLElement>('[data-row-index]')].map((row) => ({
+    index: Number(row.dataset.rowIndex),
+    top: row.offsetTop,
+    height: row.offsetHeight,
+  })).filter((row) => Number.isFinite(row.index))
+  return indexFromRows(list.scrollTop, rows, fallback)
 }
 
 export function useVirtualWindow(
@@ -45,6 +66,19 @@ export function useVirtualWindow(
 ) {
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(320)
+  const wasLive = useRef(live)
+
+  useLayoutEffect(() => {
+    const listEl = listRef.current
+    const leavingLive = wasLive.current && !live && pin === 'bottom'
+    wasLive.current = live
+    if (!listEl || !leavingLive) return
+    const next = scrollTopForIndex(indexOnScreen(listEl, estimate, 0), estimate)
+    listEl.dataset.snapping = '1'
+    listEl.scrollTop = next
+    setScrollTop(next)
+    requestAnimationFrame(() => { delete listEl.dataset.snapping })
+  }, [live, pin, estimate, listRef])
 
   useEffect(() => {
     const listEl = listRef.current

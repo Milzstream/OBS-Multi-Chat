@@ -12,6 +12,8 @@ import {
   isTokenRefreshHealthMessage,
   isKickTag,
   isTwitchTag,
+  kickCategorySkipped,
+  kickChannelPatch,
   kickTagsForApi,
   kickStreamDetails,
   loadStreamInfo,
@@ -21,6 +23,8 @@ import {
   streamDetailsUnchanged,
   tagsEqual,
   twitchTagsForApi,
+  loadYoutubeBanIds,
+  youtubeBanRecord,
   youtubeTagWriteNeeded,
   loadYouTubeQuota,
   oauthAuthorizeUrl,
@@ -77,6 +81,26 @@ describe('stream details', () => {
       { title: 'Now', category: 'IRL' },
     )
     assert.deepEqual(next.tags, ['English'])
+  })
+
+  it('does not claim a Kick category update when the typed name has no id', () => {
+    assert.equal(kickCategorySkipped('Minecraft', undefined), true)
+    assert.equal(kickCategorySkipped('Minecraft', '12'), false)
+    const patch = kickChannelPatch({ title: 'Friday', category: 'Minecraft', tags: ['English'] })
+    assert.equal(patch.body.category_id, undefined)
+    assert.equal(patch.body.stream_title, 'Friday')
+    assert.match(patch.warning || '', /not updated/)
+    const kept = kickChannelPatch({ title: 'Friday', category: 'Minecraft', categoryId: '12' })
+    assert.equal(kept.body.category_id, 12)
+    assert.equal(kept.warning, undefined)
+  })
+
+  it('reloads YouTube ban ids after a restart', () => {
+    const saved = youtubeBanRecord([['UC1', ['ban-1', 'ban-1', '']], ['', ['x']]])
+    assert.deepEqual(saved, { uc1: ['ban-1'] })
+    const loaded = loadYoutubeBanIds(saved)
+    assert.deepEqual(loaded.get('uc1'), ['ban-1'])
+    assert.equal(loadYoutubeBanIds(null).size, 0)
   })
 
   it('reads Kick custom_tags from the stream object', () => {
