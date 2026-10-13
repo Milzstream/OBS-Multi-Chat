@@ -81,6 +81,7 @@ import {
   sseChangedKeys,
   sseNamedEvent,
   shouldKeepTokenRefreshBanner,
+  shouldWarnKickChatDown,
   summarizeApiError,
   syncYouTubeTokenChatIds,
   tokenRefreshFailureMessage,
@@ -1714,7 +1715,7 @@ function refreshChatHealth() {
     const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
     if (!shouldKeepTokenRefreshBanner(state.health.Kick, Boolean(kickAccount?.connected))) {
       if (kickChat.connected) { if (state.health.Kick.status === 'down') setHealth('Kick', 'ok') }
-      else setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
+      else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
     }
   } else if (isTokenRefreshHealthMessage(state.health.Kick.message)) {
     setHealth('Kick', 'ok')
@@ -2222,11 +2223,11 @@ async function pollLiveState() {
   }
   if (tokens.Kick) {
     if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
-      try { await pollKick(); logPolledLive('Kick'); if (kickChat.connected) setHealth('Kick', 'ok'); else if (tokens.Kick) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
+      try { await pollKick(); logPolledLive('Kick'); if (kickChat.connected) setHealth('Kick', 'ok'); else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         console.error('Kick poll:', message)
-        if (!kickChat.connected) setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
-        else setHealth('Kick', 'warn', 'Kick status poll failed')
+        if (kickChat.connected) setHealth('Kick', 'warn', 'Kick status poll failed')
+        else setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
       }
     } else maintainKickChat()
   }

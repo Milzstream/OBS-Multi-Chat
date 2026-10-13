@@ -39,6 +39,7 @@ import {
   twitchEventSubWatchdogShouldClose,
   shareInFlight,
   restoreYouTubeQuotaBlock,
+  shouldWarnKickChatDown,
   youtubeBanChatIds,
   youtubeLiveChatCursor,
   youtubeLiveChatListQuery,
@@ -146,6 +147,13 @@ describe('Kick chat and activity', () => {
     assert.equal(kickChannelPollFailure(401)?.refresh, true)
     assert.match(kickChannelPollFailure(500)?.message || '', /500/)
     assert.equal(kickChannelPollFailure(500)?.refresh, false)
+  })
+
+  it('does not warn that Kick chat is down until a connect attempt has failed', () => {
+    assert.equal(shouldWarnKickChatDown(false, false), false)
+    assert.equal(shouldWarnKickChatDown(true, false), false)
+    assert.equal(shouldWarnKickChatDown(true, true), false)
+    assert.equal(shouldWarnKickChatDown(false, true), true)
   })
 
   it('reads chatroom ids and names from mixed payloads', () => {

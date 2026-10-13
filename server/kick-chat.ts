@@ -496,11 +496,13 @@ export class KickChat {
   private onModeration?: (event: KickModeration) => void
   private closed = true
   private attempt = 0
+  private hasFailed = false
   private provider?: 'centrifugo' | 'pusher'
   private token?: string
 
   get currentChatroomId() { return this.chatroomId }
   get connected() { return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
+  get failed() { return this.hasFailed }
 
   async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number, onActivity?: (event: KickActivity) => void, onModeration?: (event: KickModeration) => void) {
     this.onMessage = onMessage
@@ -510,6 +512,8 @@ export class KickChat {
     if (this.slug !== slug) {
       this.slug = slug
       this.chatroomId = cachedChatroomId
+      this.attempt = 0
+      this.hasFailed = false
       await this.disconnectSocket()
     } else if (cachedChatroomId && !this.chatroomId) {
       this.chatroomId = cachedChatroomId
@@ -522,6 +526,8 @@ export class KickChat {
     this.closed = true
     this.slug = undefined
     this.chatroomId = undefined
+    this.attempt = 0
+    this.hasFailed = false
     this.onMessage = undefined
     this.onActivity = undefined
     this.onModeration = undefined
@@ -614,7 +620,7 @@ export class KickChat {
       if (live.kind === 'error') { console.error('Kick chat:', live.message); this.ws?.close(); return }
       if (live.kind === 'connected') { this.subscribeCentrifugo(); return }
       if (live.kind === 'subscribed') {
-        if (live.id === 2) { this.attempt = 0; console.log(`Kick chat connected (${this.slug})`) }
+        if (live.id === 2) { this.attempt = 0; this.hasFailed = false; console.log(`Kick chat connected (${this.slug})`) }
         return
       }
       this.dispatch(readKickSocketFrame(live.frame))
@@ -639,6 +645,7 @@ export class KickChat {
     }
     if (frame.handshake === 'subscribed') {
       this.attempt = 0
+      this.hasFailed = false
       if (String(frame.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
       return
     }
@@ -656,6 +663,7 @@ export class KickChat {
 
   private scheduleReconnect() {
     if (this.closed || this.reconnectTimer) return
+    this.hasFailed = true
     const delay = Math.min(15_000, 1_000 * 2 ** this.attempt++)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined

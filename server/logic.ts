@@ -794,6 +794,34 @@ export function closestRecentOutgoing<T extends { text: string; at: number }>(
   return best
 }
 
+/**
+ * True when `item` is the dock send `tracked` refers to. Twitch or YouTube may
+ * already have replaced the optimistic UUID, so Kick still has to find that row.
+ */
+export function rowMatchesOutgoing(
+  item: ChatMessage,
+  tracked: { id: string; platforms: Platform[]; at: number },
+  optimisticIds: ReadonlySet<string>,
+) {
+  if (item.id === tracked.id) return true
+  if (item.copies?.some((copy) => copy.id === tracked.id)) return true
+  if (optimisticIds.has(item.id)) return false
+  const itemPlatforms = item.platforms || [item.platform]
+  // The dock send stores every target platform on insert. A received Kick line is Kick-only.
+  if (!tracked.platforms.every((platform) => itemPlatforms.includes(platform))) return false
+  const itemTime = Date.parse(item.time) || 0
+  return Math.abs(itemTime - tracked.at) <= 20_000
+}
+
+function copiesUnchanged(current?: ChatMessageCopy[], next?: ChatMessageCopy[]) {
+  if (!current?.length && !next?.length) return true
+  if (!current || !next || current.length !== next.length) return false
+  return current.every((copy, index) => {
+    const other = next[index]
+    return copy.platform === other.platform && copy.id === other.id && copy.userId === other.userId && copy.sourceId === other.sourceId
+  })
+}
+
 export function mergeIncomingChat(
   messages: ChatMessage[],
   message: ChatMessage,
@@ -839,7 +867,8 @@ export function mergeIncomingChat(
     let match = youtubePair && sameYouTubeChat && delta <= 2_000
     if (!match && ownYouTube && !sameYouTubeChat && delta <= 20_000) match = true
     // Echoes merge only into the optimistic row for that send. Any other own row with the same text is a separate line.
-    if (!match && tracked && item.id === tracked.id && delta <= 20_000) match = true
+    // After Twitch/YouTube replace the dock UUID, Kick still has to fold into that same unified row.
+    if (!match && tracked && delta <= 20_000 && incomingPlatforms.some((platform) => tracked.platforms.includes(platform)) && rowMatchesOutgoing(item, tracked, optimisticIds)) match = true
     else if (!match && incomingIsOwn && itemIsOwn && delta <= 90_000 && youtubePair && !sameYouTubeChat) {
       match = true
     }
@@ -859,7 +888,7 @@ export function mergeIncomingChat(
       ? current.parts
       : takeIncomingParts && message.parts?.length ? message.parts : current.parts
     // YouTube's first sighting fills sourceId. Twitch and Kick echoes have no sourceId, so the optimistic UUID has to yield to the platform id or Delete calls the API with a UUID.
-    const echoReplacesOptimisticId = Boolean(tracked && current.id === tracked.id && message.id && optimisticIds.has(current.id) && !optimisticIds.has(message.id))
+    const echoReplacesOptimisticId = Boolean(tracked && rowMatchesOutgoing(current, tracked, optimisticIds) && message.id && optimisticIds.has(current.id) && !optimisticIds.has(message.id))
     const takeIncomingId = Boolean((message.sourceId && !current.sourceId) || echoReplacesOptimisticId)
     const sourceLabel = mergedSourceLabel(current, message, targets)
     const platformsUnchanged = platforms.length === already.length && platforms.every((platform) => already.includes(platform))
@@ -869,10 +898,10 @@ export function mergeIncomingChat(
     const textChanged = text !== current.text
     const labelChanged = sourceLabel !== current.sourceLabel
     const metaChanged = Boolean((message.userId && !current.userId) || (message.handle && !current.handle) || (message.avatar && !current.avatar) || (!current.badges?.length && message.badges?.length))
-    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged) {
+    const copies = mergeChatCopies(current, message, optimisticIds)
+    if (platformsUnchanged && parts === current.parts && !takeIncomingId && !ingestChanged && !textChanged && !labelChanged && !metaChanged && copiesUnchanged(current.copies, copies)) {
       return { messages, changed: false, seenIds }
     }
-    const copies = mergeChatCopies(current, message, optimisticIds)
     return {
       messages: messages.map((item, index) => index === mergeAt ? {
         ...item,
@@ -1632,6 +1661,15 @@ export function isTokenRefreshHealthMessage(message: string) {
 
 export function shouldKeepTokenRefreshBanner(health: Health, connected: boolean) {
   return isTokenRefreshHealthMessage(health.message) && !connected
+}
+
+/**
+ * Kick's first realtime handshake does extra HTTP before the socket is up.
+ * "Not connected yet" on launch is that handshake, not a drop — wait until a
+ * connect attempt has actually failed (or the socket later drops).
+ */
+export function shouldWarnKickChatDown(connected: boolean, failed: boolean) {
+  return !connected && failed
 }
 
 export function isPermanentTokenRefreshError(error: unknown) {
