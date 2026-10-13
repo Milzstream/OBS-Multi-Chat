@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import WebSocket from 'ws'
+import { fetchTimed, type FetchLike } from './fetch-timed.js'
 
 /**
  * Kick chat, activity, and moderation over Kick's public Pusher WebSocket, plus
@@ -109,6 +110,40 @@ export function rememberKickProfilePic(slug: string, payload: any) {
   if (key && pic) kickProfilePicCache.set(key, pic)
 }
 
+export const KICK_PAGE_FETCH_MS = 12_000
+
+export function kickPageFetch(url: string, init: RequestInit = {}, fetchImpl?: FetchLike, ms = KICK_PAGE_FETCH_MS) {
+  return fetchTimed(url, init, ms, fetchImpl ?? fetch)
+}
+
+export function createFlushLock() {
+  let running = false
+  let pending = false
+  return {
+    async run(task: () => Promise<void>) {
+      if (running) {
+        pending = true
+        return
+      }
+      running = true
+      try {
+        do {
+          pending = false
+          await task()
+        } while (pending)
+      } finally {
+        running = false
+      }
+    },
+  }
+}
+
+export function dropSocket(socket?: { removeAllListeners: () => void; terminate: () => void }) {
+  if (!socket) return
+  socket.removeAllListeners()
+  try { socket.terminate() } catch { /* already closed */ }
+}
+
 /** Resolve a channel's public chatroom id. Node fetch is often Cloudflare-blocked; Windows PowerShell then a real browser are the fallbacks. */
 export async function resolveKickChatroomId(slug: string, cached?: number): Promise<number> {
   if (cached && cached > 0) return cached
@@ -119,7 +154,7 @@ export async function resolveKickChatroomId(slug: string, cached?: number): Prom
     `https://kick.com/api/v1/channels/${encodeURIComponent(key)}`,
   ]) {
     try {
-      const response = await fetch(url, { headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` } })
+      const response = await kickPageFetch(url, { headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` } })
       if (!response.ok) continue
       const payload = await response.json()
       rememberKickProfilePic(key, payload)
@@ -201,7 +236,7 @@ export async function lookupKickProfilePics(slugs: string[]): Promise<Map<string
       continue
     }
     try {
-      const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
+      const response = await kickPageFetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
         headers: { ...BROWSER_HEADERS, Referer: `https://kick.com/${encodeURIComponent(key)}` },
       })
       if (response.ok) {
@@ -514,12 +549,6 @@ export class KickChat {
     this.pingTimer = undefined
     const socket = this.ws
     this.ws = undefined
-    if (!socket) return
-    await new Promise<void>((resolve) => {
-      socket.once('close', () => resolve())
-      socket.once('error', () => resolve())
-      try { socket.close() } catch { resolve() }
-      setTimeout(resolve, 500)
-    })
+    dropSocket(socket)
   }
 }

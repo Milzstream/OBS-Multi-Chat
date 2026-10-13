@@ -45,6 +45,92 @@ function platformMark(platform: Platform) {
   return <span className="kick-mark">K</span>
 }
 
+export const SETTINGS_TOGGLE_KEYS = ['translateChat', 'activityFallback', 'ignoreMissingJwt', 'dropOldAlerts'] as const
+export type SettingsToggleKey = typeof SETTINGS_TOGGLE_KEYS[number]
+export type SettingsPatch = Partial<Record<SettingsToggleKey, boolean>> & {
+  autoLiveCheck?: Partial<AutoLiveCheck>
+}
+
+type PolledSettings = {
+  translateChat: boolean
+  translateError: string
+  activityFallback: boolean
+  ignoreMissingJwt: boolean
+  dropOldAlerts: boolean
+  autoLiveCheck: AutoLiveCheck
+  streamelements: Settings['streamelements']
+  youtubeQuota: Settings['youtubeQuota']
+}
+
+export function settingsInFlightKeys(body: SettingsPatch) {
+  const keys: string[] = []
+  for (const key of SETTINGS_TOGGLE_KEYS) if (typeof body[key] === 'boolean') keys.push(key)
+  if (body.autoLiveCheck) {
+    for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
+      if (typeof body.autoLiveCheck[platform] === 'boolean') keys.push(`autoLiveCheck.${platform}`)
+    }
+  }
+  return keys
+}
+
+export function mergePolledSettings<T extends PolledSettings>(current: T, remote: Partial<T>, inFlight: ReadonlySet<string>): T {
+  const next = { ...current }
+  if (!inFlight.has('translateChat') && typeof remote.translateChat === 'boolean') next.translateChat = remote.translateChat
+  if (typeof remote.translateError === 'string') next.translateError = remote.translateError
+  if (!inFlight.has('activityFallback') && typeof remote.activityFallback === 'boolean') next.activityFallback = remote.activityFallback
+  if (!inFlight.has('ignoreMissingJwt') && typeof remote.ignoreMissingJwt === 'boolean') next.ignoreMissingJwt = remote.ignoreMissingJwt
+  if (!inFlight.has('dropOldAlerts') && typeof remote.dropOldAlerts === 'boolean') next.dropOldAlerts = remote.dropOldAlerts
+  if (remote.autoLiveCheck && typeof remote.autoLiveCheck === 'object') {
+    next.autoLiveCheck = {
+      Twitch: inFlight.has('autoLiveCheck.Twitch') ? current.autoLiveCheck.Twitch : remote.autoLiveCheck.Twitch !== false,
+      Kick: inFlight.has('autoLiveCheck.Kick') ? current.autoLiveCheck.Kick : remote.autoLiveCheck.Kick !== false,
+      YouTube: inFlight.has('autoLiveCheck.YouTube') ? current.autoLiveCheck.YouTube : remote.autoLiveCheck.YouTube !== false,
+    }
+  }
+  if (remote.streamelements && typeof remote.streamelements === 'object') next.streamelements = remote.streamelements
+  if (remote.youtubeQuota && typeof remote.youtubeQuota === 'object') next.youtubeQuota = remote.youtubeQuota
+  return next
+}
+
+export function applySettingsPatch<T extends PolledSettings>(current: T, body: SettingsPatch): T {
+  const next = { ...current, autoLiveCheck: { ...current.autoLiveCheck } }
+  for (const key of SETTINGS_TOGGLE_KEYS) if (typeof body[key] === 'boolean') next[key] = body[key]
+  if (body.autoLiveCheck) {
+    for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
+      if (typeof body.autoLiveCheck[platform] === 'boolean') next.autoLiveCheck[platform] = body.autoLiveCheck[platform]
+    }
+  }
+  return next
+}
+
+export function restoreSettingsKeys<T extends PolledSettings>(current: T, previous: T, keys: readonly string[]): T {
+  const next = { ...current, autoLiveCheck: { ...current.autoLiveCheck } }
+  for (const key of keys) {
+    if (key.startsWith('autoLiveCheck.')) {
+      const platform = key.slice('autoLiveCheck.'.length) as Platform
+      next.autoLiveCheck[platform] = previous.autoLiveCheck[platform]
+    } else if (key === 'translateChat' || key === 'activityFallback' || key === 'ignoreMissingJwt' || key === 'dropOldAlerts') {
+      next[key] = previous[key]
+    }
+  }
+  return next
+}
+
+export function mergeJwtDraft(current: Record<Platform, string>, remote: Record<string, unknown>, edited: ReadonlySet<string>) {
+  const next = { ...current }
+  for (const platform of JWT_PLATFORMS) {
+    if (edited.has(platform) || !(platform in remote)) continue
+    next[platform] = String(remote[platform] || '')
+  }
+  return next
+}
+
+export function settingsSaveError(ok: boolean, status: number, body: { error?: unknown }) {
+  if (ok && !body.error) return ''
+  if (typeof body.error === 'string' && body.error.trim()) return body.error.trim()
+  return `Could not save settings (${status || 'network'})`
+}
+
 export default function ConsoleApp() {
   const [connections, setConnections] = useState<Connection[]>(emptyConnections)
   const [info, setInfo] = useState<ConsoleInfo | null>(null)
@@ -69,8 +155,14 @@ export default function ConsoleApp() {
   const [copied, setCopied] = useState('')
   const [youtubePrivacy, setYoutubePrivacy] = useState<YoutubePrivacyNotice[]>([])
   const [privacyStatus, setPrivacyStatus] = useState('')
+  const [settingsError, setSettingsError] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const settingsRef = useRef(settings)
+  const inFlightRef = useRef(new Set<string>())
+  const settingsEpoch = useRef(0)
+  const jwtEditedRef = useRef(new Set<Platform>())
+  settingsRef.current = settings
 
   useEffect(() => {
     document.title = 'Relay Chat Dock'
@@ -93,36 +185,19 @@ export default function ConsoleApp() {
       }).catch(() => undefined)
     }
     const loadSettings = () => {
+      const epoch = settingsEpoch.current
       void fetch('/api/state').then((response) => response.ok ? response.json() : null).then((data) => {
-        if (cancelled || !data || typeof data !== 'object') return
+        if (cancelled || epoch !== settingsEpoch.current || !data || typeof data !== 'object') return
         const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[] }
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
-        setSettings((current) => ({
-          translateChat: typeof remote.translateChat === 'boolean' ? remote.translateChat : current.translateChat,
-          translateError: typeof remote.translateError === 'string' ? remote.translateError : current.translateError,
-          activityFallback: typeof remote.activityFallback === 'boolean' ? remote.activityFallback : current.activityFallback,
-          ignoreMissingJwt: typeof remote.ignoreMissingJwt === 'boolean' ? remote.ignoreMissingJwt : current.ignoreMissingJwt,
-          dropOldAlerts: typeof remote.dropOldAlerts === 'boolean' ? remote.dropOldAlerts : current.dropOldAlerts,
-          autoLiveCheck: remote.autoLiveCheck && typeof remote.autoLiveCheck === 'object' ? {
-            Twitch: remote.autoLiveCheck.Twitch !== false,
-            Kick: remote.autoLiveCheck.Kick !== false,
-            YouTube: remote.autoLiveCheck.YouTube !== false,
-          } : current.autoLiveCheck,
-          streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : current.streamelements,
-          youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : current.youtubeQuota,
-        }))
+        setSettings((current) => mergePolledSettings(current, remote, inFlightRef.current))
         if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
       }).catch(() => undefined)
     }
     const loadJwts = () => {
       void fetch('/api/jwts').then((response) => response.ok ? response.json() : null).then((tokens) => {
         if (cancelled || !tokens || typeof tokens !== 'object') return
-        const record = tokens as Record<string, unknown>
-        setJwtDraft({
-          Twitch: String(record.Twitch || ''),
-          Kick: String(record.Kick || ''),
-          YouTube: String(record.YouTube || ''),
-        })
+        setJwtDraft((current) => mergeJwtDraft(current, tokens as Record<string, unknown>, jwtEditedRef.current))
       }).catch(() => undefined)
     }
     loadInfo()
@@ -146,9 +221,48 @@ export default function ConsoleApp() {
     if (stickRef.current && node) node.scrollTop = node.scrollHeight
   }, [lines])
 
-  const patchSettings = (body: Partial<Pick<Settings, 'translateChat' | 'activityFallback' | 'ignoreMissingJwt' | 'dropOldAlerts'>>) => {
-    setSettings((current) => ({ ...current, ...body }))
+  const patchSettings = (body: SettingsPatch) => {
+    const keys = settingsInFlightKeys(body)
+    if (!keys.length || keys.some((key) => inFlightRef.current.has(key))) return
+    const previous = settingsRef.current
+    settingsEpoch.current += 1
+    for (const key of keys) inFlightRef.current.add(key)
+    const optimistic = applySettingsPatch(previous, body)
+    settingsRef.current = optimistic
+    setSettings(optimistic)
     void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as Partial<Settings> & { error?: string }
+        const error = settingsSaveError(response.ok, response.status, data)
+        if (error) {
+          setSettingsError(error)
+          setSettings((current) => {
+            const restored = restoreSettingsKeys(current, previous, keys)
+            settingsRef.current = restored
+            return restored
+          })
+          return
+        }
+        setSettingsError('')
+        setSettings((current) => {
+          const others = new Set([...inFlightRef.current].filter((key) => !keys.includes(key)))
+          const next = mergePolledSettings(current, data, others)
+          settingsRef.current = next
+          return next
+        })
+      })
+      .catch(() => {
+        setSettingsError('Could not save settings')
+        setSettings((current) => {
+          const restored = restoreSettingsKeys(current, previous, keys)
+          settingsRef.current = restored
+          return restored
+        })
+      })
+      .finally(() => {
+        for (const key of keys) inFlightRef.current.delete(key)
+        settingsEpoch.current += 1
+      })
   }
 
   const saveJwt = async (platform: Platform) => {
@@ -207,9 +321,7 @@ export default function ConsoleApp() {
   }
   const checkLive = (platform: Platform) => fetch(`/api/live-check/${platform}`, { method: 'POST' }).then((response) => { if (!response.ok) return Promise.reject() })
   const toggleAutoLiveCheck = (platform: Platform, enabled: boolean) => {
-    const autoLiveCheck = { ...settings.autoLiveCheck, [platform]: enabled }
-    setSettings((current) => ({ ...current, autoLiveCheck }))
-    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoLiveCheck: { [platform]: enabled } }) })
+    patchSettings({ autoLiveCheck: { [platform]: enabled } })
   }
 
   const missing = settings.streamelements.missing || []
@@ -266,6 +378,7 @@ export default function ConsoleApp() {
             onToggleAutoLiveCheck={toggleAutoLiveCheck}
             note="Connect opens in your browser. Chat and activity stay in the OBS docks. Auto checks whether each platform is live. Uncheck it to pause those status polls until you press Check live."
           />
+          {settingsError ? <p className="settings-jwt-error">{settingsError}</p> : null}
           <span className="settings-section-title">CHAT</span>
           <label className="settings-toggle">
             <span>Translate non-English chat to English</span>
@@ -304,6 +417,7 @@ export default function ConsoleApp() {
                   onFocus={() => setJwtFocus(platform)}
                   onBlur={() => setJwtFocus((current) => current === platform ? null : current)}
                   onChange={(event) => {
+                    jwtEditedRef.current.add(platform)
                     setJwtDraft((current) => ({ ...current, [platform]: event.target.value }))
                     if (jwtStatus[platform]) setJwtStatus((current) => ({ ...current, [platform]: undefined }))
                   }}

@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { checkForUpdates, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, type GitHubRelease } from '../server/check-update.js'
+import { checkForUpdates, confirmWithSpawn, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, type GitHubRelease } from '../server/check-update.js'
 
 function release(tag: string): GitHubRelease {
   return {
@@ -111,5 +111,44 @@ describe('update check flow', () => {
     assert.equal(digestMatches(Buffer.from('nope'), 'sha256:' + 'ab'.repeat(32)), false)
     assert.equal(escapePowerShellHereString("v0.1'@; calc"), "v0.1' @; calc")
     assert.equal(path.dirname(installerSetupPath('v/../../Users/Public/evil')), path.resolve(os.tmpdir()))
+  })
+
+  it('resolves the Yes/No prompt without blocking the event loop', async () => {
+    let ticks = 0
+    const timer = setInterval(() => { ticks += 1 }, 5)
+    const pending = confirmWithSpawn(() => ({
+      on(event: string, listener: (...args: unknown[]) => void) {
+        if (event === 'close') setTimeout(() => listener(0), 30)
+      },
+    }), 'Update?', 'Relay')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.ok(ticks >= 1)
+    assert.equal(await pending, true)
+    clearInterval(timer)
+    const declined = await confirmWithSpawn(() => ({
+      on(event: string, listener: (...args: unknown[]) => void) {
+        if (event === 'error') listener(new Error('missing'))
+      },
+    }), 'Update?', 'Relay')
+    assert.equal(declined, false)
+  })
+
+  it('waits for an async confirm before downloading', async () => {
+    const started: string[] = []
+    let releaseConfirm: (yes: boolean) => void = () => undefined
+    const pending = checkForUpdates({
+      currentVersion: '0.6.1',
+      latestRelease: release('v0.6.2'),
+      installerCopy: true,
+      confirm: () => new Promise((resolve) => { releaseConfirm = resolve }),
+      download: async () => { started.push('download') },
+      startInstaller: (dest) => started.push(dest),
+      exit: () => started.push('exit'),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.deepEqual(started, [])
+    releaseConfirm(false)
+    await pending
+    assert.deepEqual(started, [])
   })
 })

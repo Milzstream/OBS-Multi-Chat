@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { activityIsDuplicate, createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements, postStreamElementsMock, streamElementsEmulatePlan, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
-import { ActivityWarningBanner, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
+import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { profileHref } from '../src/activity/ActivityRow.tsx'
 import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
@@ -205,7 +205,7 @@ describe('activity display', () => {
   })
 
   it('stays quiet while StreamElements is still connecting, and warns once it settles', () => {
-    const base = { warnings: [] as string[], missingJwts: [] as string[], seConnected: false, seConnecting: true, seReady: true, ignoreMissingJwt: false, dismissed: false }
+    const base = { warnings: [] as string[], missingJwts: [] as string[], seConnected: false, seConnecting: true, seReady: true, ignoreMissingJwt: false, dismissed: [] as string[] }
     // A restart hydrates the JWTs after the dock's first snapshot. That window
     // used to flash “StreamElements not configured” for a second.
     assert.equal(shouldShowActivityWarning(base), false)
@@ -214,9 +214,15 @@ describe('activity display', () => {
     assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true }), false)
     assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true, missingJwts: ['Kick'] }), true)
     assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, seConnected: true, ignoreMissingJwt: true }), false)
-    // Backend warnings still speak up, and a dismissal still holds.
+    // Backend warnings still speak up, and a dismissal still holds for that warning only.
     assert.equal(shouldShowActivityWarning({ ...base, warnings: ['StreamElements disconnected — retrying alerts'] }), true)
-    assert.equal(shouldShowActivityWarning({ ...base, seConnecting: false, dismissed: true }), false)
+    const settled = { ...base, seConnecting: false }
+    const setupKey = activityWarningKey(settled)
+    assert.equal(shouldShowActivityWarning({ ...settled, dismissed: [setupKey] }), false)
+    assert.equal(shouldShowActivityWarning({ ...settled, warnings: ['Reconnect Twitch'], dismissed: [setupKey] }), true)
+    const reconnect = { ...base, warnings: ['Reconnect Twitch'] }
+    assert.equal(shouldShowActivityWarning({ ...reconnect, dismissed: [activityWarningKey(reconnect)] }), false)
+    assert.equal(shouldShowActivityWarning({ ...reconnect, warnings: ['Reconnect Twitch', 'StreamElements offline'], dismissed: [activityWarningKey(reconnect)] }), true)
     // Nothing has reported a StreamElements status yet.
     assert.equal(shouldShowActivityWarning({ ...base, seReady: false, seConnecting: false }), false)
   })

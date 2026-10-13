@@ -9,7 +9,7 @@ import express from 'express'
 import cors from 'cors'
 import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
+import { KickChat, createFlushLock, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
 import { YouTubeLiveChat, youtubeViewersWhileLive, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
 import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile, writeTextAtomic } from './env-file.js'
@@ -314,6 +314,7 @@ let twitchAvatarTimer: NodeJS.Timeout | undefined
 const kickAvatars = new Map<string, string>()
 const kickAvatarPending = new Set<string>()
 let kickAvatarTimer: NodeJS.Timeout | undefined
+const kickAvatarFlush = createFlushLock()
 const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
 const kickChat = new KickChat()
 const youtubeChat = new YouTubeLiveChat()
@@ -1859,27 +1860,29 @@ function queueKickAvatar(slug?: string) {
 }
 
 async function flushKickAvatars() {
-  const slugs = [...kickAvatarPending].slice(0, 5)
-  slugs.forEach((slug) => kickAvatarPending.delete(slug))
-  if (!slugs.length) return
-  const pics = await lookupKickProfilePics(slugs)
-  for (const [slug, url] of pics) {
-    const avatar = normalizeAvatar(url)
-    if (avatar) kickAvatars.set(slug, avatar)
-  }
-  let changed = false
-  state.messages = state.messages.map((item) => {
-    if (item.platform !== 'Kick') return item
-    const avatar = kickAvatars.get((item.handle || kickProfileSlug(item.user)).toLowerCase())
-    if (!avatar || item.avatar === avatar) return item
-    changed = true
-    return { ...item, avatar }
+  await kickAvatarFlush.run(async () => {
+    const slugs = [...kickAvatarPending].slice(0, 5)
+    slugs.forEach((slug) => kickAvatarPending.delete(slug))
+    if (!slugs.length) return
+    const pics = await lookupKickProfilePics(slugs)
+    for (const [slug, url] of pics) {
+      const avatar = normalizeAvatar(url)
+      if (avatar) kickAvatars.set(slug, avatar)
+    }
+    let changed = false
+    state.messages = state.messages.map((item) => {
+      if (item.platform !== 'Kick') return item
+      const avatar = kickAvatars.get((item.handle || kickProfileSlug(item.user)).toLowerCase())
+      if (!avatar || item.avatar === avatar) return item
+      changed = true
+      return { ...item, avatar }
+    })
+    if (changed) {
+      scheduleChatSave()
+      broadcast()
+    }
+    if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
   })
-  if (changed) {
-    scheduleChatSave()
-    broadcast()
-  }
-  if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
 }
 
 function rememberOutgoing(entry: { id: string; text: string; platforms: Platform[]; at: number }) {

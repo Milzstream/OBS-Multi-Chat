@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -22,7 +22,7 @@ export type GitHubRelease = {
 export type InstallerAsset = { name: string; browser_download_url: string; digest?: string }
 
 export type UpdateHooks = {
-  confirm?: (message: string) => boolean
+  confirm?: (message: string) => boolean | Promise<boolean>
   download?: (url: string, dest: string) => Promise<void>
   startInstaller?: (setupPath: string) => void
   currentVersion?: string
@@ -154,9 +154,33 @@ async function getLatestGitHubRelease(): Promise<GitHubRelease | null> {
   }
 }
 
+type YesNoSpawn = (
+  command: string,
+  args: string[],
+  options: { windowsHide: boolean; stdio: 'ignore' },
+) => { on(event: string, listener: (...args: any[]) => void): unknown }
+
+export function confirmWithSpawn(spawnImpl: YesNoSpawn, message: string, title: string) {
+  return new Promise<boolean>((resolve) => {
+    let settled = false
+    const finish = (yes: boolean) => {
+      if (settled) return
+      settled = true
+      resolve(yes)
+    }
+    try {
+      const child = spawnImpl('powershell.exe', ['-NoProfile', '-STA', '-Command', windowsYesNoCommand(message, title)], { windowsHide: true, stdio: 'ignore' })
+      child.on('error', () => finish(false))
+      child.on('close', (code) => finish(code === 0))
+    } catch {
+      finish(false)
+    }
+  })
+}
+
 function windowsYesNo(message: string, title: string) {
-  if (process.platform !== 'win32') return false
-  return spawnSync('powershell.exe', ['-NoProfile', '-STA', '-Command', windowsYesNoCommand(message, title)], { windowsHide: true }).status === 0
+  if (process.platform !== 'win32') return Promise.resolve(false)
+  return confirmWithSpawn((command, args, options) => spawn(command, args, options), message, title)
 }
 
 async function downloadFile(url: string, dest: string) {
@@ -217,7 +241,7 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
 
     const confirm = hooks.confirm || ((message) => windowsYesNo(message, 'Relay Chat Dock'))
     const message = `Relay Chat Dock ${safeReleaseTag(latestVersion)} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
-    if (!confirm(message)) return
+    if (!(await confirm(message))) return
 
     const dest = installerSetupPath(latestVersion)
     await (hooks.download || downloadFile)(setupUrl, dest)

@@ -81,6 +81,20 @@ export function ActivityWarningBanner({ messages, missingJwts, seConnected, onDi
   )
 }
 
+export function activityWarningKey(state: {
+  warnings: string[]
+  missingJwts: string[]
+  seConnected: boolean
+  seConnecting: boolean
+  seReady: boolean
+  ignoreMissingJwt: boolean
+}) {
+  if (state.warnings.length) return `warn:${[...new Set(state.warnings)].sort().join('\n')}`
+  if (!state.seReady || state.seConnecting || state.ignoreMissingJwt) return ''
+  if (state.missingJwts.length || !state.seConnected) return `setup:${state.seConnected ? 'partial' : 'missing'}:${[...state.missingJwts].sort().join(',')}`
+  return ''
+}
+
 export function shouldShowActivityWarning(state: {
   warnings: string[]
   missingJwts: string[]
@@ -88,13 +102,11 @@ export function shouldShowActivityWarning(state: {
   seConnecting: boolean
   seReady: boolean
   ignoreMissingJwt: boolean
-  dismissed: boolean
+  dismissed: readonly string[]
 }) {
-  if (state.dismissed) return false
-  if (state.warnings.length > 0) return true
-  if (!state.seReady || state.seConnecting) return false
-  if (state.ignoreMissingJwt) return false
-  return state.missingJwts.length > 0 || !state.seConnected
+  const key = activityWarningKey(state)
+  if (!key) return false
+  return !state.dismissed.includes(key)
 }
 
 export default function ActivityApp() {
@@ -105,7 +117,7 @@ export default function ActivityApp() {
   const [seConnecting, setSeConnecting] = useState(true)
   const [seReady, setSeReady] = useState(false)
   const [ignoreMissingJwt, setIgnoreMissingJwt] = useState(false)
-  const [dismissedWarning, setDismissedWarning] = useState(false)
+  const [dismissedWarnings, setDismissedWarnings] = useState<string[]>([])
   const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
   const [kindFilter, setKindFilter] = useState<string[]>(() => parseStoredStringSet(readLocalPref(ACTIVITY_KIND_FILTER_KEY), ACTIVITY_KIND_GROUP_IDS))
   const [now, setNow] = useState(Date.now())
@@ -170,7 +182,8 @@ export default function ActivityApp() {
   const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.length, ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
   const kindsRestricted = kindFilter.length !== ACTIVITY_KIND_GROUP_IDS.length
   const warningMessages = [...new Set(activityWarnings)]
-  const showSetup = shouldShowActivityWarning({ warnings: warningMessages, missingJwts, seConnected, seConnecting, seReady, ignoreMissingJwt, dismissed: dismissedWarning })
+  const warningState = { warnings: warningMessages, missingJwts, seConnected, seConnecting, seReady, ignoreMissingJwt }
+  const showSetup = shouldShowActivityWarning({ ...warningState, dismissed: dismissedWarnings })
 
   const sendTest = (item: (typeof tests)[number]) => {
     setShowTests(false)
@@ -232,7 +245,11 @@ export default function ActivityApp() {
         </div>
       ) : null}
       {showSetup ? (
-        <ActivityWarningBanner messages={warningMessages} missingJwts={missingJwts} seConnected={seConnected} onDismiss={() => setDismissedWarning(true)} />
+        <ActivityWarningBanner messages={warningMessages} missingJwts={missingJwts} seConnected={seConnected} onDismiss={() => {
+          const key = activityWarningKey(warningState)
+          if (!key) return
+          setDismissedWarnings((current) => current.includes(key) ? current : [...current, key])
+        }} />
       ) : null}
       <section className="activity-feed">
         <div className="activity-list" ref={listRef} onScroll={onScroll}>

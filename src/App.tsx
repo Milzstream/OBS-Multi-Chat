@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, MouseEvent, useEffect, useRef, useState } fro
 import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Twitch, Users, Youtube } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from './autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from './virtualList'
-import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, unifiedCategoryQuery, visibleChatMessages, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
+import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, openDockUrl, platformStatTip, postYoutubePrivacy, preferredCategory, profileLinkTitle, selectedSendPlatforms, streamDashboardUrl, tagAssignments, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubeStudioUrl, type LiveStreamTip, type MergedCategory, type TagAssignment, type TagPlatform, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 import { chatDockFields, subscribeDockSse } from './sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from './dock-prefs'
@@ -23,7 +23,7 @@ type CategoryOption = { id: string; name: string }
 type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
 type ChatBadge = { title: string; url?: string; label?: string }
 type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; copies?: { platform: Platform; id: string; userId?: string; sourceId?: string }[]; user: string; text: string; time: string; emotes?: string[]; parts?: MessagePart[]; userId?: string; handle?: string; sourceId?: string; sourceLabel?: string; originalText?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean }
-type ModPrompt = { action: 'timeout' | 'ban'; duration?: number }
+type ModPrompt = { action: 'timeout' | 'ban'; duration?: number; confirmOnly?: boolean }
 type ModMenuState = { x: number; y: number; message: ChatMessage; prompt?: ModPrompt }
 type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 type YoutubeQuotaStatus = { used: number; limit: number }
@@ -190,8 +190,11 @@ function App() {
       setMenu({ ...menu, prompt: { action, duration } })
       return
     }
+    if (moderationNeedsDockConfirm(action, targets.map((item) => item.platform), reason)) {
+      setMenu({ ...menu, prompt: { action: 'ban', confirmOnly: true } })
+      return
+    }
     setMenu(null)
-    if (action === 'ban' && targets.every((item) => !moderationAcceptsReason(item.platform)) && !window.confirm(`Ban ${target.user} on ${moderationPlatformLabel(target)}?`)) return
     const sentReason = reason?.trim()
     moderatingRef.current = true
     void Promise.all(targets.map((item) => fetch('/api/moderate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, platform: item.platform, messageId: item.messageId, userId: item.userId, sourceId: item.sourceId, duration, ...(sentReason ? { reason: sentReason } : {}) }) }).then((response) => response.json()).then((result: { ok: boolean; error?: string; reason?: string }) => ({ platform: item.platform, ...result })))).then((results) => {
@@ -244,19 +247,29 @@ function App() {
 function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onModerate: (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => void; onClose: () => void }) {
   const [reason, setReason] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
-  const prompting = Boolean(menu.prompt)
-  useEffect(() => {
-    if (prompting) inputRef.current?.focus()
-  }, [prompting, menu.prompt?.action, menu.prompt?.duration])
-  const width = prompting ? 228 : 168
-  const height = prompting ? 168 : menu.message.deleted ? 90 : 190
   const prompt = menu.prompt
+  const confirmOnly = Boolean(prompt?.confirmOnly)
+  const prompting = Boolean(prompt)
+  useEffect(() => {
+    if (prompting && !confirmOnly) inputRef.current?.focus()
+  }, [prompting, confirmOnly, prompt?.action, prompt?.duration])
+  const width = prompting ? 228 : 168
+  const height = confirmOnly ? 112 : prompting ? 168 : menu.message.deleted ? 90 : 190
+  const platformLabel = moderationPlatformLabel(menu.message)
   return (
     <div className={prompting ? 'mod-menu mod-menu-prompt' : 'mod-menu'} style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - width)), top: Math.max(6, Math.min(menu.y, window.innerHeight - height)) }} onClick={(event) => event.stopPropagation()}>
-      <div className="mod-menu-user">{menu.message.user} · {moderationPlatformLabel(menu.message)}</div>
-      {prompt ? (
+      <div className="mod-menu-user">{menu.message.user} · {platformLabel}</div>
+      {prompt?.confirmOnly ? (
+        <form className="mod-menu-reason" onSubmit={(event) => { event.preventDefault(); onModerate(prompt.action, prompt.duration, '') }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose() } }}>
+          <label>{youtubeBanConfirmLabel(menu.message.user, platformLabel)}</label>
+          <div className="mod-menu-actions">
+            <button type="submit" className="danger">Ban</button>
+            <button type="button" onClick={onClose}>Cancel</button>
+          </div>
+        </form>
+      ) : prompt ? (
         <form className="mod-menu-reason" onSubmit={(event) => { event.preventDefault(); onModerate(prompt.action, prompt.duration, reason) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); onClose() } }}>
-          <label htmlFor="mod-reason">{prompt.action === 'ban' ? 'Ban' : 'Timeout'} on {moderationPlatformLabel(menu.message)}. Reason is optional.</label>
+          <label htmlFor="mod-reason">{prompt.action === 'ban' ? 'Ban' : 'Timeout'} on {platformLabel}. Reason is optional.</label>
           <input id="mod-reason" ref={inputRef} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (optional)" />
           <div className="mod-menu-actions">
             <button type="submit" className={prompt.action === 'ban' ? 'danger' : undefined}>{prompt.action === 'ban' ? 'Ban' : 'Timeout'}</button>

@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fetchTimed } from './fetch-timed.js'
 
 /**
  * Reads YouTube live chat through the public site (InnerTube): the watch and
@@ -290,39 +291,65 @@ export function nextContinuation(payload: any): { continuation?: string; timeout
   return { ended: false, timeoutMs: 8000 }
 }
 
-async function fetchHtml(url: string) {
+const PAGE_FETCH_MS = 12_000
+
+export function isRequestTimeout(error: unknown) {
+  if (!(error instanceof Error)) return false
+  return error.name === 'TimeoutError' || error.name === 'AbortError' || /timed out|timeout/i.test(error.message)
+}
+
+async function fetchPage(url: string): Promise<{ html?: string; timedOut: boolean }> {
   try {
-    const response = await fetch(url, { headers: BROWSER_HEADERS })
-    if (!response.ok) return
-    return decodeHtml(await response.text())
-  } catch {
-    return
+    const response = await fetchTimed(url, { headers: BROWSER_HEADERS }, PAGE_FETCH_MS)
+    if (!response.ok) return { timedOut: false }
+    return { html: decodeHtml(await response.text()), timedOut: false }
+  } catch (error) {
+    return { timedOut: isRequestTimeout(error) }
   }
 }
 
-const youtubeBrowserMisses = new Set<string>()
+async function fetchHtml(url: string) {
+  const page = await fetchPage(url)
+  return page.html
+}
+
+export const YOUTUBE_BROWSER_MISS_TTL_MS = 5 * 60_000
+
+const youtubeBrowserMisses = new Map<string, number>()
 
 export function innerTubeRetryDelay(failures: number) {
   return Math.min(20_000, 2_000 * 2 ** Math.min(Math.max(0, failures), 4))
 }
 
-export function youtubeBrowserAllowed(videoId: string, missed: Set<string> = youtubeBrowserMisses) {
-  return !missed.has(videoId)
+export function noteYoutubeBrowserMiss(videoId: string, error: unknown, missed: Map<string, number> = youtubeBrowserMisses, now = Date.now()) {
+  if (!videoId || isRequestTimeout(error)) return
+  missed.set(videoId, now + YOUTUBE_BROWSER_MISS_TTL_MS)
 }
 
-async function fetchHtmlWithBrowser(url: string) {
+export function youtubeBrowserAllowed(videoId: string, missed: Map<string, number> | Set<string> = youtubeBrowserMisses, now = Date.now()) {
+  if (missed instanceof Set) return !missed.has(videoId)
+  const until = missed.get(videoId)
+  if (until == null) return true
+  if (until <= now) {
+    missed.delete(videoId)
+    return true
+  }
+  return false
+}
+
+async function fetchHtmlWithBrowser(url: string): Promise<{ html?: string; error?: unknown }> {
   const executablePath = browserPath()
   const chromium = await loadChromium()
-  if (!executablePath || !chromium) return
+  if (!executablePath || !chromium) return {}
   let browser: any
   try {
     browser = await chromium.launch({ headless: true, executablePath })
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, userAgent: BROWSER_HEADERS['User-Agent'] })
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    return decodeHtml(await page.content())
+    return { html: decodeHtml(await page.content()) }
   } catch (error) {
     console.error('YouTube chat page:', error instanceof Error ? error.message : error)
-    return
+    return { error }
   } finally {
     await browser?.close()
   }
@@ -348,30 +375,37 @@ function extractInitialPayload(html: string) {
 
 /** Load one live page, prefer the lightweight popout when it works, then extract the session plus any bootstrap of recent messages. */
 async function loadLivePage(videoId: string) {
+  let timedOut = false
   for (const url of [
     `https://www.youtube.com/live_chat?is_popout=1&v=${encodeURIComponent(videoId)}`,
     `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
   ]) {
-    let html = await fetchHtml(url)
+    const page = await fetchPage(url)
+    if (page.timedOut) timedOut = true
+    let html = page.html
     if (!html && youtubeBrowserAllowed(videoId)) {
-      html = await fetchHtmlWithBrowser(url)
-      if (!html) youtubeBrowserMisses.add(videoId)
+      const browser = await fetchHtmlWithBrowser(url)
+      if (browser.error && isRequestTimeout(browser.error)) timedOut = true
+      else if (!browser.html) noteYoutubeBrowserMiss(videoId, browser.error ?? new Error('browser miss'))
+      html = browser.html
     }
     if (!html) continue
     const session = extractSession(html, videoId)
     if (!session) continue
-      const initial = extractInitialPayload(html)
-      return {
-        session,
-        bootstrap: initial ? parseActions(initial, session.videoId) : [],
-        moderation: initial ? parseModerationActions(initial) : [],
-      }
+    youtubeBrowserMisses.delete(videoId)
+    const initial = extractInitialPayload(html)
+    return {
+      session,
+      bootstrap: initial ? parseActions(initial, session.videoId) : [],
+      moderation: initial ? parseModerationActions(initial) : [],
+    }
   }
+  if (timedOut) throw new Error('YouTube page timed out')
 }
 
 /** Poll the unofficial youtubei live-chat endpoint with the InnerTube session details extracted from the page. */
 async function pollLiveChat(session: Session) {
-  const response = await fetch(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?prettyPrint=false&key=${encodeURIComponent(session.apiKey)}`, {
+  const response = await fetchTimed(`https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?prettyPrint=false&key=${encodeURIComponent(session.apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...BROWSER_HEADERS },
     body: JSON.stringify({
@@ -386,7 +420,7 @@ async function pollLiveChat(session: Session) {
       },
       continuation: session.continuation,
     }),
-  })
+  }, PAGE_FETCH_MS)
   if (!response.ok) throw new Error(`InnerTube live chat ${response.status}`)
   return response.json() as Promise<any>
 }
@@ -439,7 +473,7 @@ export class YouTubeLiveChat {
     const handle = input.handle?.replace(/^@+/, '').trim()
     if (handle && !handle.includes(' ') && handle.toLowerCase() !== 'youtube') urls.push(`https://www.youtube.com/@${encodeURIComponent(handle)}/live`)
     for (const url of urls) {
-      const html = await fetchHtml(url) || await fetchHtmlWithBrowser(url)
+      const html = await fetchHtml(url) || (await fetchHtmlWithBrowser(url)).html
       if (!html) continue
       const videoId = extractVideoId(html)
       if (videoId) return { videoId, viewers: parseYouTubeViewers(html), title: parseYouTubeTitle(html) }
@@ -453,7 +487,7 @@ export class YouTubeLiveChat {
 
   async pageInfo(videoId: string): Promise<{ viewers?: number; title?: string } | undefined> {
     const watch = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`
-    const html = await fetchHtml(watch) || await fetchHtmlWithBrowser(watch)
+    const html = await fetchHtml(watch) || (await fetchHtmlWithBrowser(watch)).html
     if (!html) return
     return { viewers: parseYouTubeViewers(html), title: parseYouTubeTitle(html) }
   }

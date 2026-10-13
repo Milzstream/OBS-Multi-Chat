@@ -46,7 +46,7 @@ import {
   TWITCH_EVENTSUB_DEFAULT_URL,
   youtubeLiveChatBanSnippet,
 } from '../server/logic.js'
-import { chatroomIdFrom, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -154,6 +154,42 @@ describe('Kick chat and activity', () => {
     assert.equal(pickName({ username: 'Ada' }), 'Ada')
     assert.equal(parseJson('{"ok":true}').ok, true)
     assert.equal(parseJson('{nope}'), undefined)
+  })
+
+  it('times out a hung Kick page fetch', async () => {
+    await assert.rejects(
+      kickPageFetch('https://kick.com/api/v2/channels/ada', {}, (_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })))
+      }), 40),
+      /Request timed out after 40ms/,
+    )
+  })
+
+  it('drops a stuck socket before the next one opens', () => {
+    const calls: string[] = []
+    dropSocket({
+      removeAllListeners: () => { calls.push('remove') },
+      terminate: () => { calls.push('terminate') },
+    })
+    assert.deepEqual(calls, ['remove', 'terminate'])
+    dropSocket(undefined)
+  })
+
+  it('runs one avatar flush at a time and replays the in-flight task if another call arrives', async () => {
+    const lock = createFlushLock()
+    let runs = 0
+    let release: () => void = () => undefined
+    const done = lock.run(() => new Promise((resolve) => {
+      runs += 1
+      if (runs === 1) release = () => resolve()
+      else resolve()
+    }))
+    const overlap = lock.run(async () => { runs += 100 })
+    assert.equal(runs, 1)
+    release()
+    await done
+    await overlap
+    assert.equal(runs, 2)
   })
 
   it('maps follows, subs, gifts, kicks, and raids', () => {

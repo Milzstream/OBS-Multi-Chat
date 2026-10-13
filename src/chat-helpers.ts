@@ -220,6 +220,14 @@ export function moderationAcceptsReason(platform: string) {
   return platform === 'Twitch' || platform === 'Kick'
 }
 
+export function moderationNeedsDockConfirm(action: string, platforms: string[], reason: string | undefined) {
+  return action === 'ban' && reason === undefined && platforms.length > 0 && platforms.every((platform) => !moderationAcceptsReason(platform))
+}
+
+export function youtubeBanConfirmLabel(user: string, platformLabel: string) {
+  return `Ban ${user} on ${platformLabel}?`
+}
+
 /** Dock status line after a moderation call. Includes the reason only when one was sent. */
 export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban', user: string, reason?: string) {
   if (action === 'delete') return 'Message deleted'

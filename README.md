@@ -24,7 +24,7 @@ The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-
 4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the Relay Chat Dock window shows that path on every launch
 5. Start **Relay Chat Dock** from the Start Menu
 
-The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen. The download is only started when the asset URL is a GitHub release host and the file matches the release `sha256` digest.
+The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen. That Yes/No prompt does not freeze chat while it is open. The download is only started when the asset URL is a GitHub release host and the file matches the release `sha256` digest.
 
 **Portable zip**
 
@@ -211,13 +211,13 @@ Click **Connect** for each platform in either dock's settings. Each button opens
 
 ### Moderation
 
-Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch and Kick ask for an optional reason (up to 500 characters) before a ban or timeout. Leave it blank to send no reason. YouTube live chat bans have no reason field, so that prompt is hidden and a YouTube ban still asks you to confirm. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id.
+Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch and Kick ask for an optional reason (up to 500 characters) before a ban or timeout. Leave it blank to send no reason. YouTube live chat bans have no reason field. The dock asks you to confirm in place; Cancel does not ban, and the confirm does not use a system dialog. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id.
 
 ### Activity dock
 
 StreamElements is the source of truth. Paste one JWT per linked platform in the Relay Chat Dock window (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT reconnects StreamElements without restarting the companion.
 
-If a JWT is missing, the companion window and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** in the window if you only use some platforms. Dismissing the banner with × hides it for the current session only; a page refresh brings it back unless ignore is checked.
+If a JWT is missing, the companion window and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** in the window if you only use some platforms. Dismissing the banner with × hides that warning for the current session. A later, different warning still shows. A page refresh brings dismissed warnings back unless ignore is checked.
 
 The banner waits before it complains. StreamElements hydrates its JWTs over the network on start and after every saved JWT, and it cycles its own websocket, so those windows read as `Connecting…` in the Relay Chat Dock window and raise no alert. A websocket that is back and streaming inside 10 seconds never warns at all; only a longer outage does.
 
@@ -301,7 +301,7 @@ Loopback (this computer) can call every route with no token. Off this computer t
 
 ## Current platform status
 
-Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's public chat WebSocket after resolving the channel's chatroom id. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections.
+Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's public chat WebSocket after resolving the channel's chatroom id. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections.
 
 ## License
 

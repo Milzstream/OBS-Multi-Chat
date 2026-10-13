@@ -41,7 +41,10 @@ import {
   extractSession,
   extractVideoId,
   innerTubeRetryDelay,
+  isRequestTimeout,
+  noteYoutubeBrowserMiss,
   youtubeBrowserAllowed,
+  YOUTUBE_BROWSER_MISS_TTL_MS,
   nextContinuation,
   parseActions,
   parseModerationActions,
@@ -556,5 +559,17 @@ describe('YouTube InnerTube moderation', () => {
     missed.add('video')
     assert.equal(youtubeBrowserAllowed('video', missed), false)
     assert.equal(youtubeBrowserAllowed('other', missed), true)
+  })
+
+  it('does not keep a browser miss after a timeout, and expires a real miss', () => {
+    const missed = new Map<string, number>()
+    assert.equal(isRequestTimeout(new Error('Request timed out after 12000ms')), true)
+    assert.equal(isRequestTimeout(Object.assign(new Error('Timeout 30000ms exceeded'), { name: 'TimeoutError' })), true)
+    noteYoutubeBrowserMiss('video', new Error('Request timed out after 12000ms'), missed, 1_000)
+    assert.equal(youtubeBrowserAllowed('video', missed, 1_000), true)
+    noteYoutubeBrowserMiss('video', new Error('browser miss'), missed, 1_000)
+    assert.equal(youtubeBrowserAllowed('video', missed, 1_000), false)
+    assert.equal(youtubeBrowserAllowed('video', missed, 1_000 + YOUTUBE_BROWSER_MISS_TTL_MS), true)
+    assert.equal(missed.has('video'), false)
   })
 })

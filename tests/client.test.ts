@@ -3,7 +3,8 @@ import fs from 'node:fs'
 import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { assignTagPlatforms, chatProfileUrl, dockAvatarSrc, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { applySettingsPatch, mergeJwtDraft, mergePolledSettings, restoreSettingsKeys, settingsInFlightKeys, settingsSaveError } from '../src/ConsoleApp.tsx'
 import { activityDockFields, applyActivitySlice, chatDockFields, sseReconnectStillNeeded, sseSeqFromState, sseSeqIsGap, sseStateIsStale } from '../src/sse.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 import { ConnectionSettings } from '../src/ConnectionSettings.tsx'
@@ -221,6 +222,59 @@ describe('auto live check toggle', () => {
     assert.match(on, /Check live/)
     const off = render({ Twitch: false })
     assert.doesNotMatch(checkbox(off, 'Auto-check Twitch live'), /checked/)
+  })
+})
+
+describe('dock moderation confirm', () => {
+  it('asks for a YouTube ban in the dock and leaves Twitch on the reason prompt', () => {
+    assert.equal(moderationNeedsDockConfirm('ban', ['YouTube'], undefined), true)
+    assert.equal(moderationNeedsDockConfirm('ban', ['YouTube'], ''), false)
+    assert.equal(moderationNeedsDockConfirm('ban', ['Twitch'], undefined), false)
+    assert.equal(moderationNeedsDockConfirm('timeout', ['YouTube'], undefined), false)
+    assert.equal(youtubeBanConfirmLabel('Ada', 'YouTube'), 'Ban Ada on YouTube?')
+    assert.equal(moderationAcceptsReason('YouTube'), false)
+  })
+})
+
+describe('companion settings poll', () => {
+  const current = {
+    translateChat: true,
+    translateError: '',
+    activityFallback: true,
+    ignoreMissingJwt: false,
+    dropOldAlerts: false,
+    autoLiveCheck: { Twitch: true, Kick: true, YouTube: true },
+    streamelements: { connected: false, handle: '', connecting: true },
+    youtubeQuota: { used: 1, limit: 10000 },
+  }
+
+  it('keeps an in-flight toggle and an edited JWT when a poll returns the old value', () => {
+    const keys = settingsInFlightKeys({ translateChat: false, autoLiveCheck: { Kick: false } })
+    assert.deepEqual(keys, ['translateChat', 'autoLiveCheck.Kick'])
+    const optimistic = { ...current, translateChat: false, autoLiveCheck: { ...current.autoLiveCheck, Kick: false } }
+    const polled = mergePolledSettings(optimistic, {
+      translateChat: true,
+      activityFallback: false,
+      autoLiveCheck: { Twitch: true, Kick: true, YouTube: false },
+    }, new Set(keys))
+    assert.equal(polled.translateChat, false)
+    assert.equal(polled.activityFallback, false)
+    assert.equal(polled.autoLiveCheck.Kick, false)
+    assert.equal(polled.autoLiveCheck.YouTube, false)
+    const draft = mergeJwtDraft({ Twitch: 'pasted', Kick: '', YouTube: '' }, { Twitch: '', Kick: 'server', YouTube: 'yt' }, new Set(['Twitch']))
+    assert.equal(draft.Twitch, 'pasted')
+    assert.equal(draft.Kick, 'server')
+    assert.equal(draft.YouTube, 'yt')
+  })
+
+  it('applies the server value after the post settles, and shows the error body on failure', () => {
+    const optimistic = applySettingsPatch(current, { translateChat: false })
+    assert.equal(optimistic.translateChat, false)
+    const restored = restoreSettingsKeys(optimistic, current, ['translateChat'])
+    assert.equal(restored.translateChat, true)
+    assert.equal(settingsSaveError(false, 503, { error: 'watch bind failed' }), 'watch bind failed')
+    assert.equal(settingsSaveError(false, 500, {}), 'Could not save settings (500)')
+    assert.equal(settingsSaveError(true, 200, {}), '')
   })
 })
 
