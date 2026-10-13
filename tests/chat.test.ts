@@ -46,7 +46,7 @@ import {
   TWITCH_EVENTSUB_DEFAULT_URL,
   youtubeLiveChatBanSnippet,
 } from '../server/logic.js'
-import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, kickSocketShouldStay, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, kickRealtimePlan, kickRealtimeToken, kickSocketShouldStay, parseJson, parseKickChatMessage, pickName, readKickCentrifugoFrame, readKickSocketFrame } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -163,6 +163,23 @@ describe('Kick chat and activity', () => {
       }), 40),
       /Request timed out after 40ms/,
     )
+  })
+
+  it('uses Kick realtime credentials instead of the retired Pusher app', () => {
+    const plan = kickRealtimePlan({ data: { connections: [{ provider: 'centrifugo', credentials: { url: 'wss://realtime.example/connection/websocket' } }] } })
+    assert.equal(plan?.provider, 'centrifugo')
+    assert.equal(plan && 'url' in plan ? plan.url : '', 'wss://realtime.example/connection/websocket')
+    const pusher = kickRealtimePlan({ data: { connections: [{ provider: 'pusher', credentials: { app_key: 'abc', cluster: 'us2' } }] } })
+    assert.equal(pusher?.provider, 'pusher')
+    assert.match(pusher && 'url' in pusher ? pusher.url : '', /ws-us2\.pusher\.com\/app\/abc/)
+    assert.equal(kickRealtimeToken({ data: { token: 'jwt' } }), 'jwt')
+    assert.equal(readKickCentrifugoFrame('{}')?.kind, 'ping')
+    assert.equal(readKickCentrifugoFrame('{"id":1,"connect":{}}')?.kind, 'connected')
+    assert.equal(readKickCentrifugoFrame('{"id":2,"subscribe":{}}')?.kind, 'subscribed')
+    const publication = readKickCentrifugoFrame(JSON.stringify({ push: { channel: 'chatrooms.44.v2', pub: { data: { event: 'App\\Events\\ChatMessageEvent', data: { id: 'm1', content: 'hi', sender: { username: 'Ada' } } } } } }))
+    assert.equal(publication?.kind, 'publication')
+    if (publication?.kind === 'publication') assert.equal(readKickSocketFrame(publication.frame)?.message?.user, 'Ada')
+    assert.equal(readKickSocketFrame({ event: 'pusher:error', data: '{"code":4001,"message":"not in this cluster"}' })?.handshake, 'error')
   })
 
   it('drops a stuck socket before the next one opens, and does not replace one that is still connecting', () => {
