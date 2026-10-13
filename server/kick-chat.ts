@@ -138,9 +138,15 @@ export function createFlushLock() {
   }
 }
 
-export function dropSocket(socket?: { removeAllListeners: () => void; terminate: () => void }) {
+export function kickSocketShouldStay(readyState?: number) {
+  return readyState === WebSocket.CONNECTING || readyState === WebSocket.OPEN
+}
+
+export function dropSocket(socket?: { removeAllListeners: (event?: string) => void; on: (event: string, listener: () => void) => void; terminate: () => void }) {
   if (!socket) return
-  socket.removeAllListeners()
+  socket.removeAllListeners('message')
+  socket.removeAllListeners('close')
+  socket.on('error', () => undefined)
   try { socket.terminate() } catch { /* already closed */ }
 }
 
@@ -463,7 +469,7 @@ export class KickChat {
     } else if (cachedChatroomId && !this.chatroomId) {
       this.chatroomId = cachedChatroomId
     }
-    if (this.ws?.readyState === WebSocket.OPEN) return
+    if (kickSocketShouldStay(this.ws?.readyState)) return
     await this.connect()
   }
 
@@ -487,7 +493,9 @@ export class KickChat {
   }
 
   private async openSocket() {
+    if (kickSocketShouldStay(this.ws?.readyState)) return
     if (!this.chatroomId) this.chatroomId = await resolveKickChatroomId(this.slug!, this.chatroomId)
+    if (kickSocketShouldStay(this.ws?.readyState)) return
     await this.disconnectSocket()
     console.log(`Kick chat connecting (${this.slug})`)
     const socket = new WebSocket(PUSHER_URL)

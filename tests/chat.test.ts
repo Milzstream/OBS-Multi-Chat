@@ -46,7 +46,7 @@ import {
   TWITCH_EVENTSUB_DEFAULT_URL,
   youtubeLiveChatBanSnippet,
 } from '../server/logic.js'
-import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
+import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, kickSocketShouldStay, parseJson, parseKickChatMessage, pickName } from '../server/kick-chat.js'
 import { chat } from './helpers.js'
 
 describe('Twitch IRC', () => {
@@ -165,14 +165,19 @@ describe('Kick chat and activity', () => {
     )
   })
 
-  it('drops a stuck socket before the next one opens', () => {
+  it('drops a stuck socket before the next one opens, and does not replace one that is still connecting', () => {
     const calls: string[] = []
     dropSocket({
-      removeAllListeners: () => { calls.push('remove') },
+      removeAllListeners: (event) => { calls.push(`remove:${event}`) },
+      on: (event) => { calls.push(`on:${event}`) },
       terminate: () => { calls.push('terminate') },
     })
-    assert.deepEqual(calls, ['remove', 'terminate'])
+    assert.deepEqual(calls, ['remove:message', 'remove:close', 'on:error', 'terminate'])
     dropSocket(undefined)
+    assert.equal(kickSocketShouldStay(0), true)
+    assert.equal(kickSocketShouldStay(1), true)
+    assert.equal(kickSocketShouldStay(2), false)
+    assert.equal(kickSocketShouldStay(undefined), false)
   })
 
   it('runs one avatar flush at a time and replays the in-flight task if another call arrives', async () => {
