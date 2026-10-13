@@ -1,49 +1,18 @@
 const fs = require('fs')
 const path = require('path')
+const { stampAndVerifyWindowsExe } = require('./stamp-windows-exe.cjs')
 
 const version = require('../package.json').version
 const icon = path.resolve('assets/app-icon.ico')
-
-async function stampIcon(exePath) {
-  if (!fs.existsSync(exePath)) return
-  const { load } = require('resedit/cjs')
-  const ResEdit = await load()
-  const exe = ResEdit.NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true })
-  exe.newHeader.optionalHeader.subsystem = 2
-  const res = ResEdit.NtExecutableResource.from(exe)
-  if (fs.existsSync(icon)) {
-    const iconFile = ResEdit.Data.IconFile.from(fs.readFileSync(icon))
-    const groups = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
-    const groupId = groups[0] ? groups[0].id : 1
-    const lang = groups[0] ? groups[0].lang : 1033
-    ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
-      res.entries,
-      groupId,
-      lang,
-      iconFile.icons.map((item) => item.data),
-    )
-  }
-  const [major, minor, patch] = String(version).split('.').map((part) => Number(part) || 0)
-  const versionInfo = ResEdit.Resource.VersionInfo.fromEntries(res.entries)[0]
-  if (versionInfo) {
-    versionInfo.setFileVersion(major, minor, patch, 0, 1033)
-    versionInfo.setProductVersion(major, minor, patch, 0, 1033)
-    versionInfo.setStringValues({ lang: 1033, codepage: 1200 }, {
-      FileDescription: 'OBS multi-chat and activity dock',
-      ProductName: 'Relay Chat Dock',
-      CompanyName: 'Milzstream',
-      LegalCopyright: 'SEE LICENSE IN LICENSE',
-      OriginalFilename: 'relay-chat-dock.exe',
-      FileVersion: version,
-      ProductVersion: version,
-    })
-    versionInfo.outputToResourceEntries(res.entries)
-  }
-  res.outputResource(exe)
-  const stamped = `${exePath}.stamped`
-  fs.writeFileSync(stamped, Buffer.from(exe.generate()))
-  fs.copyFileSync(stamped, exePath)
-  fs.rmSync(stamped, { force: true })
+const stampMeta = {
+  version,
+  icon,
+  productName: 'Relay Chat Dock',
+  fileDescription: 'OBS multi-chat and activity dock',
+  company: 'Milzstream',
+  copyright: 'SEE LICENSE IN LICENSE',
+  originalFilename: 'relay-chat-dock.exe',
+  windowsSubsystem: 2,
 }
 
 function copyReplace(src, dest) {
@@ -118,12 +87,9 @@ else if (!fs.existsSync(deployEnv) && fs.existsSync('.env.example')) fs.copyFile
 fs.writeFileSync(path.resolve('deploy', 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
 fs.rmSync(built, { force: true })
 
-Promise.resolve()
-  .then(() => stampIcon(path.resolve('deploy', 'relay-chat-dock.exe')))
-  .then(() => {
-    if (!process.exitCode) console.log('Created deploy\\relay-chat-dock.exe')
-  })
-  .catch((error) => {
-    console.error('Could not stamp the executable icon:', error instanceof Error ? error.message : error)
-    process.exitCode = 1
-  })
+stampAndVerifyWindowsExe(path.resolve('deploy', 'relay-chat-dock.exe'), stampMeta).then((stamped) => {
+  if (!process.exitCode) console.log(`Created deploy\\relay-chat-dock.exe (${stamped.fileVersionRaw})`)
+}).catch((error) => {
+  console.error('Could not stamp the executable version:', error instanceof Error ? error.message : error)
+  process.exitCode = 1
+})

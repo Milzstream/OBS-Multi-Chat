@@ -1,46 +1,17 @@
 const fs = require('fs')
 const path = require('path')
+const { parseAppVersion, readWindowsVersion, stampAndVerifyWindowsExe } = require('./stamp-windows-exe.cjs')
 
 const version = require('../package.json').version
 const icon = path.resolve('assets/app-icon.ico')
-
-async function stampExeIcon(exePath) {
-  if (!fs.existsSync(exePath) || !fs.existsSync(icon)) return
-  const { load } = require('resedit/cjs')
-  const ResEdit = await load()
-  const exe = ResEdit.NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true })
-  const res = ResEdit.NtExecutableResource.from(exe)
-  const iconFile = ResEdit.Data.IconFile.from(fs.readFileSync(icon))
-  const groups = ResEdit.Resource.IconGroupEntry.fromEntries(res.entries)
-  const groupId = groups[0] ? groups[0].id : 1
-  const lang = groups[0] ? groups[0].lang : 1033
-  ResEdit.Resource.IconGroupEntry.replaceIconsForResource(
-    res.entries,
-    groupId,
-    lang,
-    iconFile.icons.map((item) => item.data),
-  )
-  const [major, minor, patch] = String(version).split('.').map((part) => Number(part) || 0)
-  const versionInfo = ResEdit.Resource.VersionInfo.fromEntries(res.entries)[0]
-  if (versionInfo) {
-    versionInfo.setFileVersion(major, minor, patch, 0, lang)
-    versionInfo.setProductVersion(major, minor, patch, 0, lang)
-    versionInfo.setStringValues({ lang, codepage: 1200 }, {
-      FileDescription: 'Relay Chat Dock',
-      ProductName: 'Relay Chat Dock',
-      CompanyName: 'Milzstream',
-      LegalCopyright: 'SEE LICENSE IN LICENSE',
-      OriginalFilename: 'relay-chat-dock.exe',
-      FileVersion: version,
-      ProductVersion: version,
-    })
-    versionInfo.outputToResourceEntries(res.entries)
-  }
-  res.outputResource(exe)
-  const stamped = `${exePath}.stamped`
-  fs.writeFileSync(stamped, Buffer.from(exe.generate()))
-  fs.copyFileSync(stamped, exePath)
-  fs.rmSync(stamped, { force: true })
+const stampMeta = {
+  version,
+  icon,
+  productName: 'Relay Chat Dock',
+  fileDescription: 'Relay Chat Dock',
+  company: 'Milzstream',
+  copyright: 'SEE LICENSE IN LICENSE',
+  originalFilename: 'relay-chat-dock.exe',
 }
 
 const unpacked = path.resolve('deploy-electron', 'win-unpacked')
@@ -56,13 +27,6 @@ const keptEnv = fs.existsSync(savedEnv) ? fs.readFileSync(savedEnv) : null
 const dataDir = path.join(deploy, 'data')
 const keptData = path.join(require('os').tmpdir(), `relay-deploy-data-${process.pid}`)
 if (fs.existsSync(dataDir)) fs.cpSync(dataDir, keptData, { recursive: true })
-fs.rmSync(deploy, { recursive: true, force: true })
-fs.cpSync(unpacked, deploy, { recursive: true })
-if (keptEnv) fs.writeFileSync(savedEnv, keptEnv)
-if (fs.existsSync(keptData)) {
-  fs.cpSync(keptData, dataDir, { recursive: true })
-  fs.rmSync(keptData, { recursive: true, force: true })
-}
 
 function envValues(text) {
   const values = {}
@@ -106,15 +70,33 @@ function mergeEnvFile(srcPath, destPath) {
   fs.writeFileSync(destPath, destText)
 }
 
-const deployEnv = path.join(deploy, 'production.env')
-if (fs.existsSync('.env.example')) fs.copyFileSync('.env.example', path.join(deploy, '.env.example'))
-if (fs.existsSync('production.env')) mergeEnvFile('production.env', deployEnv)
-else if (!fs.existsSync(deployEnv) && fs.existsSync('.env.example')) fs.copyFileSync('.env.example', deployEnv)
-else if (fs.existsSync('.env.example')) mergeEnvFile('.env.example', deployEnv)
-fs.writeFileSync(path.join(deploy, 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
-stampExeIcon(path.join(deploy, 'relay-chat-dock.exe')).then(() => {
-  console.log('Created deploy\\relay-chat-dock.exe')
-}).catch((error) => {
-  console.error('Could not stamp the executable icon:', error instanceof Error ? error.message : error)
+async function finishPack() {
+  // electron-builder leaves Electron's version (for example 33.4.11.0) because
+  // signAndEditExecutable is off. Stamp before copying into deploy.
+  await stampAndVerifyWindowsExe(exe, stampMeta)
+  fs.rmSync(deploy, { recursive: true, force: true })
+  fs.cpSync(unpacked, deploy, { recursive: true })
+  if (keptEnv) fs.writeFileSync(savedEnv, keptEnv)
+  if (fs.existsSync(keptData)) {
+    fs.cpSync(keptData, dataDir, { recursive: true })
+    fs.rmSync(keptData, { recursive: true, force: true })
+  }
+  const deployEnv = path.join(deploy, 'production.env')
+  if (fs.existsSync('.env.example')) fs.copyFileSync('.env.example', path.join(deploy, '.env.example'))
+  if (fs.existsSync('production.env')) mergeEnvFile('production.env', deployEnv)
+  else if (!fs.existsSync(deployEnv) && fs.existsSync('.env.example')) fs.copyFileSync('.env.example', deployEnv)
+  else if (fs.existsSync('.env.example')) mergeEnvFile('.env.example', deployEnv)
+  fs.writeFileSync(path.join(deploy, 'package.json'), `${JSON.stringify({ name: 'obs-multi-chat', version }, null, 2)}\n`)
+  const shipped = path.join(deploy, 'relay-chat-dock.exe')
+  const actual = await readWindowsVersion(shipped)
+  const expected = parseAppVersion(version)
+  if (!actual || actual.fileVersionRaw !== expected.fileVersion || actual.internalName !== stampMeta.originalFilename) {
+    await stampAndVerifyWindowsExe(shipped, stampMeta)
+  }
+  console.log(`Created deploy\\relay-chat-dock.exe (${expected.fileVersion})`)
+}
+
+finishPack().catch((error) => {
+  console.error('Could not stamp the executable version:', error instanceof Error ? error.message : error)
   process.exitCode = 1
 })
