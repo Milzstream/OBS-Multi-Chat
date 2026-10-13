@@ -16,6 +16,8 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
 
+**Use the latest release.** Twitch, Kick, and YouTube change their chat and APIs over time, and Relay tracks those changes in new builds. Kick chat is one example: this version uses Kick's current realtime WebSocket because the old Pusher app was retired. An older install is not guaranteed to keep working after a provider change.
+
 **Installer (recommended)**
 
 1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
@@ -301,7 +303,7 @@ Loopback (this computer) can call every route with no token. Off this computer t
 
 ## Current platform status
 
-Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's realtime WebSocket after resolving the channel's chatroom id. The old Pusher app is no longer accepted. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections.
+Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's realtime WebSocket after resolving the channel's chatroom id. The old Pusher app is no longer accepted. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections. Stay on the latest [release](https://github.com/Milzstream/OBS-Multi-Chat/releases) when a provider changes; older builds are not guaranteed to keep working.
 
 ## License
 
