@@ -5,10 +5,41 @@
 
 export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
-export type AlertSettings = { enabled: boolean; sound: boolean; displaySec: number; disabled: string[] }
+export type AlertSettings = { enabled: boolean; sound: boolean; showPlatform: boolean; displaySec: number; disabled: string[] }
 export type AlertEvent = { id: string; platform: string; kind: string; time: string }
 
-export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, displaySec: 5, disabled: [] }
+export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] }
+
+/** Platform-neutral wording and colors, so a pill never reveals which service the alert came from. */
+export function neutralAlertLabel(event: { platform: string; kind: string }) {
+  if (event.kind === 'follow') return 'FOLLOW'
+  if (event.platform === 'YouTube' && event.kind === 'subscription') return 'FOLLOW'
+  if (event.kind === 'subscription' || event.kind === 'membership') return 'SUBSCRIBER'
+  if (event.kind === 'gift') return 'GIFT'
+  if (event.kind === 'cheer' || event.kind === 'superchat') return 'CHEER'
+  if (event.kind === 'raid') return 'RAID'
+  if (event.kind === 'merch') return 'MERCH'
+  return 'DONATION'
+}
+
+const NEUTRAL_COLORS: Record<string, string> = {
+  FOLLOW: '#4aa3ff',
+  SUBSCRIBER: '#ff4d57',
+  GIFT: '#ff4d57',
+  CHEER: '#00d4ff',
+  RAID: '#f3af61',
+  MERCH: '#f3af61',
+  DONATION: '#f3af61',
+}
+
+export function neutralAlertColor(event: { platform: string; kind: string }) {
+  return NEUTRAL_COLORS[neutralAlertLabel(event)]
+}
+
+/** Rewrite platform-specific currency words in an alert subtitle. */
+export function neutralAlertText(text: string) {
+  return text.replace(/\bkicks?\b/gi, 'Bits')
+}
 
 /** An alert older than this when it first appears is backfill, not something that just happened. */
 export const ALERT_MAX_AGE_MS = 10 * 60 * 1000
@@ -66,6 +97,7 @@ export function parseAlertSettings(value: unknown): AlertSettings {
   return {
     enabled: raw.enabled === true,
     sound: raw.sound !== false,
+    showPlatform: raw.showPlatform !== false,
     displaySec: Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_ALERT_SETTINGS.displaySec,
     disabled: Array.isArray(raw.disabled) ? raw.disabled.filter((item): item is string => typeof item === 'string') : [],
   }

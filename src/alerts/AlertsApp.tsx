@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { KindIcon, PlatformMark, kindColor, platformColor, type ActivityEvent } from '../activity/ActivityRow'
 import { activityKindLabel, activitySubtitle } from '../activity/format'
 import { activityDockFields, subscribeDockSse } from '../sse'
-import { DEFAULT_ALERT_SETTINGS, alertSoundGroup, createAlertTracker, enqueueAlerts, isAlertAllowed, parseAlertSettings, type AlertSettings } from './alerts'
+import { DEFAULT_ALERT_SETTINGS, alertSoundGroup, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, type AlertSettings } from './alerts'
 import { playAlertSound } from './sounds'
 
 const GAP_MS = 400
@@ -67,8 +67,12 @@ export default function AlertsApp() {
 
   if (!current || !settings.enabled) return <main className="alerts-stage" />
   const source = current.source || current.platform
-  const color = platformColor[current.platform]
-  const detail = activitySubtitle(current)
+  const showPlatform = settings.showPlatform
+  const color = showPlatform ? platformColor[current.platform] : neutralAlertColor(current)
+  const badge = showPlatform ? kindColor(current) : neutralAlertColor(current)
+  const label = showPlatform ? activityKindLabel(current) : neutralAlertLabel(current)
+  const subtitle = activitySubtitle(current)
+  const detail = showPlatform ? subtitle : neutralAlertText(subtitle)
   return (
     <main className="alerts-stage">
       <div
@@ -76,13 +80,13 @@ export default function AlertsApp() {
         className="activity-row alert-pill"
         style={{ ['--row-color' as string]: color, ['--alert-sec' as string]: `${settings.displaySec}s` }}
       >
-        <span className="activity-icon" style={{ color: platformColor[source] }}><PlatformMark platform={source} size={18} /></span>
+        {showPlatform ? <span className="activity-icon" style={{ color: platformColor[source] }}><PlatformMark platform={source} /></span> : null}
         <span className="activity-icon" style={{ color }}><KindIcon kind={current.kind} /></span>
         <div className="activity-copy">
           <strong>{current.user}</strong>
           {detail ? <small>{detail}</small> : null}
         </div>
-        <span className="activity-kind" style={{ background: kindColor(current), color: '#fff' }}>{activityKindLabel(current)}</span>
+        <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{label}</span>
       </div>
     </main>
   )

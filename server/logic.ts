@@ -1604,7 +1604,7 @@ const ALERT_PLATFORMS = ['Twitch', 'Kick', 'YouTube', 'StreamElements']
 const ALERT_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'raid', 'donation', 'membership', 'superchat', 'merch']
 
 export function defaultAlertSettings(): AlertSettings {
-  return { enabled: false, sound: true, displaySec: 5, disabled: [] }
+  return { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] }
 }
 
 /** Clamp a display time to whole-or-half seconds the page can honor. */
@@ -1633,6 +1633,7 @@ export function parseAlertSettings(value: unknown): AlertSettings {
   return {
     enabled: parsed.enabled === true,
     sound: parsed.sound !== false,
+    showPlatform: parsed.showPlatform !== false,
     displaySec: clampAlertSeconds(parsed.displaySec, defaults.displaySec),
     disabled: parseAlertDisabled(parsed.disabled),
   }

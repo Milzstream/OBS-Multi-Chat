@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { alertSoundGroup, createAlertTracker, enqueueAlerts, isAlertAllowed, parseAlertSettings } from '../src/alerts/alerts.ts'
+import { alertSoundGroup, neutralAlertColor, neutralAlertLabel, neutralAlertText, createAlertTracker, enqueueAlerts, isAlertAllowed, parseAlertSettings } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
 import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAppSettings } from '../server/logic.js'
 
@@ -46,17 +46,28 @@ test('type filters and sound groups', () => {
 })
 
 test('client alert settings default to off with sound on', () => {
-  assert.deepEqual(parseAlertSettings(undefined), { enabled: false, sound: true, displaySec: 5, disabled: [] })
+  assert.deepEqual(parseAlertSettings(undefined), { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] })
 })
 
 test('server alert settings are validated and persisted shape', () => {
-  assert.deepEqual(defaultAppSettings().alerts, { enabled: false, sound: true, displaySec: 5, disabled: [] })
+  assert.deepEqual(defaultAppSettings().alerts, { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] })
   assert.equal(clampAlertSeconds(0), 1)
   assert.equal(clampAlertSeconds(999), 30)
   assert.equal(clampAlertSeconds('abc', 7), 7)
   assert.deepEqual(parseAlertDisabled(['Twitch:follow', 'Twitch:follow', 'Bogus:follow', 'Twitch:nope', 'Twitch:follow:x', 4]), ['Twitch:follow'])
-  const parsed = parseAppSettings({ alerts: { enabled: true, sound: false, displaySec: 8, disabled: ['Kick:cheer'] } })
-  assert.deepEqual(parsed.alerts, { enabled: true, sound: false, displaySec: 8, disabled: ['Kick:cheer'] })
+  const parsed = parseAppSettings({ alerts: { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'] } })
+  assert.deepEqual(parsed.alerts, { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'] })
+})
+
+test('platform-neutral labels, colors and text', () => {
+  assert.equal(neutralAlertLabel({ platform: 'YouTube', kind: 'subscription' }), 'FOLLOW')
+  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'follow' }), 'FOLLOW')
+  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'subscription' }), 'SUBSCRIBER')
+  assert.equal(neutralAlertLabel({ platform: 'YouTube', kind: 'membership' }), 'SUBSCRIBER')
+  assert.equal(neutralAlertLabel({ platform: 'YouTube', kind: 'superchat' }), 'CHEER')
+  assert.equal(neutralAlertLabel({ platform: 'Kick', kind: 'cheer' }), 'CHEER')
+  assert.equal(neutralAlertColor({ platform: 'YouTube', kind: 'subscription' }), neutralAlertColor({ platform: 'Twitch', kind: 'follow' }))
+  assert.equal(neutralAlertText('100 Kicks · hi'), '100 Bits · hi')
 })
 
 test('/alerts mounts the alert page', () => {

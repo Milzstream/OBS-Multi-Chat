@@ -36,6 +36,7 @@ export type AutoLiveCheck = Record<Platform, boolean>
 export type AlertSettings = {
   enabled: boolean
   sound: boolean
+  showPlatform: boolean
   displaySec: number
   disabled: string[]
 }

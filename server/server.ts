@@ -732,6 +732,7 @@ app.post('/api/settings', async (request, response) => {
     const next = { ...settings.alerts, disabled: [...settings.alerts.disabled] }
     if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
     if (typeof patch.sound === 'boolean') next.sound = patch.sound
+    if (typeof patch.showPlatform === 'boolean') next.showPlatform = patch.showPlatform
     if (patch.displaySec !== undefined) next.displaySec = clampAlertSeconds(patch.displaySec, next.displaySec)
     if (Array.isArray(patch.disabled)) next.disabled = parseAlertDisabled(patch.disabled)
     if (JSON.stringify(next) !== JSON.stringify(settings.alerts)) {

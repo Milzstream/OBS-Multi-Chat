@@ -506,6 +506,11 @@ export default function ConsoleApp() {
             <span>Play alert sounds</span>
             <input type="checkbox" checked={alerts.sound} onChange={() => void patchAlerts({ sound: !alerts.sound })} />
           </label>
+          <label className="settings-toggle">
+            <span>Show Platform</span>
+            <input type="checkbox" checked={alerts.showPlatform} onChange={() => void patchAlerts({ showPlatform: !alerts.showPlatform })} />
+          </label>
+          {!alerts.showPlatform ? <p className="settings-note">Platform icons and colors are hidden, and labels are generic (a YouTube subscriber reads FOLLOW, a member reads SUBSCRIBER).</p> : null}
           <label className="alert-time">
             <span>Display time (seconds)</span>
             <input
