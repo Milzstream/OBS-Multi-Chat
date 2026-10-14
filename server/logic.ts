@@ -9,6 +9,7 @@ import {
   KICK_OAUTH_SCOPES,
   TWITCH_OAUTH_SCOPES,
   YOUTUBE_OAUTH_SCOPES,
+  type AlertSettings,
   type AppSettings,
   type AutoLiveCheck,
   type ChatBadge,
@@ -1597,8 +1598,49 @@ export function shouldRunYouTubeMaintenance(options: { autoEnabled: boolean; man
   return options.chatConnected
 }
 
+export const ALERT_DISPLAY_MIN = 1
+export const ALERT_DISPLAY_MAX = 30
+const ALERT_PLATFORMS = ['Twitch', 'Kick', 'YouTube', 'StreamElements']
+const ALERT_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'raid', 'donation', 'membership', 'superchat', 'merch']
+
+export function defaultAlertSettings(): AlertSettings {
+  return { enabled: false, sound: true, displaySec: 5, disabled: [] }
+}
+
+/** Clamp a display time to whole-or-half seconds the page can honor. */
+export function clampAlertSeconds(value: unknown, fallback = 5) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number)) return fallback
+  return Math.min(ALERT_DISPLAY_MAX, Math.max(ALERT_DISPLAY_MIN, Math.round(number * 2) / 2))
+}
+
+/** Keep only well-formed `Platform:kind` keys, deduped. */
+export function parseAlertDisabled(value: unknown) {
+  if (!Array.isArray(value)) return []
+  const keys = new Set<string>()
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const [platform, kind, extra] = item.split(':')
+    if (extra === undefined && ALERT_PLATFORMS.includes(platform) && ALERT_KINDS.includes(kind)) keys.add(item)
+  }
+  return [...keys]
+}
+
+export function parseAlertSettings(value: unknown): AlertSettings {
+  const defaults = defaultAlertSettings()
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return defaults
+  const parsed = value as Partial<AlertSettings>
+  return {
+    enabled: parsed.enabled === true,
+    sound: parsed.sound !== false,
+    displaySec: clampAlertSeconds(parsed.displaySec, defaults.displaySec),
+    disabled: parseAlertDisabled(parsed.disabled),
+  }
+}
+
 export function defaultAppSettings(): AppSettings {
   return {
+    alerts: defaultAlertSettings(),
     activityFallback: true,
     ignoreMissingJwt: false,
     dropOldAlerts: false,
@@ -1614,6 +1656,7 @@ export function parseAppSettings(value: unknown): AppSettings {
   if (!value || typeof value !== 'object') return defaultAppSettings()
   const parsed = value as Partial<AppSettings>
   return {
+    alerts: parseAlertSettings(parsed.alerts),
     activityFallback: parsed.activityFallback !== false,
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,

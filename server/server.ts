@@ -32,6 +32,8 @@ import {
   applyLiveStreamDetails,
   collapseYouTubeDuplicates,
   defaultAppSettings,
+  clampAlertSeconds,
+  parseAlertDisabled,
   LIVE_STATUS_POLL_MS,
   mergeAutoLiveCheck,
   shouldPollLiveStatus,
@@ -126,6 +128,7 @@ import {
 } from './logic.js'
 import type {
   Account,
+  AlertSettings,
   AppSettings,
   ChatMessage,
   ChatModeration,
@@ -252,7 +255,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
+type State = { accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; alerts: AlertSettings; activityMax: number; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { lanEnabled: envLanEnabled } = resolveBindHost()
@@ -400,6 +403,8 @@ const state: State = {
   dropOldAlerts: settings.dropOldAlerts,
   translateChat: settings.translateChat,
   translateError: '',
+  alerts: { ...settings.alerts, disabled: [...settings.alerts.disabled] },
+  activityMax,
   autoLiveCheck: { ...settings.autoLiveCheck },
   youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
 }
@@ -479,7 +484,7 @@ function currentWatchUrl() {
 }
 app.get('/api/console', (_request, response) => {
   const base = `http://127.0.0.1:${port}`
-  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, lanEnabled: localApi.lanEnabled, watchUrl: currentWatchUrl() || null })
+  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, alertsUrl: `${base}/alerts`, lanEnabled: localApi.lanEnabled, watchUrl: currentWatchUrl() || null })
 })
 app.get('/api/logs', (request, response) => {
   const after = Number(request.query.after || 0)
@@ -666,7 +671,7 @@ app.post('/api/stream-info', async (request, response) => {
   }
 })
 app.post('/api/settings', async (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean }
+  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean; alerts?: Partial<AlertSettings> }
   let changed = false
   let watchError = ''
   const turnedOn: Platform[] = []
@@ -722,6 +727,19 @@ app.post('/api/settings', async (request, response) => {
       changed = true
     }
   }
+  if (body.alerts && typeof body.alerts === 'object' && !Array.isArray(body.alerts)) {
+    const patch = body.alerts
+    const next = { ...settings.alerts, disabled: [...settings.alerts.disabled] }
+    if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
+    if (typeof patch.sound === 'boolean') next.sound = patch.sound
+    if (patch.displaySec !== undefined) next.displaySec = clampAlertSeconds(patch.displaySec, next.displaySec)
+    if (Array.isArray(patch.disabled)) next.disabled = parseAlertDisabled(patch.disabled)
+    if (JSON.stringify(next) !== JSON.stringify(settings.alerts)) {
+      settings.alerts = next
+      state.alerts = { ...next, disabled: [...next.disabled] }
+      changed = true
+    }
+  }
   if (changed || watchChanged) saveSettings()
   if (changed) broadcast()
   const payload = {
@@ -730,6 +748,7 @@ app.post('/api/settings', async (request, response) => {
     dropOldAlerts: settings.dropOldAlerts,
     translateChat: settings.translateChat,
     autoLiveCheck: settings.autoLiveCheck,
+    alerts: settings.alerts,
     streamelements: state.streamelements,
     lanEnabled: localApi.lanEnabled,
     watchUrl: currentWatchUrl() || null,
@@ -2953,6 +2972,8 @@ function sseSettings() {
     dropOldAlerts: state.dropOldAlerts,
     translateChat: state.translateChat,
     translateError: state.translateError,
+    alerts: state.alerts,
+    activityMax: state.activityMax,
     autoLiveCheck: state.autoLiveCheck,
   }
 }

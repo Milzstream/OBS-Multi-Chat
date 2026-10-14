@@ -33,7 +33,7 @@ export const platformColor: Record<ActivityPlatform, string> = {
   StreamElements: '#f3af61',
 }
 
-function kindColor(event: ActivityEvent) {
+export function kindColor(event: ActivityEvent) {
   if (event.kind === 'follow') return platformColor[event.platform]
   if (event.kind === 'subscription' || event.kind === 'membership' || event.kind === 'gift') return '#ff4d57'
   if (event.kind === 'donation' || event.kind === 'merch') return '#f3af61'
@@ -49,7 +49,7 @@ export function PlatformMark({ platform, size = 13 }: { platform: ActivityPlatfo
   return <Bell size={size} strokeWidth={2.5} />
 }
 
-function KindIcon({ kind }: { kind: ActivityKind }) {
+export function KindIcon({ kind }: { kind: ActivityKind }) {
   const size = 13
   if (kind === 'follow') return <UserPlus size={size} />
   if (kind === 'gift') return <Gift size={size} />

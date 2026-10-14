@@ -1,0 +1,113 @@
+/**
+ * Pure logic for the on-stream alert page: which alert types can be toggled,
+ * which sound group an event plays, and the one-at-a-time arrival queue.
+ */
+
+export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
+export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
+export type AlertSettings = { enabled: boolean; sound: boolean; displaySec: number; disabled: string[] }
+export type AlertEvent = { id: string; platform: string; kind: string; time: string }
+
+export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, displaySec: 5, disabled: [] }
+
+/** An alert older than this when it first appears is backfill, not something that just happened. */
+export const ALERT_MAX_AGE_MS = 10 * 60 * 1000
+
+export const ALERT_TYPES: Record<AlertPlatform, readonly { kind: string; label: string }[]> = {
+  Twitch: [
+    { kind: 'follow', label: 'Follow' },
+    { kind: 'subscription', label: 'Subscription' },
+    { kind: 'gift', label: 'Gift subs' },
+    { kind: 'cheer', label: 'Cheer' },
+    { kind: 'raid', label: 'Raid' },
+  ],
+  Kick: [
+    { kind: 'follow', label: 'Follow' },
+    { kind: 'subscription', label: 'Subscription' },
+    { kind: 'gift', label: 'Gifted subs' },
+    { kind: 'cheer', label: 'KICKs' },
+    { kind: 'raid', label: 'Raid' },
+  ],
+  YouTube: [
+    { kind: 'subscription', label: 'Subscriber' },
+    { kind: 'membership', label: 'Member' },
+    { kind: 'gift', label: 'Gifted memberships' },
+    { kind: 'superchat', label: 'Super Chat' },
+  ],
+  StreamElements: [
+    { kind: 'donation', label: 'Donation' },
+    { kind: 'merch', label: 'Merch' },
+  ],
+}
+
+export const ALERT_PLATFORMS = Object.keys(ALERT_TYPES) as AlertPlatform[]
+
+export function alertKey(platform: string, kind: string) {
+  return `${platform}:${kind}`
+}
+
+export function isAlertAllowed(event: { platform: string; kind: string }, disabled: readonly string[]) {
+  return !disabled.includes(alertKey(event.platform, event.kind))
+}
+
+export function alertSoundGroup(kind: string): AlertSoundGroup {
+  if (kind === 'follow') return 'follow'
+  if (kind === 'subscription' || kind === 'membership' || kind === 'gift') return 'sub'
+  if (kind === 'cheer') return 'cheer'
+  if (kind === 'donation' || kind === 'merch') return 'donation'
+  if (kind === 'superchat') return 'superchat'
+  return 'raid'
+}
+
+export function parseAlertSettings(value: unknown): AlertSettings {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_ALERT_SETTINGS }
+  const raw = value as Partial<AlertSettings>
+  const seconds = Number(raw.displaySec)
+  return {
+    enabled: raw.enabled === true,
+    sound: raw.sound !== false,
+    displaySec: Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_ALERT_SETTINGS.displaySec,
+    disabled: Array.isArray(raw.disabled) ? raw.disabled.filter((item): item is string => typeof item === 'string') : [],
+  }
+}
+
+/**
+ * Remembers which events the page has already seen. The first snapshot only
+ * primes the set, so an OBS refresh never replays the feed. After that, every
+ * unseen id comes back oldest-first so alerts play in arrival order.
+ */
+export function createAlertTracker(now: () => number = Date.now) {
+  const seen = new Set<string>()
+  let primed = false
+  const remember = (id: string) => {
+    seen.add(id)
+    if (seen.size > 10_000) seen.delete(seen.values().next().value as string)
+  }
+  return {
+    primed: () => primed,
+    ingest<T extends AlertEvent>(events: readonly T[], prime = false): T[] {
+      if (prime && !primed) {
+        for (const event of events) remember(event.id)
+        primed = true
+        return []
+      }
+      if (!primed) return []
+      const fresh: T[] = []
+      for (const event of events) {
+        if (seen.has(event.id)) continue
+        remember(event.id)
+        const age = now() - (Date.parse(event.time) || now())
+        if (age > ALERT_MAX_AGE_MS) continue
+        fresh.push(event)
+      }
+      return fresh.sort((a, b) => (Date.parse(a.time) || 0) - (Date.parse(b.time) || 0))
+    },
+  }
+}
+
+/** Append in arrival order. When over the cap, the oldest waiting alerts are dropped. */
+export function enqueueAlerts<T>(queue: readonly T[], incoming: readonly T[], cap: number): T[] {
+  const next = [...queue, ...incoming]
+  const limit = Math.max(1, Math.floor(cap) || 1)
+  return next.length > limit ? next.slice(next.length - limit) : next
+}

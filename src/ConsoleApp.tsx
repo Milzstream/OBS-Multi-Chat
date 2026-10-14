@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { Twitch, Youtube } from 'lucide-react'
+import { Bell, Twitch, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
 import { postYoutubePrivacy, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
+import { ALERT_PLATFORMS, ALERT_TYPES, DEFAULT_ALERT_SETTINGS, alertKey, parseAlertSettings, type AlertPlatform, type AlertSettings } from './alerts/alerts'
 
 type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
-type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string; watchUrl?: string | null; lanEnabled?: boolean }
+type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string; alertsUrl?: string; watchUrl?: string | null; lanEnabled?: boolean }
 type AutoLiveCheck = Record<Platform, boolean>
 type Settings = {
   translateChat: boolean
@@ -156,6 +157,10 @@ export default function ConsoleApp() {
   const [youtubePrivacy, setYoutubePrivacy] = useState<YoutubePrivacyNotice[]>([])
   const [privacyStatus, setPrivacyStatus] = useState('')
   const [settingsError, setSettingsError] = useState('')
+  const [alerts, setAlerts] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS)
+  const [alertPlatform, setAlertPlatform] = useState<AlertPlatform | null>(null)
+  const [alertSecDraft, setAlertSecDraft] = useState<string | null>(null)
+  const alertsBusy = useRef(0)
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const settingsRef = useRef(settings)
@@ -188,7 +193,8 @@ export default function ConsoleApp() {
       const epoch = settingsEpoch.current
       void fetch('/api/state').then((response) => response.ok ? response.json() : null).then((data) => {
         if (cancelled || epoch !== settingsEpoch.current || !data || typeof data !== 'object') return
-        const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[] }
+        const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[]; alerts?: unknown }
+        if (remote.alerts && alertsBusy.current === 0) setAlerts(parseAlertSettings(remote.alerts))
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
         setSettings((current) => mergePolledSettings(current, remote, inFlightRef.current))
         if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
@@ -304,6 +310,43 @@ export default function ConsoleApp() {
     } catch { /* button stays as it was */ }
   }
 
+  const patchAlerts = async (patch: Partial<AlertSettings>) => {
+    const previous = alerts
+    setAlerts({ ...alerts, ...patch })
+    alertsBusy.current += 1
+    try {
+      const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alerts: patch }) })
+      const data = await response.json() as { alerts?: unknown }
+      if (!response.ok) throw new Error('save')
+      if (data.alerts) setAlerts(parseAlertSettings(data.alerts))
+      return true
+    } catch {
+      setAlerts(previous)
+      return false
+    } finally {
+      alertsBusy.current -= 1
+    }
+  }
+
+  const toggleAlerts = async () => {
+    const enabled = !alerts.enabled
+    const saved = await patchAlerts({ enabled })
+    if (saved && enabled && info?.alertsUrl) await copy('alerts', info.alertsUrl)
+  }
+
+  const commitAlertSeconds = () => {
+    if (alertSecDraft == null) return
+    const seconds = Number(alertSecDraft)
+    setAlertSecDraft(null)
+    if (Number.isFinite(seconds) && seconds > 0 && seconds !== alerts.displaySec) void patchAlerts({ displaySec: seconds })
+  }
+
+  const toggleAlertType = (platform: AlertPlatform, kind: string) => {
+    const key = alertKey(platform, kind)
+    const disabled = alerts.disabled.includes(key) ? alerts.disabled.filter((item) => item !== key) : [...alerts.disabled, key]
+    void patchAlerts({ disabled })
+  }
+
   const copy = async (label: string, value: string) => {
     try {
       await navigator.clipboard.writeText(value)
@@ -338,6 +381,16 @@ export default function ConsoleApp() {
           <button type="button" title={info?.envPath || 'Configuration file'} disabled={!info?.envPath} onClick={() => info?.envPath && void copy('config', info.envPath)}>{copied === 'config' ? 'Copied' : 'Config'}</button>
           <button type="button" title={info?.chatUrl || 'Chat dock URL'} disabled={!info?.chatUrl} onClick={() => info?.chatUrl && void copy('chat', info.chatUrl)}>{copied === 'chat' ? 'Copied' : 'Chat dock'}</button>
           <button type="button" title={info?.activityUrl || 'Activity dock URL'} disabled={!info?.activityUrl} onClick={() => info?.activityUrl && void copy('activity', info.activityUrl)}>{copied === 'activity' ? 'Copied' : 'Activity dock'}</button>
+          <button
+            type="button"
+            className={alerts.enabled ? 'watch-on' : 'watch-off'}
+            title={alerts.enabled ? `${info?.alertsUrl || 'Alerts are on'}\nRight-click to copy. Click to turn off.` : 'Turn on the on-stream alert page, one OBS browser source for every platform.'}
+            onClick={() => void toggleAlerts()}
+            onContextMenu={(event) => {
+              event.preventDefault()
+              if (info?.alertsUrl) void copy('alerts', info.alertsUrl)
+            }}
+          >{copied === 'alerts' ? 'Copied' : alerts.enabled ? 'Alerts on' : 'Alerts'}</button>
           <button
             type="button"
             className={info?.lanEnabled ? 'watch-on' : 'watch-off'}
@@ -444,7 +497,41 @@ export default function ConsoleApp() {
             <span>Drop alerts older than 30 days</span>
             <input type="checkbox" checked={settings.dropOldAlerts} onChange={() => patchSettings({ dropOldAlerts: !settings.dropOldAlerts })} />
           </label>
-
+          <div className="settings-divider" />
+          <span className="settings-section-title">ALERTS</span>
+          <p className="settings-note">
+            {alerts.enabled && info?.alertsUrl ? <>Add this as an OBS browser source and enable Control audio via OBS for sound: <code>{info.alertsUrl}</code></> : 'Use the Alerts button at the top to turn on the on-stream alert page.'}
+          </p>
+          <label className="settings-toggle">
+            <span>Play alert sounds</span>
+            <input type="checkbox" checked={alerts.sound} onChange={() => void patchAlerts({ sound: !alerts.sound })} />
+          </label>
+          <label className="alert-time">
+            <span>Display time (seconds)</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              step={0.5}
+              value={alertSecDraft ?? String(alerts.displaySec)}
+              onChange={(event) => setAlertSecDraft(event.target.value)}
+              onBlur={commitAlertSeconds}
+              onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commitAlertSeconds() } }}
+            />
+          </label>
+          <div className="alert-platforms">
+            {ALERT_PLATFORMS.map((platform) => (
+              <button key={platform} type="button" className={alertPlatform === platform ? 'active' : undefined} title={`${platform} alert types`} onClick={() => setAlertPlatform((current) => current === platform ? null : platform)}>
+                {platform === 'StreamElements' ? <Bell size={14} strokeWidth={2.5} /> : platformIcon(platform)}
+              </button>
+            ))}
+          </div>
+          {alertPlatform ? ALERT_TYPES[alertPlatform].map((type) => (
+            <label key={type.kind} className="settings-toggle">
+              <span>{type.label}</span>
+              <input type="checkbox" checked={!alerts.disabled.includes(alertKey(alertPlatform, type.kind))} onChange={() => toggleAlertType(alertPlatform, type.kind)} />
+            </label>
+          )) : null}
         </aside>
       </div>
     </main>

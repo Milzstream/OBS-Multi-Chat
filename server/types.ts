@@ -32,7 +32,16 @@ export type YoutubeQuota = { day: string; used: number; limit?: number; blockedU
 export type YoutubeQuotaStatus = { used: number; limit: number }
 /** Per-platform automatic live-status polls. Missing or true means on. Chat sockets are not gated by this. */
 export type AutoLiveCheck = Record<Platform, boolean>
+/** On-stream alert page settings. `disabled` holds `Platform:kind` keys the page skips. */
+export type AlertSettings = {
+  enabled: boolean
+  sound: boolean
+  displaySec: number
+  disabled: string[]
+}
+
 export type AppSettings = {
+  alerts: AlertSettings
   activityFallback: boolean
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
