@@ -185,7 +185,7 @@ a.activity-row { color: inherit; text-decoration: none; }
 .console-links button.watch-on { background: #24574c; color: #e8fff8; }
 .alerts-page, .alerts-page body, .alerts-page #root { background: transparent; }
 .alerts-page body { min-width: 0; min-height: 0; overflow: hidden; }
-.alerts-stage { display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; padding: 2.4vmin; box-sizing: border-box; font-size: min(3.4vw, 8vh); }
+.alerts-stage { display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; padding: 2.4vmin; box-sizing: border-box; font-size: min(5vw, 28vh); }
 .alert-pill { width: auto; min-width: 12em; max-width: 100%; margin: 0; padding: .6em .8em; gap: .5em; border-radius: .45em; font-size: 1em; opacity: 0; animation: alert-in .4s ease-out forwards, alert-out .4s ease-in forwards; animation-delay: 0s, calc(var(--alert-sec, 5s) - .4s); }
 .alert-pill .activity-copy strong { font-size: .85em; }
 .alert-pill .activity-copy small { font-size: .6em; white-space: normal; }
