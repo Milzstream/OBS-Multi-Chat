@@ -500,7 +500,7 @@ export default function ConsoleApp() {
           <div className="settings-divider" />
           <span className="settings-section-title">ALERTS</span>
           <p className="settings-note">
-            {alerts.enabled && info?.alertsUrl ? <>Add this as an OBS browser source and enable Control audio via OBS for sound: <code>{info.alertsUrl}</code></> : 'Use the Alerts button at the top to turn on the on-stream alert page.'}
+            {alerts.enabled ? 'Tip: set the OBS browser source to 1000 x 250 and enable Control audio via OBS for sound. Copy the URL from the Alerts button at the top.' : 'Use the Alerts button at the top to turn on the on-stream alert page.'}
           </p>
           <label className="settings-toggle">
             <span>Play alert sounds</span>

@@ -249,6 +249,10 @@ Activity history is stored locally in `data/activity.json` (last 5000 real event
 
 Click **Alerts** in the companion window to turn on `http://localhost:4173/alerts` (off by default; right-click **Alerts on** to copy the URL). Add it as one OBS **Browser** source. The page is transparent, ignores alerts already in the feed when it loads (so an OBS refresh does not replay), and shows each new alert as the activity pill, one at a time in arrival order. The queue holds as many alerts as the activity feed does; past that the oldest waiting ones are dropped. The **Alerts** section in the companion settings has a sound toggle (one short built-in clip per group: follow, sub/member, cheer/KICKs, donation/merch, Super Chat, raid), **Show Platform** (on by default; turn it off to hide platform icons and colors and use generic labels, so a YouTube subscriber reads FOLLOW and a member reads SUBSCRIBER), the display time (default 5 seconds), and platform buttons that open each platform's alert types so you can uncheck the ones to skip. Enable **Control audio via OBS** on the browser source or the sound never leaves the page. The pill scales with the browser source: its width and height set the size, so a 1000 x 250 source gives a roughly 800 px wide pill, and a bigger source makes a bigger pill. Use a wide, short size like that, place the source where you want alerts, and avoid a tiny one. The flask icon in the Activity dock emulates alerts, which also play here.
 
+![On-stream alert pill with platform icons and colors](docs/alerts-1.png)
+
+![On-stream alert pill with Show Platform off: generic colors, no platform icon](docs/alerts-2.png)
+
 ### Testing alerts
 
 1. Open the Activity dock and click the flask icon. That posts a StreamElements emulate (`POST /activities/{channel}/mock`) for the platform's JWT. The live overlay plays it, and the dock shows the row when the activities socket delivers it. This needs the matching StreamElements JWT.
