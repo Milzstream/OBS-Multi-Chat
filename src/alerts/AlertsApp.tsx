@@ -26,7 +26,15 @@ export default function AlertsApp() {
 
   useEffect(() => {
     const tracker = trackerRef.current
+    let bootId = ''
     const apply = (data: Record<string, unknown>, snapshot: boolean) => {
+      if (snapshot && typeof data.bootId === 'string') {
+        if (bootId && bootId !== data.bootId) {
+          window.location.reload()
+          return
+        }
+        bootId = data.bootId
+      }
       if ('alerts' in data) {
         const next = parseAlertSettings(data.alerts)
         settingsRef.current = next
