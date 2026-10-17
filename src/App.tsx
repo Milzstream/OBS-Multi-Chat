@@ -212,8 +212,8 @@ function App() {
     setStreamTitle(title)
     setStreamDetails(details)
     try {
-       const response = await fetch('/api/stream-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, Twitch: details.Twitch, Kick: details.Kick, YouTube: details.YouTube }) })
-       const result = await response.json() as { results: { platform: 'Twitch' | 'Kick' | 'YouTube'; ok: boolean; error?: string; warning?: string; skipped?: boolean }[] }
+      const response = await fetch('/api/stream-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, Twitch: details.Twitch, Kick: details.Kick }) })
+      const result = await response.json() as { results: { platform: 'Twitch' | 'Kick'; ok: boolean; error?: string; warning?: string; skipped?: boolean }[] }
       const rows = result.results || []
       const failed = rows.filter((item) => !item.ok)
       const warnings = rows.filter((item) => item.warning)
@@ -457,8 +457,8 @@ function UnifiedCategoryField({ twitch, kick, twitchEnabled, kickEnabled, onChan
 /** Chip input for stream tags. Destination toggles pick Twitch / Kick / YouTube for the next chip. */
 function TagEditor({ tags, disabled, connected, onChange }: { tags: TagAssignment[]; disabled: boolean; connected: Record<TagPlatform, boolean>; onChange: (tags: TagAssignment[]) => void }) {
   const [draft, setDraft] = useState('')
-  const [dest, setDest] = useState<Record<TagPlatform, boolean>>({ Twitch: true, Kick: true, YouTube: true })
-  const selected = (['Twitch', 'Kick', 'YouTube'] as TagPlatform[]).filter((platform) => dest[platform] && connected[platform])
+  const [dest, setDest] = useState<Record<TagPlatform, boolean>>({ Twitch: true, Kick: true })
+  const selected = (['Twitch', 'Kick'] as TagPlatform[]).filter((platform) => dest[platform] && connected[platform])
   const commit = (raw: string) => {
     const pieces = raw.split(/[\s,]+/).map((item) => item.trim().replace(/^#+/, '')).filter(Boolean)
     if (!pieces.length) return
@@ -494,7 +494,7 @@ function TagEditor({ tags, disabled, connected, onChange }: { tags: TagAssignmen
         }} onBlur={() => { if (draft.trim()) commit(draft) }} placeholder="Tags" />
       ) : null}
       <div className="tag-dest">
-        {(['Twitch', 'Kick', 'YouTube'] as TagPlatform[]).map((platform) => (
+        {(['Twitch', 'Kick'] as TagPlatform[]).map((platform) => (
           <button type="button" key={platform} className={dest[platform] ? 'active' : undefined} disabled={disabled || !connected[platform]} style={{ color: platformMeta[platform].color }} aria-pressed={dest[platform]} aria-label={`${platform} tags`} title={platform} onClick={() => setDest((current) => ({ ...current, [platform]: !current[platform] }))}>
             {platformIcon(platform, 12)}
           </button>
@@ -571,7 +571,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
   const youtubeConnected = Boolean(connections.find((connection) => connection.platform === 'YouTube')?.connected)
   const twitchConnected = Boolean(connections.find((connection) => connection.platform === 'Twitch')?.connected)
   const kickConnected = Boolean(connections.find((connection) => connection.platform === 'Kick')?.connected)
-  const tagsDisabled = !twitchConnected && !kickConnected && !youtubeConnected
+  const tagsDisabled = !twitchConnected && !kickConnected
   const youtubeChannelId = connections.find((connection) => connection.platform === 'YouTube')?.channelId
   const openYouTubeStudio = () => {
     void fetch('/api/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: youtubeStudioUrl(youtubeChannelId) }) }).catch((error) => console.error('Failed to open YouTube Studio:', error))
@@ -582,7 +582,6 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       ...current,
       Twitch: { ...current.Twitch, tags: tags.filter((item) => item.platforms.includes('Twitch')).map((item) => item.tag) },
       Kick: { ...current.Kick, tags: tags.filter((item) => item.platforms.includes('Kick')).map((item) => item.tag) },
-      YouTube: { ...current.YouTube, tags: tags.filter((item) => item.platforms.includes('YouTube')).map((item) => item.tag) },
     }))
   }
   return (
@@ -599,7 +598,7 @@ function StreamControls({ title, details, connections, onSave, onClose }: { titl
       <button type="button" className="controls-link" onClick={() => setSplitCategories((open) => !open)}>{splitCategories ? 'Use one category search' : 'Twitch / Kick separately'}</button>
       <div className="stream-fields">
         <div className="stream-fields-heading"><strong>Tags</strong></div>
-        <TagEditor tags={tagAssignments(draftDetails.Twitch.tags, draftDetails.Kick.tags, draftDetails.YouTube.tags)} disabled={tagsDisabled} connected={{ Twitch: twitchConnected, Kick: kickConnected, YouTube: youtubeConnected }} onChange={setTags} />
+        <TagEditor tags={tagAssignments(draftDetails.Twitch.tags, draftDetails.Kick.tags)} disabled={tagsDisabled} connected={{ Twitch: twitchConnected, Kick: kickConnected }} onChange={setTags} />
       </div>
       <button className="update-stream" disabled={saving} onClick={() => { void save() }}>{saving ? 'Saving...' : 'Set title, categories, and tags'}</button>
       {status ? <div className={`stream-status ${status.kind}`}>{status.text}</div> : null}

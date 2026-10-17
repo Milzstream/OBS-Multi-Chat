@@ -127,9 +127,9 @@ describe('chat dock helpers', () => {
   })
 
   it('marks which platforms can take a tag', () => {
-    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick', 'YouTube'])
-    assert.deepEqual(tagPlatforms('first-play'), ['Kick', 'YouTube'])
-    assert.deepEqual(tagPlatforms('こんにちは'), ['YouTube'])
+    assert.deepEqual(tagPlatforms('English'), ['Twitch', 'Kick'])
+    assert.deepEqual(tagPlatforms('first-play'), ['Kick'])
+    assert.deepEqual(tagPlatforms('こんにちは'), [])
     assert.deepEqual(assignTagPlatforms('English', []), [])
     assert.deepEqual(assignTagPlatforms('first-play', ['Twitch']), [])
     assert.deepEqual(assignTagPlatforms('English', ['Kick']), ['Kick'])

@@ -126,7 +126,7 @@ export function mergeCategoryResults(twitch: CategoryHit[], kick: CategoryHit[])
   })
 }
 
-export type TagPlatform = 'Twitch' | 'Kick' | 'YouTube'
+export type TagPlatform = 'Twitch' | 'Kick'
 
 /** Twitch: letters/numbers 1–25. Kick: those plus - _. No catalog/autocomplete APIs. */
 /** Destination toggles are authoritative. An empty selection does not fall through to every valid platform. */
@@ -138,9 +138,9 @@ export function assignTagPlatforms(tag: string, selected: TagPlatform[]): TagPla
 export function tagPlatforms(tag: string): TagPlatform[] {
   const value = tag.trim().replace(/^#+/, '')
   if (!value) return []
-  if (/^[A-Za-z0-9]{1,25}$/.test(value)) return ['Twitch', 'Kick', 'YouTube']
-  if (/^[A-Za-z0-9_-]{1,40}$/.test(value)) return ['Kick', 'YouTube']
-  return ['YouTube']
+  if (/^[A-Za-z0-9]{1,25}$/.test(value)) return ['Twitch', 'Kick']
+  if (/^[A-Za-z0-9_-]{1,40}$/.test(value)) return ['Kick']
+  return []
 }
 
 export type TagAssignment = { tag: string; platforms: TagPlatform[] }
@@ -156,7 +156,7 @@ export function moderationPlatformLabel(message: { platform: ChatPlatform; copie
   return message.platform
 }
 
-export function tagAssignments(twitch?: string[], kick?: string[], youtube?: string[]): TagAssignment[] {
+export function tagAssignments(twitch?: string[], kick?: string[]): TagAssignment[] {
   const map = new Map<string, TagAssignment>()
   const add = (list: string[] | undefined, platform: TagPlatform) => {
     for (const raw of list || []) {
@@ -171,7 +171,6 @@ export function tagAssignments(twitch?: string[], kick?: string[], youtube?: str
   }
   add(twitch, 'Twitch')
   add(kick, 'Kick')
-  add(youtube, 'YouTube')
   return [...map.values()]
 }
 
