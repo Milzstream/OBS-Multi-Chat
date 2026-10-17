@@ -51,6 +51,7 @@ import {
   kickModerationBanPayload,
   kickStreamDetails,
   normalizeTags,
+  descriptionWithTagLine,
   twitchTagsForApi,
   kickChannelPatch,
   looksLikePlaceholder,
@@ -139,6 +140,7 @@ import type {
   StreamElementsStatus,
   StreamInfoMap,
   StreamPlatform,
+  StreamInfoPlatform,
   Token,
   TokenPlatform,
   YoutubeQuota,
@@ -633,7 +635,8 @@ app.get('/api/categories/:platform', async (request, response) => {
   try { response.json(await searchCategories(platform, query)) } catch (error) { console.error(`${platform} category search:`, error); response.status(502).json({ error: 'Category search failed' }) }
 })
 app.post('/api/stream-info/:platform', async (request, response) => {
-  const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
+  const lower = request.params.platform.toLowerCase()
+  const platform = lower === 'twitch' ? 'Twitch' : lower === 'kick' ? 'Kick' : lower === 'youtube' ? 'YouTube' : undefined
   if (!platform) return response.status(404).json({ error: 'Unknown stream platform' })
   const { title, category, categoryId, tags } = request.body as Partial<StreamDetails>
   const normalizedTags = normalizeTags(tags)
@@ -652,14 +655,17 @@ app.post('/api/stream-info/:platform', async (request, response) => {
   }
 })
 app.post('/api/stream-info', async (request, response) => {
-  const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
+  const { title, Twitch, Kick, YouTube } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails; YouTube?: StreamDetails }
   const sharedTitle = String(title || '').trim()
-  const detailsByPlatform = {
+  const detailsByPlatform: Record<StreamInfoPlatform, StreamDetails> = {
     Twitch: { category: '', ...Twitch, title: sharedTitle, tags: normalizeTags(Twitch?.tags) || [] },
     Kick: { category: '', ...Kick, title: sharedTitle, tags: normalizeTags(Kick?.tags) || [] },
+    YouTube: { title: String(YouTube?.title || ''), category: String(YouTube?.category || ''), ...YouTube, tags: normalizeTags(YouTube?.tags) || [] },
   }
   try {
-    const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
+    const platforms: StreamInfoPlatform[] = ['Twitch', 'Kick']
+    if (YouTube?.tags?.length) platforms.push('YouTube')
+    const results = await Promise.all(platforms.map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
     let changed = false
     for (const result of results) {
       if (!result.ok || ('skipped' in result && result.skipped)) continue
@@ -2944,7 +2950,7 @@ async function searchCategories(platform: StreamPlatform, query: string) {
   return (result.data || []).map((item: any) => ({ id: String(item.id), name: item.name }))
 }
 
-async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
+async function updateStreamInfo(platform: StreamInfoPlatform, info: StreamDetails) {
   if (!tokens[platform]) return { platform, ok: false, error: 'Not connected' }
   if (platform === 'Twitch') {
     const token = await ensureToken('Twitch')
@@ -2965,6 +2971,30 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
       const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch.body) })
       if (!response.ok) return { platform, ok: false, error: await response.text() }
       return { platform, ok: true, ...(patch.warning ? { warning: patch.warning } : {}) }
+    } catch (error) {
+      return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  if (platform === 'YouTube') {
+    const token = await ensureToken('YouTube')
+    if (!token) return { platform, ok: false, error: 'Not connected' }
+    const ids = youtubeTargets.map((target) => target.videoId).filter(Boolean)
+    if (!ids.length) return { platform, ok: true, warning: 'No live YouTube broadcast to update' }
+    const tags = normalizeTags(info.tags) || []
+    try {
+      for (const videoId of ids) {
+        const current = await youtubeApi(`/videos?part=snippet&id=${encodeURIComponent(videoId)}`, token)
+        const item = current.items?.[0]
+        const snippet = item?.snippet
+        if (!snippet) continue
+        const description = descriptionWithTagLine(snippet.description, tags)
+        await youtubeApi('/videos?part=snippet', token, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: videoId, snippet: { title: snippet.title, description, categoryId: snippet.categoryId, tags: snippet.tags } }),
+        })
+      }
+      return { platform, ok: true }
     } catch (error) {
       return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
     }
