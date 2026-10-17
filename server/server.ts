@@ -311,7 +311,9 @@ const oauthStates = createOAuthStateStore()
 const youtubeSeen = new Set<string>()
 const youtubeChatLabels = new Map<string, string>()
 const liveCheckLocks = new Map<Platform, Promise<void>>()
-let livePollInFlight = false
+let twitchLivePollInFlight = false
+let youtubeLivePollInFlight = false
+let kickLivePollInFlight = false
 const twitchBadgeUrls = new Map<string, string>()
 const twitchAvatars = new Map<string, string>()
 const twitchAvatarPending = new Set<string>()
@@ -2211,58 +2213,84 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
 }
 
 async function pollLiveState() {
-  if (livePollInFlight) return
-  livePollInFlight = true
-  try {
-  try {
   const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
   const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
   const twitchWasLive = Boolean(twitchAccount?.live)
   const kickWasLive = Boolean(kickAccount?.live)
-  // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
+  // Poll each platform independently so a slow YouTube or Twitch poll cannot
+  // delay Kick's live/offline update. Per-platform guards prevent overlapping
+  // polls for the same platform.
+  const tasks: Promise<void>[] = []
   if (tokens.Twitch) {
-    if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
-      try { await pollTwitch(); logPolledLive('Twitch'); if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('Twitch poll:', message)
-        if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
-        ensureTwitchChat()
+    tasks.push((async () => {
+      if (twitchLivePollInFlight) return
+      twitchLivePollInFlight = true
+      try {
+        // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
+        if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
+          try { await pollTwitch(); logPolledLive('Twitch'); if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true; if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('Twitch poll:', message)
+            if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
+            ensureTwitchChat()
+          }
+        } else ensureTwitchChat()
+      } finally {
+        twitchLivePollInFlight = false
       }
-    } else ensureTwitchChat()
+    })())
   }
-  if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
-  if (tokens.YouTube && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) try {
-    const checked = await pollYouTube()
-    if (checked) logPolledLive('YouTube')
-    if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
-  } catch (error) {
-    if (noteYouTubeQuota(error)) { /* site chat continues */ }
-    else {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('YouTube poll:', message)
-      if (!youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
-    }
+  if (tokens.YouTube && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) {
+    tasks.push((async () => {
+      if (youtubeLivePollInFlight) return
+      youtubeLivePollInFlight = true
+      try {
+        try {
+          const checked = await pollYouTube()
+          if (checked) logPolledLive('YouTube')
+          if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
+        } catch (error) {
+          if (noteYouTubeQuota(error)) { /* site chat continues */ }
+          else {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('YouTube poll:', message)
+            if (!youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
+          }
+        }
+      } finally {
+        youtubeLivePollInFlight = false
+      }
+    })())
   }
   if (tokens.Kick) {
-    if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
-      try { await pollKick(); logPolledLive('Kick'); if (kickChat.connected) setHealth('Kick', 'ok'); else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        console.error('Kick poll:', message)
-        if (kickChat.connected) setHealth('Kick', 'warn', 'Kick status poll failed')
-        else setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
+    tasks.push((async () => {
+      if (kickLivePollInFlight) return
+      kickLivePollInFlight = true
+      try {
+        if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
+          try { await pollKick(); logPolledLive('Kick'); if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true; if (kickChat.connected) setHealth('Kick', 'ok'); else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('Kick poll:', message)
+            if (kickChat.connected) setHealth('Kick', 'warn', 'Kick status poll failed')
+            else setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
+          }
+          broadcast()
+        } else maintainKickChat()
+      } finally {
+        kickLivePollInFlight = false
       }
-    } else maintainKickChat()
+    })())
   }
-  if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
-  persistStreamInfo()
-  refreshChatHealth()
-  broadcast()
+  try {
+    await Promise.allSettled(tasks)
+    if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
+    if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
+    persistStreamInfo()
+    refreshChatHealth()
+    broadcast()
   } catch (error) {
     // A locked settings file or a thrown status poll must not reject void pollLiveState() and exit.
     console.error('Live status poll:', error instanceof Error ? error.message : error)
-  }
-  } finally {
-    livePollInFlight = false
   }
 }
 
