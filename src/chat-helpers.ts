@@ -7,13 +7,26 @@
 
 export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
 
-/** Rewrite Kick CDN avatar URLs through the local `/api/media` proxy so OBS's sandboxed renderer can load them. */
+/** Platform image CDNs the OBS dock cannot hotlink; keep in sync with `isSafeMediaUrl`. */
+function dockMediaHost(host: string) {
+  return host === 'files.kick.com'
+    || host === 'static-cdn.jtvnw.net'
+    || host === 'yt3.ggpht.com'
+    || host === 'yt4.ggpht.com'
+    || host === 'yt3.googleusercontent.com'
+    || host.endsWith('.kick.com')
+    || host.endsWith('.ggpht.com')
+    || host.endsWith('.googleusercontent.com')
+}
+
+/** Rewrite platform CDN avatar URLs through the local `/api/media` proxy so OBS's sandboxed renderer can load them. */
 export function dockAvatarSrc(url?: string) {
   if (!url) return
   try {
     const href = url.startsWith('//') ? `https:${url}` : url
+    if (href.startsWith('/api/media?')) return href
     const host = new URL(href).hostname.toLowerCase()
-    if (host === 'files.kick.com' || host.endsWith('.kick.com')) return `/api/media?u=${encodeURIComponent(href)}`
+    if (dockMediaHost(host)) return `/api/media?u=${encodeURIComponent(href)}`
   } catch { return url }
   return url
 }

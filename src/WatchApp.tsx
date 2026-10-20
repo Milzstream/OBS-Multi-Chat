@@ -215,9 +215,9 @@ export default function WatchApp() {
 }
 
 function WatchAvatar({ name, src, color }: { name: string; src?: string; color: string }) {
-  const [failed, setFailed] = useState(false)
-  const showImage = Boolean(src) && !failed
-  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : displayLetter(name)}</div>
+  const [failedSrc, setFailedSrc] = useState<string>()
+  const showImage = Boolean(src) && src !== failedSrc
+  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : displayLetter(name)}</div>
 }
 
 function WatchMessage({ message, rowIndex, channelLogin, showTranslationMark, token }: { message: ChatMessage; rowIndex: number; channelLogin?: string; showTranslationMark: boolean; token: string }) {
@@ -231,7 +231,7 @@ function WatchMessage({ message, rowIndex, channelLogin, showTranslationMark, to
       <div className="message-body">
         <div className="message-meta">
           <span className="platform-dot">{platforms.map((platform) => <span key={platform} style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 11)}</span>)}</span>
-          {(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={badge.url} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}
+          {(message.badges || []).map((badge, index) => badge.url ? <img key={`${badge.title}-${index}`} className="chat-badge" src={watchMediaSrc(badge.url, token)} alt={badge.title} title={badge.title} referrerPolicy="no-referrer" /> : badge.label ? <span key={`${badge.title}-${index}`} className="chat-badge-label" title={badge.title}>{badge.label}</span> : null)}
           {profileUrl
             ? <a className="clickable-username" href={profileUrl} target="_blank" rel="noopener noreferrer" title={profileLinkTitle(message.platform)}><strong style={message.color ? { color: message.color } : undefined}>{name}</strong></a>
             : <strong style={message.color ? { color: message.color } : undefined}>{name}</strong>}

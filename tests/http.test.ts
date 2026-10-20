@@ -139,7 +139,10 @@ describe('profile URL allowlist and Windows open args', () => {
     assert.equal(parseOpenUrl('https://example.com').ok, false)
     assert.equal(parseOpenUrl('https://www.twitch.tv/popout/milz/viewercard/ada').ok, true)
     assert.equal(isSafeMediaUrl('https://files.kick.com/images/user/1/x.webp'), true)
+    assert.equal(isSafeMediaUrl('https://static-cdn.jtvnw.net/jtv_user_pictures/x.png'), true)
+    assert.equal(isSafeMediaUrl('https://yt4.ggpht.com/ytc/abc=s88-c-k'), true)
     assert.equal(isSafeMediaUrl('https://evil.example/x.webp'), false)
+    assert.equal(isSafeMediaUrl('https://ggpht.com.evil.example/x.webp'), false)
     assert.equal(isSafeMediaUrl('http://files.kick.com/x.webp'), false)
   })
 

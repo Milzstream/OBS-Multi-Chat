@@ -14,9 +14,12 @@ import { nextPinState } from '../src/autoScroll.tsx'
 import { indexFromRows, scrollTopForIndex, virtualWindow } from '../src/virtualList.ts'
 
 describe('chat dock helpers', () => {
-  it('proxies Kick CDN avatars through the local media route', () => {
+  it('proxies Kick, Twitch, and YouTube CDN avatars through the local media route', () => {
     assert.equal(dockAvatarSrc('https://files.kick.com/images/user/1/a.webp'), '/api/media?u=https%3A%2F%2Ffiles.kick.com%2Fimages%2Fuser%2F1%2Fa.webp')
-    assert.equal(dockAvatarSrc('https://static-cdn.jtvnw.net/jtv_user_pictures/x.png'), 'https://static-cdn.jtvnw.net/jtv_user_pictures/x.png')
+    assert.equal(dockAvatarSrc('https://static-cdn.jtvnw.net/jtv_user_pictures/x.png'), '/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fjtv_user_pictures%2Fx.png')
+    assert.equal(dockAvatarSrc('https://yt4.ggpht.com/ytc/abc=s88-c-k'), '/api/media?u=https%3A%2F%2Fyt4.ggpht.com%2Fytc%2Fabc%3Ds88-c-k')
+    assert.equal(dockAvatarSrc('/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fx.png'), '/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fx.png')
+    assert.equal(dockAvatarSrc('https://evil.example/a.png'), 'https://evil.example/a.png')
     assert.equal(dockAvatarSrc(undefined), undefined)
   })
 

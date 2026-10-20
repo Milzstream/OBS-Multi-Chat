@@ -415,16 +415,19 @@ export function isSafeExternalUrl(raw: string) {
   return false
 }
 
-const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt3.googleusercontent.com'])
+const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt4.ggpht.com', 'yt3.googleusercontent.com'])
+const MEDIA_HOST_SUFFIXES = ['.kick.com', '.ggpht.com', '.googleusercontent.com']
 
-/** Allowlist avatar/media URLs to a fixed set of platform image hosts the docks are allowed to hotlink. */
+/** Allowlist avatar/media URLs to platform image hosts the docks load through `/api/media`. Keep in sync with `dockAvatarSrc`. */
 export function isSafeMediaUrl(raw: string) {
   if (typeof raw !== 'string' || !raw || raw.length > 2048) return false
   let parsed: URL
   try { parsed = new URL(raw) } catch { return false }
   if (parsed.protocol !== 'https:') return false
   if (parsed.username || parsed.password) return false
-  return MEDIA_HOSTS.has(parsed.hostname.toLowerCase())
+  const host = parsed.hostname.toLowerCase()
+  if (MEDIA_HOSTS.has(host)) return true
+  return MEDIA_HOST_SUFFIXES.some((suffix) => host.endsWith(suffix) && host.length > suffix.length)
 }
 
 export function parseOpenUrl(raw: unknown): { ok: true; url: string } | { ok: false; error: string } {
