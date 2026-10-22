@@ -11,6 +11,8 @@
     "dev:app": "npm run build && electron .",
     "start": "tsx server/server.ts",
     "test": "node scripts/run-tests.mjs",
+    "test:chat": "node scripts/run-tests.mjs tests/chat.test.ts tests/twitch-irc.test.ts tests/kick-chat.test.ts tests/moderation.test.ts",
+    "test:youtube": "node scripts/run-tests.mjs tests/youtube-send.test.ts tests/youtube-quota.test.ts tests/youtube-privacy.test.ts tests/youtube-ingest.test.ts tests/youtube-innertube.test.ts",
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
     "package:win": "npm run build && electron-builder --win dir && node scripts/finish-electron-pack.cjs",

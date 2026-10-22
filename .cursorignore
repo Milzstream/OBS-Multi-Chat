@@ -1,0 +1,12 @@
+# Local build trees and vendor dirs. Keep these out of AI file listings
+# even when they exist on disk (they are also gitignored).
+node_modules/
+deploy/
+deploy-electron/
+dist/
+dist-server/
+dist-package/
+release-staging/
+*.exe
+*.zip
+*.tsbuildinfo

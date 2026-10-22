@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Twitch, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
+import type { Account as Connection, AutoLiveCheck, Platform } from '../server/types'
 import { postYoutubePrivacy, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 import { ALERT_PLATFORMS, ALERT_TYPES, DEFAULT_ALERT_SETTINGS, alertKey, parseAlertSettings, type AlertPlatform, type AlertSettings } from './alerts/alerts'
 
-type Platform = 'Twitch' | 'Kick' | 'YouTube'
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
 type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string; alertsUrl?: string; watchUrl?: string | null; lanEnabled?: boolean }
-type AutoLiveCheck = Record<Platform, boolean>
 type Settings = {
   translateChat: boolean
   translateError: string
@@ -21,7 +20,6 @@ type Settings = {
 }
 
 const JWT_PLATFORMS: Platform[] = ['Twitch', 'Kick', 'YouTube']
-type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
 const emptyConnections: Connection[] = [
   { platform: 'Twitch', viewers: 0, handle: '', connected: false, live: false },
   { platform: 'Kick', viewers: 0, handle: '', connected: false, live: false },

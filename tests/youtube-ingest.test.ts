@@ -4,7 +4,6 @@ import {
   chatTextMatches,
   collapseYouTubeDuplicates,
   foldChatText,
-  isEndedYouTubeChat,
   isOwnChatMessage,
   isStoredChatMessage,
   isTruncatedText,
@@ -12,180 +11,14 @@ import {
   applyOutgoingSendResult,
   mergeIncomingChat,
   youtubeInsertedMessageId,
-  parseYouTubeQuotaInput,
   preferChatText,
-  quotaWarnAt,
-  resolveYouTubeLiveChatIds,
-  syncYouTubeTokenChatIds,
-  youtubeApiErrorReason,
-  youtubeBadges,
-  youtubeLiveChatMessageBody,
   youtubeOfficialModeration,
   youtubeOfficialToActivity,
-  youtubeQuotaCost,
-  youtubeQuotaHealthStatus,
-  youtubePrivacyMessage,
-  youtubePrivacyNotices,
-  youtubePrivacyRecheckIds,
-  youtubePublicVideoBody,
-  nextYoutubePrivacyWatch,
-  youtubeQuotaLabel,
   youtubeSameAuthor,
   youtubeSameChatFor,
-  youtubeSendGuard,
   youtubeTitleIsShorts,
 } from '../server/logic.js'
-import {
-  authorBadges,
-  classifyChatItem,
-  extractSession,
-  extractVideoId,
-  innerTubeRetryDelay,
-  isRequestTimeout,
-  noteYoutubeBrowserMiss,
-  youtubeBrowserAllowed,
-  YOUTUBE_BROWSER_MISS_TTL_MS,
-  nextContinuation,
-  parseActions,
-  parseModerationActions,
-  parseYouTubeTitle,
-  parseYouTubeViewers,
-  youtubeViewersWhileLive,
-  expandRunText,
-  runLinkUrl,
-  runsToParts,
-} from '../server/youtube-chat.js'
 import { chat, own } from './helpers.js'
-
-describe('YouTube send', () => {
-  it('resolves live chat ids from targets after the Shorts labeling change', () => {
-    const token = { liveChatId: undefined as string | undefined, liveChatIds: [] as string[] }
-    const targets = [
-      { videoId: 'abcdefghijk', liveChatId: 'CHAT_LIVE' },
-      { videoId: 'lmnopqrstuv', liveChatId: 'CHAT_SHORTS' },
-    ]
-    assert.deepEqual(resolveYouTubeLiveChatIds(targets, token), ['CHAT_LIVE', 'CHAT_SHORTS'])
-    assert.deepEqual(resolveYouTubeLiveChatIds([], token), [])
-    syncYouTubeTokenChatIds(targets, token)
-    assert.equal(token.liveChatId, 'CHAT_LIVE')
-    assert.deepEqual(token.liveChatIds, ['CHAT_LIVE', 'CHAT_SHORTS'])
-    assert.deepEqual(resolveYouTubeLiveChatIds([], token), ['CHAT_LIVE', 'CHAT_SHORTS'])
-  })
-
-  it('prefers target chat ids over a stale token', () => {
-    const token = { liveChatId: 'OLD', liveChatIds: ['OLD'] }
-    const targets = [{ videoId: 'abcdefghijk', liveChatId: 'NEW' }]
-    assert.deepEqual(resolveYouTubeLiveChatIds(targets, token), ['NEW'])
-    syncYouTubeTokenChatIds(targets, token)
-    assert.equal(token.liveChatId, 'NEW')
-  })
-
-  it('clears token chat ids when there are no live targets', () => {
-    const token = { liveChatId: 'STALE', liveChatIds: ['STALE'] }
-    syncYouTubeTokenChatIds([], token)
-    assert.equal(token.liveChatId, undefined)
-    assert.deepEqual(token.liveChatIds, [])
-    assert.deepEqual(resolveYouTubeLiveChatIds([], token), [])
-  })
-
-  it('blocks sending when chat ids are missing or quota is exhausted', () => {
-    assert.deepEqual(youtubeSendGuard({ connected: false, quotaBlocked: false, chatIds: ['x'] }), { ok: false, error: 'Not connected' })
-    assert.deepEqual(youtubeSendGuard({ connected: true, quotaBlocked: true, chatIds: ['x'] }), { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' })
-    assert.deepEqual(youtubeSendGuard({ connected: true, quotaBlocked: false, chatIds: [] }), { ok: false, error: 'YouTube chat is not live' })
-    assert.deepEqual(youtubeSendGuard({ connected: true, quotaBlocked: false, chatIds: ['CHAT'] }), { ok: true })
-  })
-
-  it('builds the official liveChatMessages.insert body', () => {
-    assert.deepEqual(youtubeLiveChatMessageBody('CHAT', 'hello'), {
-      snippet: { liveChatId: 'CHAT', type: 'textMessageEvent', textMessageDetails: { messageText: 'hello' } },
-    })
-  })
-})
-
-describe('YouTube quota', () => {
-  it('charges the documented unit costs', () => {
-    assert.equal(youtubeQuotaCost('/liveBroadcasts?part=snippet'), 1)
-    assert.equal(youtubeQuotaCost('/liveBroadcasts?part=snippet', 'PUT'), 50)
-    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'GET'), 1)
-    assert.equal(youtubeQuotaCost('/liveChat/messages?part=snippet', 'POST'), 50)
-    assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'POST'), 50)
-    assert.equal(youtubeQuotaCost('/liveChat/bans?part=snippet', 'DELETE'), 50)
-    assert.equal(youtubeQuotaCost('/channels?mine=true'), 1)
-    assert.equal(youtubeQuotaCost('/videos?id=abc'), 1)
-    assert.equal(youtubeQuotaCost('/videos?part=status', 'PUT'), 50)
-    assert.equal(youtubeQuotaCost('/unmapped-endpoint', 'GET'), 1)
-  })
-
-  it('labels insert vs list vs delete', () => {
-    assert.equal(youtubeQuotaLabel('/liveChat/messages?part=snippet', 'POST'), 'liveChatMessages.insert')
-    assert.equal(youtubeQuotaLabel('/liveChat/messages?liveChatId=x', 'GET'), 'liveChatMessages.list')
-    assert.equal(youtubeQuotaLabel('/liveChat/messages?id=x', 'DELETE'), 'liveChatMessages.delete')
-    assert.equal(youtubeQuotaLabel('/liveChat/bans?part=snippet', 'POST'), 'liveChatBans.insert')
-    assert.equal(youtubeQuotaLabel('/videos?chart=mostPopular', 'GET'), 'videos.list')
-    assert.equal(youtubeQuotaLabel('/videos?part=status', 'PUT'), 'videos.update')
-    assert.equal(youtubeQuotaLabel('/liveBroadcasts?status=active', 'GET'), 'liveBroadcasts.list')
-    assert.equal(youtubeQuotaLabel('/liveBroadcasts?part=snippet', 'PUT'), 'liveBroadcasts.update')
-    assert.equal(youtubeQuotaLabel('/playlists', 'PATCH'), 'playlists PATCH')
-  })
-
-  it('parses console quota input', () => {
-    assert.deepEqual(parseYouTubeQuotaInput('35'), { kind: 'used', used: 35 })
-    assert.deepEqual(parseYouTubeQuotaInput('used 35/10000'), { kind: 'used', used: 35, limit: 10000 })
-    assert.deepEqual(parseYouTubeQuotaInput('remaining 200'), { kind: 'remaining', remaining: 200 })
-    assert.equal(parseYouTubeQuotaInput('quota?')?.kind, 'help')
-    assert.equal(parseYouTubeQuotaInput('hello'), undefined)
-  })
-
-  it('warns at 80% and blocks at the cap', () => {
-    assert.equal(quotaWarnAt(10_000), 8_000)
-    assert.equal(youtubeQuotaHealthStatus(100, 10_000, false), undefined)
-    assert.match(youtubeQuotaHealthStatus(8_000, 10_000, false)?.message || '', /80% used/)
-    assert.match(youtubeQuotaHealthStatus(10_000, 10_000, false)?.message || '', /quota reached/)
-    assert.match(youtubeQuotaHealthStatus(10, 10_000, true)?.message || '', /quota reached/)
-  })
-
-  it('reads API error reasons and ended-chat markers', () => {
-    assert.equal(youtubeApiErrorReason(JSON.stringify({ error: { errors: [{ reason: 'liveChatEnded' }] } })), 'liveChatEnded')
-    assert.equal(youtubeApiErrorReason('plain boom'), 'plain boom')
-    assert.equal(isEndedYouTubeChat('live chat is no longer live'), true)
-    assert.equal(isEndedYouTubeChat(new Error('liveChatNotFound')), true)
-    assert.equal(isEndedYouTubeChat('quotaExceeded'), false)
-  })
-})
-
-describe('YouTube privacy warnings', () => {
-  it('warns for unlisted and private broadcasts and skips public ones', () => {
-    const notices = youtubePrivacyNotices([
-      { videoId: 'abcdefghijk', title: 'Horizontal', privacyStatus: 'public' },
-      { videoId: 'shortsid123', title: 'Vertical', privacyStatus: 'unlisted' },
-      { videoId: 'privatesid1', title: '', privacyStatus: 'private' },
-      { videoId: 'not-an-id', privacyStatus: 'unlisted' },
-    ])
-    assert.deepEqual(notices, [
-      { videoId: 'shortsid123', title: 'Vertical', privacy: 'unlisted' },
-      { videoId: 'privatesid1', title: 'privatesid1', privacy: 'private' },
-    ])
-    assert.equal(youtubePrivacyMessage(notices[0]), 'YouTube “Vertical” is unlisted.')
-  })
-
-  it('keeps ended broadcasts on the watch list and rechecks them after the interval', () => {
-    const now = 1_000_000
-    const watched = nextYoutubePrivacyWatch(now, [], [{ videoId: 'abcdefghijk', title: 'Horizontal' }])
-    assert.equal(watched[0].until, now + 30 * 60_000)
-    assert.deepEqual(youtubePrivacyRecheckIds(now, 0, watched, ['abcdefghijk']), [])
-    assert.deepEqual(youtubePrivacyRecheckIds(now + 60_000, now, watched, []), [])
-    assert.deepEqual(youtubePrivacyRecheckIds(now + 3 * 60_000, now, watched, []), ['abcdefghijk'])
-    const kept = nextYoutubePrivacyWatch(now + 31 * 60_000, watched, [])
-    assert.deepEqual(kept, [])
-  })
-
-  it('sends public privacy and keeps made-for-kids when YouTube already listed it', () => {
-    assert.deepEqual(youtubePublicVideoBody('abcdefghijk', { madeForKids: false, privacyStatus: 'unlisted' }), {
-      id: 'abcdefghijk',
-      status: { privacyStatus: 'public', madeForKids: false },
-    })
-  })
-})
 
 describe('YouTube shorts labels', () => {
   it('tags Shorts only when a sibling title has #shortsfeed', () => {
@@ -480,99 +313,6 @@ describe('YouTube message ingest', () => {
   })
 })
 
-describe('YouTube InnerTube parsing', () => {
-  it('extracts a live session and ignores replays', () => {
-    const html = `"INNERTUBE_API_KEY":"AIzaKey","INNERTUBE_CLIENT_VERSION":"2.2024.01","VISITOR_DATA":"CgtVisitor","reloadContinuationData":{"continuation":"${'C'.repeat(60)}"} watch?v=abcdefghijk`
-    const session = extractSession(html, 'fallback0001')
-    assert.equal(session?.apiKey, 'AIzaKey')
-    assert.equal(session?.videoId, 'abcdefghijk')
-    assert.equal(extractSession('"isReplay":true ' + html, 'fallback0001'), undefined)
-  })
-
-  it('parses video id, viewers, and title from watch HTML', () => {
-    const html = `<link rel="canonical" href="https://www.youtube.com/watch?v=abcdefghijk"><meta name="title" content="Night stream - YouTube">"concurrentViewers":"1,234"`
-    assert.equal(extractVideoId(html), 'abcdefghijk')
-    assert.equal(parseYouTubeViewers('1,234 watching now'), 1234)
-    assert.equal(parseYouTubeViewers('"concurrentViewers":"42"'), 42)
-    assert.equal(parseYouTubeViewers('"videoDetails":{"viewCount":"9000"}'), undefined)
-    assert.equal(youtubeViewersWhileLive(false, 0, 9000), undefined)
-    assert.deepEqual(youtubeViewersWhileLive(true, 3, 12), { viewers: 12 })
-    assert.equal(youtubeViewersWhileLive(true, 12, 12), undefined)
-    assert.equal(parseYouTubeTitle(html), 'Night stream')
-    assert.equal(extractVideoId('"isReplay":true ' + html), undefined)
-    assert.equal(extractVideoId('<link rel="canonical" href="https://www.youtube.com/watch?v=mPDDhBtFW_Jw">'), undefined)
-  })
-
-  it('parses text, emotes, badges, superchats, and memberships', () => {
-    const payload = {
-      continuationContents: {
-        liveChatContinuation: {
-          actions: [
-            { addChatItemAction: { item: { liveChatTextMessageRenderer: {
-              id: 'm1',
-              timestampUsec: '1690000000000000',
-              authorExternalChannelId: 'UC1234567890123456789012',
-              authorName: { simpleText: '@Ada' },
-              message: { runs: [{ text: 'hi ' }, { emoji: { shortcuts: [':y:'], image: { thumbnails: [{ url: 'https://yt.example/e.png' }] } } }] },
-              authorBadges: [{ liveChatAuthorBadgeRenderer: { icon: { iconType: 'OWNER' } } }],
-            } } } },
-            { addChatItemAction: { item: { liveChatPaidMessageRenderer: {
-              id: 'm2',
-              timestampUsec: '1690000001000000',
-              authorName: { simpleText: 'Pat' },
-              purchaseAmountText: { simpleText: '$5.00' },
-              message: { runs: [{ text: 'nice' }] },
-            } } } },
-            { addChatItemAction: { item: { liveChatMembershipItemRenderer: {
-              id: 'm3',
-              timestampUsec: '1690000002000000',
-              authorName: { simpleText: 'Mel' },
-              headerSubtext: { runs: [{ text: 'Welcome!' }] },
-            } } } },
-          ],
-          continuations: [{ timedContinuationData: { continuation: 'NEXT', timeoutMs: 4000 } }],
-        },
-      },
-    }
-    const messages = parseActions(payload, 'abcdefghijk')
-    assert.equal(messages.length, 3)
-    assert.equal(messages[0].user, 'Ada')
-    assert.equal(messages[0].badges?.[0].label, 'HOST')
-    assert.equal(messages[0].parts?.[1].type, 'emote')
-    assert.equal(messages[1].activityKind, 'superchat')
-    assert.equal(messages[1].amount, '$5.00')
-    assert.equal(messages[2].activityKind, 'membership')
-    assert.deepEqual(nextContinuation(payload), { continuation: 'NEXT', timeoutMs: 4000, ended: false })
-    assert.equal(classifyChatItem({ liveChatPaidStickerRenderer: { purchaseAmountText: { simpleText: '$2' } } })?.activityKind, 'superchat')
-    assert.deepEqual(runsToParts([{ text: 'x' }]), [{ type: 'text', text: 'x' }])
-    const full = 'https://classic-armory.org/character/us/tbc-anniversary/dreamscythe/Tuskinrader'
-    const truncatedLink = {
-      text: 'https://classic-armory.org/character/...',
-      navigationEndpoint: { urlEndpoint: { url: `https://www.youtube.com/redirect?event=live_chat&q=${encodeURIComponent(full)}` } },
-    }
-    assert.equal(runLinkUrl(truncatedLink), full)
-    assert.equal(expandRunText(truncatedLink), full)
-    assert.deepEqual(runsToParts([{ text: 'Wow Character: ' }, truncatedLink]), [{ type: 'text', text: 'Wow Character: ' }, { type: 'text', text: full }])
-    assert.equal(expandRunText({ text: `Wow Character: https://classic-armory.org/character/...`, navigationEndpoint: truncatedLink.navigationEndpoint }), `Wow Character: ${full}`)
-    assert.equal(expandRunText({ text: '@Ada', navigationEndpoint: { browseEndpoint: { browseId: 'UC1' } } }), '@Ada')
-    const parsedLink = parseActions({
-      continuationContents: {
-        liveChatContinuation: {
-          actions: [{ addChatItemAction: { item: { liveChatTextMessageRenderer: {
-            id: 'link1',
-            timestampUsec: '1690000003000000',
-            authorName: { simpleText: 'Ada' },
-            message: { runs: [{ text: 'Wow Character: ' }, truncatedLink] },
-          } } } }],
-        },
-      },
-    }, 'abcdefghijk')
-    assert.equal(parsedLink[0]?.text, `Wow Character: ${full}`)
-    assert.deepEqual(authorBadges({ authorBadges: [{ liveChatAuthorBadgeRenderer: { icon: { iconType: 'MODERATOR' } } }] }), [{ title: 'Moderator', label: 'MOD' }])
-    assert.deepEqual(youtubeBadges({ isChatOwner: true, isChatModerator: true }), [{ title: 'Owner', label: 'HOST' }, { title: 'Moderator', label: 'MOD' }])
-  })
-})
-
 describe('YouTube official activity', () => {
   it('maps super chats, members, and gifts', () => {
     const superchat = youtubeOfficialToActivity({
@@ -594,46 +334,5 @@ describe('YouTube official activity', () => {
     assert.equal(banned?.action, 'ban')
     assert.equal(banned?.userId, 'UC1')
     assert.equal(banned?.user, 'Ada')
-  })
-})
-
-describe('YouTube InnerTube moderation', () => {
-  it('parses deleted items and author wipes', () => {
-    const payload = {
-      continuationContents: {
-        liveChatContinuation: {
-          actions: [
-            { markChatItemAsDeletedAction: { targetItemId: 'm1' } },
-            { markChatItemsByAuthorAsDeletedAction: { externalChannelId: 'UC1' } },
-          ],
-        },
-      },
-    }
-    assert.deepEqual(parseModerationActions(payload), [
-      { action: 'delete', messageId: 'm1' },
-      { action: 'ban', userId: 'UC1' },
-    ])
-  })
-
-  it('backs off a dead chat on its own and skips a browser that already failed', () => {
-    assert.equal(innerTubeRetryDelay(1), 4_000)
-    assert.equal(innerTubeRetryDelay(8), 20_000)
-    const missed = new Set<string>()
-    assert.equal(youtubeBrowserAllowed('video', missed), true)
-    missed.add('video')
-    assert.equal(youtubeBrowserAllowed('video', missed), false)
-    assert.equal(youtubeBrowserAllowed('other', missed), true)
-  })
-
-  it('does not keep a browser miss after a timeout, and expires a real miss', () => {
-    const missed = new Map<string, number>()
-    assert.equal(isRequestTimeout(new Error('Request timed out after 12000ms')), true)
-    assert.equal(isRequestTimeout(Object.assign(new Error('Timeout 30000ms exceeded'), { name: 'TimeoutError' })), true)
-    noteYoutubeBrowserMiss('video', new Error('Request timed out after 12000ms'), missed, 1_000)
-    assert.equal(youtubeBrowserAllowed('video', missed, 1_000), true)
-    noteYoutubeBrowserMiss('video', new Error('browser miss'), missed, 1_000)
-    assert.equal(youtubeBrowserAllowed('video', missed, 1_000), false)
-    assert.equal(youtubeBrowserAllowed('video', missed, 1_000 + YOUTUBE_BROWSER_MISS_TTL_MS), true)
-    assert.equal(missed.has('video'), false)
   })
 })

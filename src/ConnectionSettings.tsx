@@ -1,7 +1,5 @@
 import React, { useState, type ReactNode } from 'react'
-
-type Platform = 'Twitch' | 'Kick' | 'YouTube'
-type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean }
+import type { Platform, Account as Connection } from '../server/types'
 const platformMeta: Record<Platform, { color: string }> = {
   Twitch: { color: '#a970ff' },
   Kick: { color: '#62c554' },

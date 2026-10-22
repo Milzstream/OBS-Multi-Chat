@@ -5,7 +5,11 @@
  * stream-controls link opens.
  */
 
-export type ChatPlatform = 'Twitch' | 'Kick' | 'YouTube'
+import type { Platform, YoutubePrivacyNotice as SharedYoutubePrivacyNotice, AccountStream } from '../server/types'
+
+export type ChatPlatform = Platform
+export type YoutubePrivacyNotice = SharedYoutubePrivacyNotice
+export type LiveStreamTip = AccountStream
 
 /** Platform image CDNs the OBS dock cannot hotlink; keep in sync with `isSafeMediaUrl`. */
 function dockMediaHost(host: string) {
@@ -281,7 +285,7 @@ export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban',
   return cleaned ? `${line}: ${cleaned}` : line
 }
 
-export type LiveStreamTip = { title: string; viewers?: number; label?: string }
+
 
 /** Tile tooltip. YouTube lists every live broadcast; Twitch and Kick show that platform's title. */
 export function platformStatTip(input: { platform: string; live: boolean; connected: boolean; viewers: number; title?: string; streams?: LiveStreamTip[]; quota?: { used: number; limit: number }; health?: string }) {
@@ -304,8 +308,6 @@ export function platformStatTip(input: { platform: string; live: boolean; connec
   lines.push(input.connected ? `Open ${input.platform} dashboard` : 'Connect in the Relay Chat Dock window')
   return lines.join('\n')
 }
-
-export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'unlisted' | 'private' }
 
 /** Same sentence the backend logs, so the dock and companion window match the console line. */
 export function youtubePrivacyMessage(notice: { title?: string; privacy: string }) {

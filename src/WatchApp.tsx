@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, Hash, Radio, Twitch, Users, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityPlatform } from './activity/ActivityRow'
 import { useAutoScroll, ScrollPausedBadge } from './autoScroll'
+import type { Account as Connection, ChatMessage, Health, Platform, StreamDetails } from '../server/types'
 import { chatProfileUrl, dockAvatarSrc, preferredCategory, profileLinkTitle, visibleChatMessages, youtubePrivacyMessage, type ChatPlatform, type YoutubePrivacyNotice } from './chat-helpers'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from './activity/format'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, type ActivityFilter, type ChatFilter } from './dock-prefs'
@@ -14,13 +15,7 @@ import { ACTIVITY_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } fr
  * browser, not on the streaming PC.
  */
 
-type Platform = ChatPlatform
-type Connection = { platform: Platform; viewers: number; handle: string; connected: boolean; live: boolean; channelId?: string }
-type StreamDetails = { title: string; category: string }
-type MessagePart = { type: 'text'; text: string } | { type: 'emote'; name: string; url: string }
-type ChatBadge = { title: string; url?: string; label?: string }
-type ChatMessage = { id: string; platform: Platform; platforms?: Platform[]; user: string; text: string; time: string; parts?: MessagePart[]; userId?: string; handle?: string; avatar?: string; color?: string; badges?: ChatBadge[]; deleted?: boolean; originalText?: string }
-type Health = { status: 'ok' | 'warn' | 'down'; message: string }
+
 
 const platformMeta: Record<Platform, { color: string }> = {
   Twitch: { color: '#a970ff' },

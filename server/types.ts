@@ -30,6 +30,12 @@ export type Health = { status: 'ok' | 'warn' | 'down'; message: string }
 export type StreamElementsStatus = { connected: boolean; handle: string; missing: string[]; connecting: boolean }
 export type YoutubeQuota = { day: string; used: number; limit?: number; blockedUntil?: number }
 export type YoutubeQuotaStatus = { used: number; limit: number }
+export type YoutubePrivacy = 'public' | 'unlisted' | 'private'
+export type YoutubePrivacyNotice = { videoId: string; title: string; privacy: 'unlisted' | 'private' }
+export type YoutubePrivacyWatch = { videoId: string; title: string; until: number }
+/** Same shape the docks render as a connection tile. */
+export type Connection = Account
+export type LiveStreamTip = AccountStream
 /** Per-platform automatic live-status polls. Missing or true means on. Chat sockets are not gated by this. */
 export type AutoLiveCheck = Record<Platform, boolean>
 /** On-stream alert page settings. `disabled` holds `Platform:kind` keys the page skips. */

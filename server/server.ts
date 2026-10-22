@@ -7,124 +7,53 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import dotenv from 'dotenv'
 import express from 'express'
 import cors from 'cors'
-import WebSocket from 'ws'
 import { createServer } from 'node:http'
-import { KickChat, createFlushLock, lookupKickProfilePics, type KickActivity, type KickModeration } from './kick-chat.js'
-import { YouTubeLiveChat, youtubeViewersWhileLive, type YouTubeChatMessage, type YouTubeChatTarget, type YouTubeModeration } from './youtube-chat.js'
-import { ACTIVITY_MAX_AGE_MS, createActivityStore, kickProfileSlug, type ActivityEvent } from './activity.js'
-import { looksLikeJwt, resolveEnvFilePath, resolveEnvTemplatePath, setEnvKey, STREAMELEMENTS_JWT_KEYS, syncEnvFile, writeTextAtomic } from './env-file.js'
+import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
+import { resolveEnvFilePath, resolveEnvTemplatePath, STREAMELEMENTS_JWT_KEYS, syncEnvFile, writeTextAtomic } from './env-file.js'
 
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
-import { createOAuthStateStore, OAUTH_STATE_TTL_MS } from './oauth-state.js'
+import { createOAuthStateStore } from './oauth-state.js'
 import { fetchTimed } from './fetch-timed.js'
-import { closeListeningServer, corsOriginDelegate, createControlGuard, createOpenHandler, isTrustedOrigin, lanWatchUrl, listenHostFor, listenOn, openInDefaultBrowser, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
-import { fetchMedia } from './media-proxy.js'
+import { closeListeningServer, corsOriginDelegate, createControlGuard, lanWatchUrl, listenHostFor, listenOn, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
-import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements, postStreamElementsMock, streamElementsEmulateName, streamElementsEmulatePlan, streamElementsMockActivity } from './streamelements.js'
+import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion, isDesktopPackaged } from './check-update.js'
 import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
+import { registerHttpRoutes } from './http-routes.js'
+import { createKickLive } from './kick-live.js'
+import { createOAuth } from './oauth.js'
+import { createTwitchLive } from './twitch-live.js'
+import { createYouTubeLive } from './youtube-live.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
-  applyLiveStreamDetails,
-  collapseYouTubeDuplicates,
   defaultAppSettings,
-  clampAlertSeconds,
-  parseAlertDisabled,
   LIVE_STATUS_POLL_MS,
-  mergeAutoLiveCheck,
   shouldPollLiveStatus,
-  shouldRunYouTubeStatusCheck,
   shouldRunYouTubeMaintenance,
-  youtubeStatusIntervalMs,
-  isDailyQuotaHeader,
-  isEndedYouTubeChat,
-  isPermanentTokenRefreshError,
   isStoredChatMessage,
   isTokenRefreshHealthMessage,
   normalizeChatHandle,
-  kickBadges,
-  kickChannelPollFailure,
-  kickModerationBanPayload,
-  kickStreamDetails,
-  normalizeTags,
-  twitchTagsForApi,
   kickChannelPatch,
-  looksLikePlaceholder,
   mergeIncomingChat,
   missingStreamElementsMessage,
   needsTranslation,
-  nextPacificMidnight,
-  normalizeAvatar,
-  oauthAuthorizeUrl,
-  pacificDate,
   parseAppSettings,
   parseActivityMax,
   parseChatMax,
   activitySseFields,
-  applyOutgoingSendResult,
-  parseKickParts,
   parseTranslatedText,
-  parseTwitchChatLine,
-  parseTwitchModerationLine,
-  parseYouTubeQuotaInput,
   pruneYouTubeSeenIds,
-  partsFromTwitchFragments,
-  quotaFromHeaders,
-  quotaWarnAt,
   resolveTranslateConfig,
-  resolveYouTubeLiveChatIds,
-  restoreYouTubeQuotaBlock,
-  sanitizeIrcMessage,
-  shareInFlight,
   sseChangedKeys,
   sseNamedEvent,
   shouldKeepTokenRefreshBanner,
   shouldWarnKickChatDown,
-  summarizeApiError,
-  syncYouTubeTokenChatIds,
-  tokenRefreshFailureMessage,
-  tokenRefreshRetryMessage,
   translateFailureMessage,
-  TWITCH_EVENTSUB_DEFAULT_URL,
-  twitchBadgesFromList,
-  twitchModerationBanData,
-  twitchEventSubCloseAction,
-  twitchEventSubConnectPlan,
-  twitchEventSubRetryDelay,
-  twitchEventSubSubscribeStillCurrent,
-  twitchEventSubWatchdogShouldClose,
-  twitchEventToActivity,
-  youtubeApiErrorReason,
-  youtubeBadges,
-  youtubeChatLabel,
-  loadYoutubeBanIds,
-  youtubeBanChatIds,
-  youtubeBanRecord,
-  youtubeLiveChatBanSnippet,
-  youtubeLiveChatCursor,
-  youtubeLiveChatListQuery,
-  youtubeInsertedMessageId,
-  youtubeLiveChatMessageBody,
-  youtubeScrapedTarget,
-  youtubeOfficialModeration,
-  youtubeOfficialToActivity,
-  youtubeQuotaCost,
-  youtubeQuotaHealthStatus,
-  youtubePrivacyMessage,
-  youtubePrivacyNotices,
-  youtubePrivacyRecheckIds,
-  youtubePrivacyValue,
-  youtubePublicVideoBody,
-  youtubeQuotaLabel,
-  youtubeSendGuard,
-  youtubeVideoId,
-  nextYoutubePrivacyWatch,
-  type YoutubePrivacyNotice,
-  type YoutubePrivacyWatch,
+  twitchTagsForApi,
 } from './logic.js'
 import type {
   Account,
@@ -141,26 +70,21 @@ import type {
   StreamPlatform,
   Token,
   TokenPlatform,
-  YoutubeQuota,
+  YoutubePrivacyNotice,
   YoutubeQuotaStatus,
 } from './types.js'
 
 /**
  * Relay Chat Dock backend entry point.
  *
- * Owns: the Express + HTTP server, SSE fan-out to the docks, OAuth exchange and
- * token refresh for all platforms, the platform adapters (Twitch EventSub / IRC,
- * Kick chat + API, YouTube official Data API + InnerTube site chat), sending and
- * moderation, StreamElements connection, and the single `state` object that the
- * chat and activity docks render.
- *
- * The pure parsers it calls live in logic.ts; the readers for unofficial platform
- * payloads (Kick Pusher, YouTube InnerTube) live in kick-chat.ts and youtube-chat.ts.
+ * Owns: the Express + HTTP server, SSE fan-out to the docks, in-memory `state`,
+ * persist helpers, translation, StreamElements, and wiring for OAuth plus the
+ * Twitch / Kick / YouTube live adapters. HTTP handlers live in http-routes.ts.
  */
+
 const relayLogs = createLogBuffer()
 relayLogs.capture()
 let flushRelayLog = () => {}
-const YOUTUBE_QUOTA_PAGE = 'https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com'
 
 process.removeAllListeners('warning')
 process.on('warning', (warning) => {
@@ -306,80 +230,16 @@ const tokens: Partial<Record<TokenPlatform, Token>> = loadTokens()
 const activityWarnings = new Map<string, string>()
 const chatWarnings = new Map<string, string>()
 const streamElements = new StreamElementsClient()
-let twitchEventSubSessionId = ''
 const oauthStates = createOAuthStateStore()
-const youtubeSeen = new Set<string>()
-const youtubeChatLabels = new Map<string, string>()
 const liveCheckLocks = new Map<Platform, Promise<void>>()
 let twitchLivePollInFlight = false
 let youtubeLivePollInFlight = false
 let kickLivePollInFlight = false
-const twitchBadgeUrls = new Map<string, string>()
-const twitchAvatars = new Map<string, string>()
-const twitchAvatarPending = new Set<string>()
-let twitchBadgesLoaded = false
-let twitchAvatarTimer: NodeJS.Timeout | undefined
-const kickAvatars = new Map<string, string>()
-const kickAvatarPending = new Set<string>()
-let kickAvatarTimer: NodeJS.Timeout | undefined
-const kickAvatarFlush = createFlushLock()
-const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
-const kickChat = new KickChat()
-const youtubeChat = new YouTubeLiveChat()
-let youtubeQuotaLimit = YOUTUBE_QUOTA_LIMIT
-let youtubeQuotaBlockedUntil = 0
-let youtubeQuotaUsed = 0
-let youtubeQuotaDay = ''
-let youtubeQuotaWarnLogged = false
-let youtubeQuotaHeaderLogged = false
-let lastYouTubeStatusAt = 0
-let lastYouTubeOfficialChatAt = 0
-const youtubeOfficialCursors = new Map<string, { pageToken?: string; waitMs: number }>()
-let youtubePollTail: Promise<void> = Promise.resolve()
-let lastYouTubeViewersAt = 0
-let youtubeForceStatus = true
-let youtubeTargets: YouTubeChatTarget[] = []
-const youtubeStreamViewers = new Map<string, number>()
-let youtubePrivacyWatch: Array<YoutubePrivacyWatch & { status?: Record<string, unknown> }> = []
-const youtubePrivacyDismissed = new Set<string>()
-const announcedYoutubePrivacy = new Set<string>()
-let lastYoutubePrivacyRecheck = 0
-const youtubeHistorySeeded = new Set<string>()
-const YOUTUBE_VIEWERS_MS = 45_000
-const YOUTUBE_OFFICIAL_CHAT_MS = 45_000
-const YOUTUBE_HYDRATE_MS = 20_000
-let youtubeHydratingUntil = 0
-
-function beginYouTubeHydration() {
-  // InnerTube and the official history seed deliver the same messages; re-run duplicate collapse while we are ingesting
-  const wasInactive = Date.now() >= youtubeHydratingUntil
-  youtubeHydratingUntil = Math.max(youtubeHydratingUntil, Date.now() + YOUTUBE_HYDRATE_MS)
-  if (wasInactive) collapseYouTubeHydrationDuplicates()
-}
-
-function collapseYouTubeHydrationDuplicates() {
-  const result = collapseYouTubeDuplicates(state.messages, youtubeTargets, { ownHandles: ownHandles(), ownUserIds: ownUserIds() })
-  if (!result.changed) return
-  for (const id of result.seenIds) youtubeSeen.add(id)
-  state.messages = result.messages
-  scheduleChatSave()
-  broadcast()
-}
 const emptyHealth = (): Health => ({ status: 'ok', message: '' })
-
-/** Remember which YouTube messages we have seen so a restart re-seeds the history buffer without re-sending the same messages to the docks. */
-function rememberYouTubeFromChat(messages: ChatMessage[]) {
-  for (const item of messages) {
-    if (item.platform !== 'YouTube') continue
-    if (item.id) youtubeSeen.add(item.id)
-    if (item.sourceId) youtubeHistorySeeded.add(item.sourceId)
-  }
-}
 
 function loadChat(): ChatMessage[] {
   const parsed = readJsonFile<unknown>(chatFile, [])
   const messages = (Array.isArray(parsed) ? parsed : []).filter(isStoredChatMessage).slice(-chatMax)
-  rememberYouTubeFromChat(messages)
   return messages
 }
 
@@ -410,12 +270,12 @@ const state: State = {
   alerts: { ...settings.alerts, disabled: [...settings.alerts.disabled] },
   activityMax,
   autoLiveCheck: { ...settings.autoLiveCheck },
-  youtubeQuota: { used: 0, limit: youtubeQuotaLimit },
+  youtubeQuota: { used: 0, limit: YOUTUBE_QUOTA_LIMIT },
 }
 
 function persistChatNow() {
   try {
-    pruneYouTubeSeenIds(youtubeSeen, state.messages)
+    pruneYouTubeSeenIds(youtube.youtubeSeen, state.messages)
     const stored = state.messages.slice(-chatMax).map((message) => {
       const rest = { ...message }
       delete rest.ingest
@@ -457,687 +317,15 @@ function applyChatModerationToState(change: ChatModeration) {
   return true
 }
 
-let twitchIrc: WebSocket | undefined
-let twitchIrcReady = false
-let twitchEventSub: WebSocket | undefined
-let twitchEventSubGeneration = 0
-let twitchEventSubReady = false
-let twitchEventSubUnsupported = false
-let twitchKeepaliveMs = 10_000
-let twitchLastEventSub = 0
-let twitchEventSubResuming = false
-let twitchEventSubResumeSocket: WebSocket | undefined
-let twitchEventSubRetry: NodeJS.Timeout | undefined
-let twitchEventSubRetryAttempt = 0
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
 let sseSeq = 0
 let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
 let lastActivityEvents: ActivityEvent[] = []
 
-app.use(cors({ origin: corsOriginDelegate(localApi) }))
-app.use(express.json())
-app.use(createControlGuard(localApi))
-app.get('/api/state', (_request, response) => {
-  state.activity = activityStore.list()
-  response.json({ seq: sseSeq, ...state })
-})
 function currentWatchUrl() {
   if (!localApi.lanEnabled) return
   ensureWatchToken()
   return lanWatchUrl({ bindHost: localApi.bindHost, port, token: localApi.watchToken, interfaces: os.networkInterfaces() })
-}
-app.get('/api/console', (_request, response) => {
-  const base = `http://127.0.0.1:${port}`
-  response.json({ version: getCurrentVersion(), envPath, dataDir, chatUrl: base, activityUrl: `${base}/activity`, alertsUrl: `${base}/alerts`, lanEnabled: localApi.lanEnabled, watchUrl: currentWatchUrl() || null })
-})
-app.get('/api/logs', (request, response) => {
-  const after = Number(request.query.after || 0)
-  response.json({ lines: Number.isFinite(after) && after > 0 ? relayLogs.since(after) : relayLogs.lines() })
-})
-app.get('/events/logs', (request, response) => {
-  const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
-  response.writeHead(200, headers)
-  const write = (line: { id: number }) => {
-    if (!response.writableEnded) response.write(`data: ${JSON.stringify(line)}\n\n`)
-  }
-  const unsubscribe = relayLogs.subscribe(write)
-  for (const line of relayLogs.lines()) write(line)
-  request.on('close', () => unsubscribe())
-})
-app.post('/api/console/host', (_request, response) => {
-  companionHost.hello()
-  response.json({ ok: true })
-})
-app.post('/api/console/bye', (_request, response) => {
-  response.json({ ok: true, scheduled: companionHost.bye() })
-})
-app.post('/api/shutdown', (_request, response) => {
-  response.json({ ok: true })
-  response.on('finish', () => shutdownCompanion())
-})
-app.post('/api/youtube-quota', (request, response) => {
-  const input = String((request.body as { input?: string } | undefined)?.input || '').trim()
-  const parsed = parseYouTubeQuotaInput(input)
-  if (!parsed || parsed.kind === 'help') return response.status(400).json({ error: 'Type usage like 35 or 35/10000' })
-  applyManualYouTubeQuota(input)
-  response.json({ ok: true, youtubeQuota: state.youtubeQuota })
-})
-app.post('/api/console/quota-page', (_request, response) => {
-  openInDefaultBrowser(YOUTUBE_QUOTA_PAGE)
-  response.json({ ok: true })
-})
-app.get('/api/media', async (request, response) => {
-  try {
-    const result = await fetchMedia(String(request.query.u || ''))
-    if (!result.ok) return response.status(result.status).end()
-    response.setHeader('Content-Type', result.contentType)
-    response.setHeader('Cache-Control', 'public, max-age=86400')
-    response.end(result.body)
-  } catch {
-    if (!response.headersSent) response.status(502).end()
-  }
-})
-app.get('/events', (request, response) => {
-  const headers: Record<string, string> = { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' }
-  const origin = request.get('origin')
-  if (origin && isTrustedOrigin(origin, localApi, request.get('host'))) headers['Access-Control-Allow-Origin'] = origin
-  response.writeHead(200, headers)
-  state.activity = activityStore.list()
-  writeSse(response, sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
-  clients.add(response)
-  request.on('close', () => {
-    clients.delete(response)
-    console.log(`SSE client dropped (${clients.size} left)`)
-  })
-})
-app.post('/api/messages', async (request, response) => {
-  const { platforms, text } = request.body as { platforms?: Platform[]; text?: string }
-  if (!text?.trim() || !platforms?.length) return response.status(400).json({ error: 'platforms and text are required' })
-  const trimmed = text.trim()
-  const id = crypto.randomUUID()
-  const user = tokens[platforms.find((platform) => tokens[platform]) || platforms[0]]?.user || 'You'
-  rememberOutgoing({ id, text: trimmed, platforms, at: Date.now() })
-  addMessage({ id, platform: platforms[0], platforms, user, text: trimmed, time: new Date().toISOString() }, { source: 'send' })
-  const results = await Promise.all(platforms.map((platform) => sendMessage(platform, trimmed)))
-  const applied = applyOutgoingSendResult(state.messages, id, results)
-  if (applied.changed) {
-    state.messages = applied.messages
-    scheduleChatSave()
-    broadcast()
-  }
-  response.json({ results })
-})
-app.post('/api/moderate', async (request, response) => {
-    const body = request.body as { action?: string; platform?: Platform; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }
-    if (!body.action || !body.platform) return response.status(400).json({ error: 'action and platform are required' })
-    try {
-      const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration, reason: body.reason })
-    if (result.ok && (body.action === 'delete' || body.action === 'timeout' || body.action === 'ban' || body.action === 'unban')) {
-      const target = state.messages.find((item) => item.id === body.messageId)
-      const applied = applyChatModerationToState({
-        action: body.action,
-        platform: body.platform,
-        messageId: body.messageId,
-        userId: body.userId,
-        user: target?.user,
-      })
-      if (!applied) console.log(moderationLogLine(body.action, body.platform, target?.user))
-    }
-    response.json(result)
-  } catch (error) {
-    response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
-  }
-})
-app.post('/api/youtube/privacy', async (request, response) => {
-  const body = request.body as { videoIds?: unknown; action?: string }
-  const action = body.action === 'dismiss' ? 'dismiss' : 'public'
-  const requested = Array.isArray(body.videoIds) ? body.videoIds.map(youtubeVideoId).filter((id): id is string => Boolean(id)) : []
-  const allowed = new Set([...state.youtubePrivacy.map((item) => item.videoId), ...youtubePrivacyWatch.map((item) => item.videoId)])
-  const videoIds = [...new Set(requested.filter((id) => allowed.has(id)))].slice(0, 10)
-  if (!videoIds.length) return response.status(400).json({ ok: false, error: 'No YouTube broadcast to update' })
-  if (action === 'dismiss') {
-    for (const id of videoIds) youtubePrivacyDismissed.add(id)
-    setYoutubePrivacy(state.youtubePrivacy.filter((item) => !youtubePrivacyDismissed.has(item.videoId)))
-    return response.json({ ok: true, dismissed: videoIds })
-  }
-  if (youtubeQuotaBlocked()) return response.status(429).json({ ok: false, error: 'YouTube API quota exceeded until midnight Pacific' })
-  const token = await ensureToken('YouTube')
-  if (!token) return response.status(400).json({ ok: false, error: 'YouTube is not connected' })
-  const updated: string[] = []
-  const errors: string[] = []
-  for (const videoId of videoIds) {
-    const watched = youtubePrivacyWatch.find((item) => item.videoId === videoId)
-    try {
-      await youtubeApi('/videos?part=status', token, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(youtubePublicVideoBody(videoId, watched?.status)),
-      })
-      updated.push(videoId)
-      youtubePrivacyDismissed.delete(videoId)
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : String(error))
-    }
-  }
-  if (updated.length) {
-    setYoutubePrivacy(state.youtubePrivacy.filter((item) => !updated.includes(item.videoId)))
-    console.log(`YouTube privacy set to public: ${updated.join(', ')}`)
-  }
-  if (!updated.length) return response.status(502).json({ ok: false, error: errors[0] || 'Could not make the video public' })
-  response.json({ ok: true, updated, error: errors.length ? errors.join(' | ') : undefined })
-})
-app.get('/api/categories/:platform', async (request, response) => {
-  const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
-  const query = String(request.query.query || '').trim()
-  if (!platform || !query) return response.json([])
-  try { response.json(await searchCategories(platform, query)) } catch (error) { console.error(`${platform} category search:`, error); response.status(502).json({ error: 'Category search failed' }) }
-})
-app.post('/api/stream-info/:platform', async (request, response) => {
-  const platform = request.params.platform.toLowerCase() === 'twitch' ? 'Twitch' : request.params.platform.toLowerCase() === 'kick' ? 'Kick' : undefined
-  if (!platform) return response.status(404).json({ error: 'Unknown stream platform' })
-  const { title, category, categoryId, tags } = request.body as Partial<StreamDetails>
-  const normalizedTags = normalizeTags(tags)
-  const details = { title: String(title || '').trim(), category: String(category || '').trim(), ...(categoryId ? { categoryId: String(categoryId) } : {}), ...(normalizedTags ? { tags: normalizedTags } : {}) }
-  try {
-    const result = await updateStreamInfo(platform, details)
-    if (result.ok) {
-      state.streamInfo[platform] = details
-      persistStreamInfo()
-    }
-    broadcast()
-    response.json({ streamInfo: state.streamInfo, results: [result] })
-  } catch (error) {
-    console.error('Stream info:', error instanceof Error ? error.message : error)
-    if (!response.headersSent) response.status(502).json({ error: error instanceof Error ? error.message : 'Could not update stream info' })
-  }
-})
-app.post('/api/stream-info', async (request, response) => {
-  const { title, Twitch, Kick } = request.body as { title?: string; Twitch?: StreamDetails; Kick?: StreamDetails }
-  const sharedTitle = String(title || '').trim()
-  const detailsByPlatform = {
-    Twitch: { category: '', ...Twitch, title: sharedTitle, tags: normalizeTags(Twitch?.tags) || [] },
-    Kick: { category: '', ...Kick, title: sharedTitle, tags: normalizeTags(Kick?.tags) || [] },
-  }
-  try {
-    const results = await Promise.all((['Twitch', 'Kick'] as StreamPlatform[]).map((platform) => updateStreamInfo(platform, detailsByPlatform[platform])))
-    let changed = false
-    for (const result of results) {
-      if (!result.ok || ('skipped' in result && result.skipped)) continue
-      state.streamInfo[result.platform] = detailsByPlatform[result.platform]
-      changed = true
-    }
-    if (changed) persistStreamInfo()
-    broadcast()
-    response.json({ streamInfo: state.streamInfo, results })
-  } catch (error) {
-    console.error('Stream info:', error instanceof Error ? error.message : error)
-    if (!response.headersSent) response.status(502).json({ error: error instanceof Error ? error.message : 'Could not update stream info' })
-  }
-})
-app.post('/api/settings', async (request, response) => {
-  const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean; alerts?: Partial<AlertSettings> }
-  let changed = false
-  let watchError = ''
-  const turnedOn: Platform[] = []
-  if (typeof body.activityFallback === 'boolean' && body.activityFallback !== settings.activityFallback) {
-    settings.activityFallback = body.activityFallback
-    state.activityFallback = body.activityFallback
-    if (body.activityFallback && twitchEventSubSessionId && tokens.Twitch) void subscribeTwitchEvents(twitchEventSubSessionId)
-    changed = true
-  }
-  if (typeof body.ignoreMissingJwt === 'boolean' && body.ignoreMissingJwt !== settings.ignoreMissingJwt) {
-    settings.ignoreMissingJwt = body.ignoreMissingJwt
-    state.ignoreMissingJwt = body.ignoreMissingJwt
-    if (body.ignoreMissingJwt) setActivityWarning('streamelements')
-    else {
-      const note = missingStreamElementsMessage(state.streamelements.missing)
-      if (note) setActivityWarning('streamelements', note)
-    }
-    changed = true
-  }
-  if (typeof body.dropOldAlerts === 'boolean' && body.dropOldAlerts !== settings.dropOldAlerts) {
-    settings.dropOldAlerts = body.dropOldAlerts
-    state.dropOldAlerts = body.dropOldAlerts
-    activityStore.setMaxAge(body.dropOldAlerts ? ACTIVITY_MAX_AGE_MS : 0)
-    changed = true
-  }
-  if (typeof body.translateChat === 'boolean' && body.translateChat !== settings.translateChat) {
-    settings.translateChat = body.translateChat
-    state.translateChat = body.translateChat
-    changed = true
-  }
-  let watchChanged = false
-  if (typeof body.lanWatch === 'boolean' && body.lanWatch !== localApi.lanEnabled) {
-    const rebound = await rebindForWatch(body.lanWatch)
-    if (rebound.ok) {
-      settings.lanWatch = body.lanWatch
-      watchChanged = true
-      console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : watchOffLogLine(envBindHost))
-    } else {
-      watchError = rebound.error
-      console.error(watchError)
-    }
-  }
-  if (body.autoLiveCheck && typeof body.autoLiveCheck === 'object') {
-    const next = mergeAutoLiveCheck(settings.autoLiveCheck, body.autoLiveCheck)
-    for (const platform of ['Twitch', 'Kick', 'YouTube'] as const) {
-      if (next[platform] && !settings.autoLiveCheck[platform]) turnedOn.push(platform)
-    }
-    if (next.Twitch !== settings.autoLiveCheck.Twitch || next.Kick !== settings.autoLiveCheck.Kick || next.YouTube !== settings.autoLiveCheck.YouTube) {
-      const youtubeTurnedOn = next.YouTube && !settings.autoLiveCheck.YouTube
-      settings.autoLiveCheck = next
-      state.autoLiveCheck = { ...next }
-      if (youtubeTurnedOn) youtubeForceStatus = true
-      changed = true
-    }
-  }
-  if (body.alerts && typeof body.alerts === 'object' && !Array.isArray(body.alerts)) {
-    const patch = body.alerts
-    const next = { ...settings.alerts, disabled: [...settings.alerts.disabled] }
-    if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
-    if (typeof patch.sound === 'boolean') next.sound = patch.sound
-    if (typeof patch.showPlatform === 'boolean') next.showPlatform = patch.showPlatform
-    if (patch.displaySec !== undefined) next.displaySec = clampAlertSeconds(patch.displaySec, next.displaySec)
-    if (Array.isArray(patch.disabled)) next.disabled = parseAlertDisabled(patch.disabled)
-    if (JSON.stringify(next) !== JSON.stringify(settings.alerts)) {
-      settings.alerts = next
-      state.alerts = { ...next, disabled: [...next.disabled] }
-      changed = true
-    }
-  }
-  if (changed || watchChanged) saveSettings()
-  if (changed) broadcast()
-  const payload = {
-    activityFallback: settings.activityFallback,
-    ignoreMissingJwt: settings.ignoreMissingJwt,
-    dropOldAlerts: settings.dropOldAlerts,
-    translateChat: settings.translateChat,
-    autoLiveCheck: settings.autoLiveCheck,
-    alerts: settings.alerts,
-    streamelements: state.streamelements,
-    lanEnabled: localApi.lanEnabled,
-    watchUrl: currentWatchUrl() || null,
-  }
-  // Turning Auto back on should notice a live change without waiting out YouTube's slow interval.
-  for (const platform of turnedOn) {
-    if (!tokens[platform]) continue
-    void checkLiveNow(platform).catch((error) => console.error(`${platform} live check:`, error instanceof Error ? error.message : error))
-  }
-  if (watchError) return response.status(503).json({ error: watchError, ...payload })
-  response.json(payload)
-})
-app.get('/api/jwts', (_request, response) => {
-  const slots = streamElementsJwtSlots()
-  response.json(Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])))
-})
-app.post('/api/jwts', async (request, response) => {
-  const body = request.body as Partial<Record<'Twitch' | 'Kick' | 'YouTube', string>>
-  const platforms = ['Twitch', 'Kick', 'YouTube'] as const
-  let text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
-  if (!text) {
-    try { syncEnvFile(envPath, envTemplatePath) } catch { /* ignore */ }
-    text = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : ''
-  }
-  const saved: Array<'Twitch' | 'Kick' | 'YouTube'> = []
-  for (const platform of platforms) {
-    if (!Object.prototype.hasOwnProperty.call(body, platform)) continue
-    const value = String(body[platform] ?? '').trim()
-    if (value && !looksLikeJwt(value)) return response.status(400).json({ error: `${platform} JWT is not valid` })
-    const key = STREAMELEMENTS_JWT_KEYS[platform]
-    text = setEnvKey(text, key, value, true)
-    process.env[key] = value
-    saved.push(platform)
-  }
-  let failed: Array<{ platform: 'Twitch' | 'Kick' | 'YouTube'; message: string }> = []
-  if (saved.length) {
-    try {
-      writeTextAtomic(envPath, text)
-    } catch (error) {
-      console.error('StreamElements JWT save:', error instanceof Error ? error.message : error)
-      return response.status(500).json({ error: 'Could not save StreamElements JWTs' })
-    }
-    failed = await startStreamElements(false)
-  }
-  const slots = streamElementsJwtSlots()
-  const error = failed.filter((item) => saved.includes(item.platform)).map((item) => item.message).join(' ')
-  response.json({
-    tokens: Object.fromEntries(slots.map((slot) => [slot.platform, slot.jwt])),
-    error: error || undefined,
-  })
-})
-app.post('/api/open', createOpenHandler(openInDefaultBrowser))
-app.post('/api/activity/delete', (request, response) => {
-  const id = String((request.body as { id?: string } | undefined)?.id || '').trim()
-  if (!id) return response.status(400).json({ error: 'id is required' })
-  if (!activityStore.remove(id)) return response.status(404).json({ error: 'Activity not found' })
-  state.activity = activityStore.list()
-  broadcast()
-  response.json({ ok: true })
-})
-app.post('/api/activity/test', async (request, response) => {
-  const body = request.body as Partial<ActivityEvent>
-  const platform = body.platform
-  const kind = body.kind
-  if (!platform || !kind) return response.status(400).json({ error: 'platform and kind are required' })
-  const plan = streamElementsEmulatePlan(platform, kind)
-  if (!plan) return response.status(400).json({ error: 'That test is not a StreamElements emulate option' })
-  try {
-    const channel = await streamElementsChannelFor(plan.provider, platform === 'StreamElements')
-    if (!channel) return response.status(400).json({ error: `Connect StreamElements for ${plan.provider} first` })
-    const provider = (channel.provider || plan.provider).toLowerCase()
-    const name = streamElementsEmulateName()
-    const activity = streamElementsMockActivity({ ...plan, provider, name })
-    await postStreamElementsMock(channel, activity)
-    console.log(`StreamElements emulate: ${provider} ${plan.type} (${name})`)
-    response.json({ ok: true, name, type: plan.type })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'StreamElements emulate failed'
-    console.error(message)
-    response.status(502).json({ error: message })
-  }
-})
-app.post('/api/disconnect/:platform', (request, response) => {
-  const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
-  if (!platform) return response.status(404).json({ error: 'Unknown platform' })
-  delete tokens[platform]
-  saveTokens()
-  const account = state.accounts.find((item) => item.platform === platform)
-  if (account) Object.assign(account, { connected: false, live: false, viewers: 0, handle: '' })
-  if (platform === 'Twitch') { closeTwitchChat(); setActivityWarning('twitch-scopes'); setChatWarning('twitch-moderate') }
-  if (platform === 'Kick') void kickChat.stop()
-  if (platform === 'YouTube') { setYouTubeTargets([]); youtubeStreamViewers.clear(); publishYouTubeStreams(); youtubePrivacyWatch = []; youtubePrivacyDismissed.clear(); announcedYoutubePrivacy.clear(); setYoutubePrivacy([]); void youtubeChat.stop() }
-  setHealth(platform, 'ok')
-  broadcast()
-  response.json({ ok: true })
-})
-app.post('/api/live-check/:platform', async (request, response) => {
-  const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
-  if (!platform) return response.status(404).json({ error: 'Unknown platform' })
-  if (!tokens[platform]) return response.status(400).json({ error: `${platform} is not connected` })
-  try {
-    await checkLiveNow(platform)
-    const account = state.accounts.find((item) => item.platform === platform)
-    response.json({ ok: true, live: Boolean(account?.live), viewers: account?.viewers || 0 })
-  } catch (error) {
-    response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
-  }
-})
-
-app.get('/oauth/callback', async (request, response) => {
-  const oauthState = oauthStates.get(String(request.query.state || ''))
-  const platform = oauthState?.platform
-  const code = String(request.query.code || '')
-  if (!code || !platform || Date.now() - oauthState.createdAt > OAUTH_STATE_TTL_MS) return response.status(400).send('OAuth callback is missing a valid state or code.')
-  oauthStates.delete(String(request.query.state))
-  try {
-    tokens[platform] = await exchangeCode(platform, code, oauthState.codeVerifier)
-    saveTokens()
-    const account = state.accounts.find((item) => item.platform === platform)
-    if (account) Object.assign(account, { connected: true, handle: tokens[platform]?.user || platform })
-    setHealth(platform, 'ok')
-    startAdapter(platform)
-    broadcast()
-    response.send('<script>window.close()</script>Connected. You can close this window.')
-  } catch (error) {
-    console.error(error)
-    response.type('text').status(502).send(`OAuth exchange failed: ${error instanceof Error ? error.message : String(error)}`)
-  }
-})
-app.get('/oauth/:platform', (request, response) => {
-  const platform = ['Twitch', 'Kick', 'YouTube'].find((item) => item.toLowerCase() === request.params.platform.toLowerCase()) as Platform | undefined
-  if (!platform) return response.status(404).send('Unknown platform')
-  const url = authorizationUrl(platform)
-  if (!url) return response.status(500).send(`Missing ${platform} client ID. Configure the backend .env file.`)
-  response.redirect(url)
-})
-
-const distPath = path.resolve(process.env.RELAY_APP_ROOT ? path.join(process.env.RELAY_APP_ROOT, 'dist') : isPackaged ? path.join(path.dirname(process.execPath), 'dist') : './dist')
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath))
-  app.get('*', (_request, response) => response.sendFile(path.join(distPath, 'index.html')))
-}
-function dropSseClients() {
-  for (const response of [...clients]) {
-    try { response.end() } catch { /* ignore */ }
-  }
-  clients.clear()
-}
-
-/**
- * Watch hosts or unhosts `/watch`. The socket only moves when bind is the
- * default loopback: Watch on → 0.0.0.0, Watch off → 127.0.0.1. A sticky
- * RELAY_BIND (0.0.0.0 or a LAN IP) stays put.
- */
-async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
-  const nextHost = listenHostFor(enabled, envBindHost)
-  if (enabled === localApi.lanEnabled && nextHost === localApi.bindHost && httpServer.listening) return { ok: true }
-  if (nextHost === localApi.bindHost && httpServer.listening) {
-    localApi.lanEnabled = enabled
-    if (enabled) ensureWatchToken()
-    return { ok: true }
-  }
-  const previousHost = localApi.bindHost
-  const previousEnabled = localApi.lanEnabled
-  try {
-    await closeListeningServer(httpServer, dropSseClients)
-    await listenOn(httpServer, port, nextHost)
-    localApi.bindHost = nextHost
-    localApi.lanEnabled = enabled
-    if (enabled) ensureWatchToken()
-    return { ok: true }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    try {
-      if (!httpServer.listening) await listenOn(httpServer, port, previousHost)
-      localApi.bindHost = previousHost
-      localApi.lanEnabled = previousEnabled
-    } catch {
-      try {
-        await listenOn(httpServer, port, previousHost || '127.0.0.1')
-        localApi.bindHost = previousHost || '127.0.0.1'
-        localApi.lanEnabled = previousEnabled
-      } catch { /* last-resort bind failed; the next request will error */ }
-    }
-    return { ok: false, error: `Could not ${enabled ? 'listen on the LAN' : 'return to this computer only'}: ${message}` }
-  }
-}
-
-function listenFailureMessage(error: NodeJS.ErrnoException) {
-  return error.code === 'EADDRINUSE'
-    ? `Relay Chat Dock is already running on port ${port}. Use the window that is already open.`
-    : `Relay backend failed to start: ${error.message}`
-}
-
-function printListenBanner() {
-  ensureYouTubeQuotaDay()
-  collapseYouTubeHydrationDuplicates()
-  const base = `http://127.0.0.1:${port}`
-  const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
-  console.log(`Relay Chat Dock v${getCurrentVersion()}`)
-  console.log(`Data  ${dataDir}`)
-  console.log(`Log   ${resolveLogFilePath(filesDir)}`)
-  if (process.env.RELAY_ELECTRON !== '1') {
-    console.log(`Chat dock      ${base}`)
-    console.log(`Activity dock  ${base}/activity`)
-  }
-  if (localApi.lanEnabled) {
-    console.log(watchLogLine(currentWatchUrl()))
-    console.log(apiToken
-      ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
-      : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
-  } else {
-    console.log(stickyLanBind(envBindHost)
-      ? watchOffLogLine(envBindHost)
-      : 'Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
-  }
-  if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
-  if (youtubeQuotaUsed) console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}`)
-  listenForYouTubeQuotaInput()
-  void checkForUpdates()
-  if (missing.length && !settings.ignoreMissingJwt) {
-    const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
-    console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
-    console.error(`  Add ${keys} in the Relay Chat Dock window or production.env.`)
-    console.error('')
-  }
-  openCompanionWindow()
-}
-
-export const relayReady = new Promise<number>((resolve, reject) => {
-  void listenOn(httpServer, port, localApi.bindHost).then(() => {
-    printListenBanner()
-    resolve(port)
-  }, (error: NodeJS.ErrnoException) => {
-    const message = listenFailureMessage(error)
-    console.error(message)
-    reject(error)
-    holdConsoleAndExit(1, message)
-  })
-})
-function openCompanionWindow() {
-  if (!serverShouldOpenWindow({ packaged: isPackaged, platform: process.platform, argv: process.argv, env: process.env })) return
-  const native = findCompanionExe([exeDir, path.join(exeDir, 'deploy')], fs.existsSync)
-  if (native) {
-    const plan = nativeWindowPlan(native, `http://127.0.0.1:${port}/console`)
-    const child = spawn(plan.command, plan.args, plan.options)
-    companionChild = child
-    child.on('exit', (code) => {
-      companionChild = undefined
-      if (code === 2 || companionShutdown) return
-      shutdownCompanion()
-    })
-    child.on('error', (error) => {
-      console.error('Companion window:', error.message)
-      windowsMessageBox('Relay Chat Dock is running, but the companion window failed to open. OBS docks can still use the usual URLs.', 'Relay Chat Dock')
-    })
-    console.log('  Companion window  opening')
-    return
-  }
-  windowsMessageBox(`Relay Chat Dock is running, but relay-chat-dock-window.exe was not found beside the app.\n\nOBS docks still use http://127.0.0.1:${port}`, 'Relay Chat Dock')
-}
-
-for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
-void startStreamElements(true)
-void pollLiveState()
-setInterval(() => { void pollLiveState() }, LIVE_STATUS_POLL_MS)
-setInterval(watchTwitchEventSub, 2_000)
-setInterval(refreshChatHealth, 5_000)
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    flushChatSave()
-    ingestLog.flush()
-    flushRelayLog()
-    process.exit(0)
-  })
-}
-
-function authorizationUrl(platform: Platform) {
-  const clientId = process.env[`${platform.toUpperCase()}_CLIENT_ID`]
-  if (!clientId) return null
-  const stateValue = crypto.randomBytes(24).toString('hex')
-  const codeVerifier = platform === 'Kick' ? crypto.randomBytes(32).toString('base64url') : undefined
-  oauthStates.set(stateValue, { platform, createdAt: Date.now(), codeVerifier })
-  const codeChallenge = platform === 'Kick' ? crypto.createHash('sha256').update(codeVerifier!).digest('base64url') : undefined
-  return oauthAuthorizeUrl(platform, { clientId, redirectUri, state: stateValue, codeChallenge })
-}
-
-async function exchangeCode(platform: Platform, code: string, codeVerifier?: string): Promise<Token> {
-  const json = await requestToken(platform, {
-    client_id: process.env[`${platform.toUpperCase()}_CLIENT_ID`] || '',
-    client_secret: process.env[`${platform.toUpperCase()}_CLIENT_SECRET`] || '',
-    code,
-    grant_type: 'authorization_code',
-    redirect_uri: redirectUri,
-    ...(platform === 'Kick' ? { code_verifier: codeVerifier || '' } : {}),
-  })
-  const token: Token = { accessToken: json.access_token, refreshToken: json.refresh_token, expiresAt: json.expires_in ? Date.now() + json.expires_in * 1000 : undefined }
-  if (platform === 'Twitch') {
-    const user = await twitchApi('/helix/users', token)
-    token.user = user.data?.[0]?.login || 'Twitch'
-    token.userId = user.data?.[0]?.id
-  } else if (platform === 'YouTube') {
-    try { await hydrateYouTubeToken(token) } catch { token.user = token.user || 'YouTube' }
-  } else await hydrateKickToken(token)
-  return token
-}
-
-async function hydrateYouTubeToken(token: Token) {
-  const channels = await youtubeApi('/channels?part=snippet&mine=true', token)
-  const item = channels.items?.[0]
-  const channel = item?.snippet
-  const handle = String(channel?.customUrl || '').replace(/^@/, '')
-  token.channelId = item?.id || token.channelId
-  token.user = channel?.title || handle || token.user || 'YouTube'
-}
-
-async function hydrateKickToken(token: Token) {
-  const [userResponse, channelResponse] = await Promise.all([kickApi('/users', token), kickApi('/channels', token)])
-  const userPayload = userResponse.ok ? await userResponse.json() as any : undefined
-  const channelPayload = channelResponse.ok ? await channelResponse.json() as any : undefined
-  const user = userPayload?.data?.[0]
-  const channel = channelPayload?.data?.[0]
-  token.user = channel?.slug || user?.name || token.user || 'Kick'
-  token.userId = channel?.broadcaster_user_id ? String(channel.broadcaster_user_id) : user?.user_id ? String(user.user_id) : token.userId
-}
-
-async function requestToken(platform: Platform, body: Record<string, string>) {
-  const endpoint = platform === 'Twitch' ? 'https://id.twitch.tv/oauth2/token' : platform === 'Kick' ? 'https://id.kick.com/oauth/token' : 'https://oauth2.googleapis.com/token'
-  const result = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) })
-  if (!result.ok) throw new Error(`${platform} token request: ${result.status} ${await result.text()}`)
-  return result.json() as Promise<{ access_token: string; refresh_token?: string; expires_in?: number }>
-}
-
-async function ensureToken(platform: Platform): Promise<Token | undefined> {
-  const token = tokens[platform]
-  if (!token) return
-  if (!token.expiresAt || token.expiresAt - 120_000 > Date.now()) return token
-  if (!token.refreshToken) {
-    markTokenRefreshFailure(platform)
-    return
-  }
-  return refreshAccessToken(platform)
-}
-
-async function refreshAccessToken(platform: Platform): Promise<Token | undefined> {
-  return shareInFlight(refreshLocks, platform, () => refreshAccessTokenNow(platform))
-}
-
-async function refreshAccessTokenNow(platform: Platform): Promise<Token | undefined> {
-  const token = tokens[platform]
-  if (!token?.refreshToken) {
-    markTokenRefreshFailure(platform)
-    return
-  }
-  try {
-    const json = await requestToken(platform, {
-      client_id: process.env[`${platform.toUpperCase()}_CLIENT_ID`] || '',
-      client_secret: process.env[`${platform.toUpperCase()}_CLIENT_SECRET`] || '',
-      grant_type: 'refresh_token',
-      refresh_token: token.refreshToken,
-    })
-    tokens[platform] = {
-      ...token,
-      accessToken: json.access_token,
-      refreshToken: json.refresh_token || token.refreshToken,
-      expiresAt: json.expires_in ? Date.now() + json.expires_in * 1000 : token.expiresAt,
-    }
-    saveTokens()
-    console.log(`${platform} access token refreshed`)
-    restorePlatformConnection(platform)
-    return tokens[platform]
-  } catch (error) {
-    console.error(`${platform} token refresh:`, error instanceof Error ? error.message : error)
-    if (isPermanentTokenRefreshError(error)) markTokenRefreshFailure(platform)
-    else setHealth(platform, 'warn', tokenRefreshRetryMessage(platform))
-    return
-  }
-}
-
-function markTokenRefreshFailure(platform: Platform) {
-  const account = state.accounts.find((item) => item.platform === platform)
-  if (account) Object.assign(account, { connected: false, live: false, viewers: 0 })
-  setHealth(platform, 'down', tokenRefreshFailureMessage(platform))
 }
 
 function restorePlatformConnection(platform: Platform) {
@@ -1147,769 +335,11 @@ function restorePlatformConnection(platform: Platform) {
   if (isTokenRefreshHealthMessage(state.health[platform].message)) setHealth(platform, 'ok')
 }
 
-async function twitchApi(endpoint: string, token: Token, options: RequestInit = {}, networkRetried = false, authRetried = false): Promise<any> {
-  let response: Response
-  try {
-    response = await fetchTimed(`https://api.twitch.tv${endpoint}`, {
-      ...options,
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID || '', Authorization: `Bearer ${token.accessToken}`, ...options.headers },
-    })
-  } catch (error) {
-    if (!networkRetried) return twitchApi(endpoint, token, options, true, authRetried)
-    throw error
-  }
-  if (response.status === 401 && !authRetried) {
-    const refreshed = await refreshAccessToken('Twitch')
-    if (refreshed) return twitchApi(endpoint, refreshed, options, networkRetried, true)
-  }
-  if ((response.status === 502 || response.status === 503 || response.status === 504) && !networkRetried) {
-    await new Promise((resolve) => setTimeout(resolve, 800))
-    return twitchApi(endpoint, token, options, true, authRetried)
-  }
-  const text = await response.text()
-  if (!response.ok) throw new Error(`Twitch API ${response.status}: ${summarizeApiError(response.status, text)}`)
-  return text ? JSON.parse(text) : {}
-}
-
-function youtubeQuotaBlocked() {
-  return Date.now() < youtubeQuotaBlockedUntil
-}
-
-function youtubeQuotaWarnAt() {
-  return quotaWarnAt(youtubeQuotaLimit)
-}
-
-function youtubeQuotaSnapshot(): YoutubeQuotaStatus {
-  return { used: youtubeQuotaUsed, limit: youtubeQuotaLimit }
-}
-
-function persistYouTubeQuota() {
-  const next = {
-    day: youtubeQuotaDay || pacificDate(),
-    used: youtubeQuotaUsed,
-    limit: youtubeQuotaLimit,
-    ...(youtubeQuotaBlockedUntil > Date.now() ? { blockedUntil: youtubeQuotaBlockedUntil } : {}),
-  }
-  const saved = settings.youtubeQuota
-  if (saved.day === next.day && saved.used === next.used && saved.limit === next.limit && (saved.blockedUntil || 0) === (next.blockedUntil || 0)) return
-  settings.youtubeQuota = next
-  saveSettings()
-}
-
-function ensureYouTubeQuotaDay() {
-  const today = pacificDate()
-  if (youtubeQuotaDay === today) return
-  const saved = settings.youtubeQuota
-  const sameDay = saved.day === today
-  youtubeQuotaDay = today
-  youtubeQuotaUsed = sameDay ? saved.used : 0
-  youtubeQuotaLimit = sameDay && saved.limit && saved.limit > 0 ? saved.limit : YOUTUBE_QUOTA_LIMIT
-  youtubeQuotaWarnLogged = youtubeQuotaUsed >= youtubeQuotaWarnAt()
-  youtubeQuotaBlockedUntil = sameDay ? restoreYouTubeQuotaBlock({ day: today, used: youtubeQuotaUsed, limit: youtubeQuotaLimit, blockedUntil: saved.blockedUntil }) : 0
-  persistYouTubeQuota()
-  state.youtubeQuota = youtubeQuotaSnapshot()
-}
-
-function youtubeQuotaHealth(): Health | undefined {
-  ensureYouTubeQuotaDay()
-  return youtubeQuotaHealthStatus(youtubeQuotaUsed, youtubeQuotaLimit, youtubeQuotaBlocked())
-}
-
-function applyYouTubeQuotaHealth() {
-  const quota = youtubeQuotaHealth()
-  if (quota) setHealth('YouTube', quota.status, quota.message)
-  else if (/quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok')
-}
-
-function setYouTubeQuotaUsed(used: number, source: string, limit?: number) {
-  ensureYouTubeQuotaDay()
-  if (limit != null && limit > 0) youtubeQuotaLimit = Math.floor(limit)
-  youtubeQuotaUsed = Math.max(0, Math.min(youtubeQuotaLimit, Math.floor(used)))
-  youtubeQuotaWarnLogged = youtubeQuotaUsed >= youtubeQuotaWarnAt()
-  persistYouTubeQuota()
-  state.youtubeQuota = youtubeQuotaSnapshot()
-  if (youtubeQuotaUsed < youtubeQuotaLimit) youtubeQuotaBlockedUntil = 0
-  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (${source})`)
-  if (youtubeQuotaUsed >= youtubeQuotaLimit) markYouTubeQuotaExceeded()
-  else applyYouTubeQuotaHealth()
-}
-
-function applyManualYouTubeQuota(line: string) {
-  const parsed = parseYouTubeQuotaInput(line)
-  if (!parsed) return
-  if (parsed.kind === 'help') {
-    console.log('YouTube quota: type the Queries per day current usage (e.g. 35), or 35/10000 if your limit is not 10000.')
-    return
-  }
-  // The console number is the day's usage from the official quotas page (see below)
-  if (parsed.kind === 'used') {
-    setYouTubeQuotaUsed(parsed.used, 'console', parsed.limit)
-    return
-  }
-  const left = parsed.remaining
-  if (left > youtubeQuotaLimit) setYouTubeQuotaUsed(youtubeQuotaUsed, 'console remaining', youtubeQuotaUsed + left)
-  else setYouTubeQuotaUsed(youtubeQuotaLimit - left, 'console remaining')
-}
-
-function listenForYouTubeQuotaInput() {
-  if (!process.stdin || process.stdin.readableEnded || process.stdin.isTTY === false) return
-  try { process.stdin.setEncoding('utf8') } catch { return }
-  if (typeof process.stdin.resume === 'function') process.stdin.resume()
-  let buffer = ''
-  process.stdin.on('data', (chunk) => {
-    buffer += String(chunk).replace(/\r/g, '')
-    let newline = buffer.indexOf('\n')
-    while (newline >= 0) {
-      const line = buffer.slice(0, newline).trim()
-      buffer = buffer.slice(newline + 1)
-      if (line) applyManualYouTubeQuota(line)
-      newline = buffer.indexOf('\n')
-    }
-  })
-  process.stdin.on('error', () => undefined)
-}
-
-/** Read the daily quota straight from Google's response headers when they carry it; returns false if the headers are only per-minute rate limits. */
-function applyYouTubeQuotaHeaders(headers: Headers) {
-  const parsed = quotaFromHeaders(headers)
-  if (!parsed) return false
-  const looksDaily = isDailyQuotaHeader(parsed)
-  if (!looksDaily) {
-    if (!youtubeQuotaHeaderLogged) {
-      youtubeQuotaHeaderLogged = true
-      console.log('YouTube rate-limit headers are not the daily quota; estimating from this app\'s official calls.')
-    }
-    return false
-  }
-  ensureYouTubeQuotaDay()
-  if (parsed.limit != null && parsed.limit > 0) youtubeQuotaLimit = parsed.limit
-  if (parsed.used != null) youtubeQuotaUsed = parsed.used
-  else if (parsed.remaining != null) youtubeQuotaUsed = Math.max(0, youtubeQuotaLimit - parsed.remaining)
-  persistYouTubeQuota()
-  state.youtubeQuota = youtubeQuotaSnapshot()
-  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (from API headers)`)
-  if (youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
-    youtubeQuotaWarnLogged = true
-    applyYouTubeQuotaHealth()
-  } else broadcast()
-  return true
-}
-
-/** Add a call's known quota cost so the dock can warn before Google actually rejects us. */
-function noteYouTubeQuotaUse(endpoint: string, method = 'GET') {
-  ensureYouTubeQuotaDay()
-  const cost = youtubeQuotaCost(endpoint, method)
-  const before = youtubeQuotaUsed
-  youtubeQuotaUsed += cost
-  persistYouTubeQuota()
-  state.youtubeQuota = youtubeQuotaSnapshot()
-  console.log(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} (+${cost} ${youtubeQuotaLabel(endpoint, method)})`)
-  if (!youtubeQuotaWarnLogged && youtubeQuotaUsed >= youtubeQuotaWarnAt()) {
-    youtubeQuotaWarnLogged = true
-    console.warn(`YouTube quota ${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()} — approaching the daily cap (resets midnight Pacific)`)
-  }
-  if (youtubeQuotaUsed >= youtubeQuotaLimit) markYouTubeQuotaExceeded()
-  else if (before < youtubeQuotaWarnAt() && youtubeQuotaUsed >= youtubeQuotaWarnAt()) applyYouTubeQuotaHealth()
-  else broadcast()
-}
-
-/** Pause all official YouTube API calls until the next Pacific midnight; site chat (InnerTube) keeps running. */
-function markYouTubeQuotaExceeded() {
-  ensureYouTubeQuotaDay()
-  const until = nextPacificMidnight()
-  youtubeQuotaUsed = Math.max(youtubeQuotaUsed, youtubeQuotaLimit)
-  persistYouTubeQuota()
-  state.youtubeQuota = youtubeQuotaSnapshot()
-  if (youtubeQuotaBlockedUntil >= until) {
-    applyYouTubeQuotaHealth()
-    return
-  }
-  youtubeQuotaBlockedUntil = until
-  persistYouTubeQuota()
-  console.error(`YouTube Data API quota exceeded (${youtubeQuotaUsed.toLocaleString()} / ${youtubeQuotaLimit.toLocaleString()}). Official YouTube calls paused until midnight Pacific. Chat will use the site reader.`)
-  applyYouTubeQuotaHealth()
-}
-
-function noteYouTubeQuota(error: unknown) {
-  const text = error instanceof Error ? error.message : String(error)
-  if (!/quotaExceeded|quota exceeded/i.test(text)) return false
-  markYouTubeQuotaExceeded()
-  return true
-}
-
-/** One official YouTube Data API call, gated on the daily quota, with token refresh and quota bookkeeping. */
-async function youtubeRequest(endpoint: string, token: Token, options: RequestInit = {}, retried = false): Promise<{ ok: boolean; status: number; text: string }> {
-  ensureYouTubeQuotaDay()
-  if (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit) {
-    markYouTubeQuotaExceeded()
-    throw new Error('YouTube API quota exceeded')
-  }
-  const method = String(options.method || 'GET').toUpperCase()
-  const localized = /[?&]hl=/.test(endpoint) ? endpoint : `${endpoint}${endpoint.includes('?') ? '&' : '?'}hl=en`
-  const headers = { Authorization: `Bearer ${token.accessToken}`, ...(options.headers as Record<string, string> | undefined) }
-  const response = await fetchTimed(`https://www.googleapis.com/youtube/v3${localized}`, { ...options, headers }, 12_000)
-  const fromHeaders = applyYouTubeQuotaHeaders(response.headers)
-  if (response.status === 401 && !retried) {
-    if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
-    const refreshed = await refreshAccessToken('YouTube')
-    if (refreshed) return youtubeRequest(endpoint, refreshed, options, true)
-    const text = await response.text()
-    return { ok: false, status: response.status, text }
-  }
-  if (!fromHeaders) noteYouTubeQuotaUse(endpoint, method)
-  const text = await response.text()
-  if (response.status === 403 && /quotaExceeded/i.test(text)) markYouTubeQuotaExceeded()
-  return { ok: response.ok, status: response.status, text }
-}
-
-/** Forget an ended YouTube live chat id so we stop polling a dead room. */
-function runYouTubePoll<T>(work: () => Promise<T>): Promise<T> {
-  const run = youtubePollTail.then(work, work)
-  youtubePollTail = run.then(() => undefined, () => undefined)
-  return run
-}
-
-function dropEndedYouTubeChat(chatId: string) {
-  youtubeOfficialCursors.delete(chatId)
-  const token = tokens.YouTube
-  if (token) {
-    token.liveChatIds = (token.liveChatIds || []).filter((id) => id !== chatId)
-    if (token.liveChatId === chatId) token.liveChatId = token.liveChatIds[0]
-  }
-  const next = youtubeTargets.filter((target) => target.liveChatId !== chatId)
-  if (next.length !== youtubeTargets.length) setYouTubeTargets(next)
-}
-
-async function youtubeApi(endpoint: string, token: Token, options: RequestInit = {}): Promise<any> {
-  const result = await youtubeRequest(endpoint, token, options)
-  if (result.status === 403 && /quotaExceeded/i.test(result.text)) throw new Error('YouTube API 403 quota exceeded')
-  if (!result.ok) throw new Error(`YouTube API ${result.status}: ${youtubeApiErrorReason(result.text)}`)
-  return result.text ? JSON.parse(result.text) : {}
-}
-
-function startAdapter(platform: Platform) {
-  if (platform === 'Twitch') {
-    twitchEventSubUnsupported = false
-    twitchBadgesLoaded = false
-    void ensureTwitchBadges()
-    connectTwitchEventSub()
-    // Auto off: keep EventSub/IRC up, but do not ask Helix whether the channel is live.
-    if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) void pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
-    else ensureTwitchChat()
-  }
-  if (platform === 'Kick') {
-    if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) void pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
-    else maintainKickChat()
-  }
-  if (platform === 'YouTube' && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) {
-    void pollYouTube().then((checked) => { if (checked) logPolledLive('YouTube'); broadcast() }).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
-  }
-}
-
-/** Keep an already-known Kick chat socket up without calling the channel live-status API. */
-function maintainKickChat() {
-  const slug = tokens.Kick?.user
-  if (slug && !looksLikePlaceholder(slug)) startKickChat(slug)
-}
-
-async function checkLiveNow(platform: Platform) {
-  const pending = liveCheckLocks.get(platform)
-  if (pending) return pending
-  const work = (async () => {
-    if (platform === 'Twitch') { await pollTwitch(); logPolledLive('Twitch', true) }
-    else if (platform === 'Kick') { await pollKick(); logPolledLive('Kick', true) }
-    else await runYouTubePoll(async () => {
-      youtubeForceStatus = true
-      beginYouTubeHydration()
-      await pollYouTubeNow({ manual: true })
-      const account = state.accounts.find((item) => item.platform === 'YouTube')
-      if (!account?.live) {
-        const token = await ensureToken('YouTube')
-        if (token) {
-          await discoverYouTubeLive(token)
-          await syncYouTubeChat(token)
-          await seedYouTubeHistory(token)
-          await refreshYouTubeViewers()
-        }
-      }
-      logPolledLive('YouTube', true)
-    })
-    refreshChatHealth()
-    broadcast()
-  })().finally(() => {
-    if (liveCheckLocks.get(platform) === work) liveCheckLocks.delete(platform)
-  })
-  liveCheckLocks.set(platform, work)
-  return work
-}
-
-function startKickChat(slug: string) {
-  queueKickAvatar(slug)
-  void kickChat.start(slug, (message) => {
-    const avatar = normalizeAvatar(message.avatar) || (message.slug ? kickAvatars.get(message.slug.toLowerCase()) : undefined)
-    addMessage({
-    id: message.id || crypto.randomUUID(),
-    platform: 'Kick',
-    user: message.user,
-    userId: message.userId,
-    handle: message.slug,
-    color: message.color,
-    avatar,
-    badges: kickBadges(message.badges),
-    text: message.text,
-    time: new Date().toISOString(),
-    parts: parseKickParts(message.text, message.emotes),
-    }, { source: 'socket' })
-    if (avatar && message.slug) kickAvatars.set(message.slug.toLowerCase(), avatar)
-    else queueKickAvatar(message.slug || kickProfileSlug(message.user))
-  }, tokens.Kick?.channelId ? Number(tokens.Kick.channelId) : undefined, (event: KickActivity) => addNativeActivity({
-    id: event.id || '',
-    platform: 'Kick',
-    kind: event.kind,
-    user: event.user,
-    userId: event.userId,
-    handle: event.slug,
-    amount: event.amount,
-    months: event.months,
-    viewers: event.viewers,
-    message: event.message,
-    time: event.time || new Date().toISOString(),
-  }), (event: KickModeration) => applyChatModerationToState({
-    action: event.action,
-    platform: 'Kick',
-    messageId: event.messageId,
-    userId: event.userId,
-    user: event.user,
-  })).then(() => {
-    if (kickChat.currentChatroomId && tokens.Kick && tokens.Kick.channelId !== String(kickChat.currentChatroomId)) {
-      tokens.Kick.channelId = String(kickChat.currentChatroomId)
-      saveTokens()
-    }
-  }).catch((error) => {
-    const message = error instanceof Error ? error.message : String(error)
-    console.error('Kick chat:', message)
-    setHealth('Kick', 'down', 'Kick chat failed to connect — messages may be missing')
-  })
-}
-
-function closeTwitchChat() {
-  twitchEventSubGeneration += 1
-  twitchEventSubReady = false
-  twitchEventSubUnsupported = false
-  twitchEventSubSessionId = ''
-  twitchEventSubResuming = false
-  twitchEventSubResumeSocket = undefined
-  twitchEventSubRetryAttempt = 0
-  cancelTwitchEventSubRetry()
-  twitchIrcReady = false
-  detachTwitchEventSub(twitchEventSub)
-  twitchIrc?.close()
-  twitchEventSub = undefined
-  twitchIrc = undefined
-}
-
-function detachTwitchEventSub(socket?: WebSocket) {
-  if (!socket) return
-  socket.removeAllListeners()
-  try { socket.close() } catch { /* already closed */ }
-}
-
-/** Connect Twitch EventSub over websocket; Twitch may ask us to reopen on a reconnect_url or we simply retry after a drop on a fresh session. */
-function cancelTwitchEventSubRetry() {
-  if (twitchEventSubRetry) clearTimeout(twitchEventSubRetry)
-  twitchEventSubRetry = undefined
-}
-
-function scheduleTwitchEventSubReconnect() {
-  if (twitchEventSubRetry || twitchEventSubResuming) return
-  if (!tokens.Twitch || twitchEventSubUnsupported) return
-  const delay = twitchEventSubRetryDelay(twitchEventSubRetryAttempt)
-  twitchEventSubRetryAttempt += 1
-  twitchEventSubRetry = setTimeout(() => {
-    twitchEventSubRetry = undefined
-    connectTwitchEventSub()
-  }, delay)
-}
-
-function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
-  // Reconnect generations: a stale socket's events are dropped once a newer session wins
-  if (!tokens.Twitch?.userId || twitchEventSubUnsupported) return
-  const plan = twitchEventSubConnectPlan(url, twitchEventSubGeneration)
-  twitchEventSubGeneration = plan.generation
-  const generation = plan.generation
-  const socket = new WebSocket(url)
-  if (plan.resume) {
-    twitchEventSubResuming = true
-    twitchEventSubResumeSocket = socket
-  } else {
-    twitchEventSub = socket
-    twitchEventSubReady = false
-    twitchLastEventSub = 0
-    twitchEventSubResuming = false
-    twitchEventSubResumeSocket = undefined
-  }
-  socket.on('message', (data) => {
-    if (generation !== twitchEventSubGeneration) return
-    twitchLastEventSub = Date.now()
-    let payload: any
-    try { payload = JSON.parse(String(data)) } catch { return }
-    const type = payload?.metadata?.message_type
-    if (type === 'session_welcome') {
-      const previous = twitchEventSub
-      twitchEventSub = socket
-      if (previous && previous !== socket) detachTwitchEventSub(previous)
-      twitchEventSubResuming = false
-      twitchEventSubResumeSocket = undefined
-      twitchEventSubRetryAttempt = 0
-      cancelTwitchEventSubRetry()
-      twitchLastEventSub = Date.now()
-      twitchKeepaliveMs = Number(payload.payload?.session?.keepalive_timeout_seconds || 10) * 1000
-      if (plan.resume) { twitchEventSubReady = true; console.log('Twitch EventSub resumed') }
-      else {
-        twitchEventSubSessionId = String(payload.payload.session.id || '')
-        void subscribeTwitchEvents(twitchEventSubSessionId, generation)
-      }
-    } else if (type === 'notification') {
-      handleTwitchEventSub(payload)
-    } else if (type === 'session_reconnect' && payload.payload?.session?.reconnect_url) {
-      // Resume on Twitch's inherited socket so subscriptions survive the transfer
-      connectTwitchEventSub(payload.payload.session.reconnect_url)
-    } else if (type === 'revocation') {
-      console.error('Twitch EventSub revoked:', payload.payload?.subscription?.status)
-      twitchEventSubReady = false
-      connectTwitchIrc()
-    }
-  })
-  socket.on('close', () => {
-    const action = twitchEventSubCloseAction(twitchEventSub === socket, generation, twitchEventSubGeneration, twitchEventSubResuming, twitchEventSubResumeSocket === socket)
-    if (action === 'ignore') return
-    if (action === 'resume-failed') {
-      twitchEventSubResuming = false
-      twitchEventSubResumeSocket = undefined
-      twitchEventSubReady = false
-      scheduleTwitchEventSubReconnect()
-      return
-    }
-    twitchEventSub = undefined
-    twitchEventSubReady = false
-    twitchEventSubResuming = false
-    twitchEventSubResumeSocket = undefined
-    scheduleTwitchEventSubReconnect()
-  })
-  socket.on('error', (error) => { console.error('Twitch EventSub:', error.message); socket.close() })
-}
-
-const twitchEventSubs: { type: string; version: string; condition: (userId: string) => Record<string, string>; activity?: boolean }[] = [
-  { type: 'channel.chat.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
-  { type: 'channel.chat.message_delete', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
-  { type: 'channel.chat.clear_user_messages', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }) },
-  { type: 'channel.unban', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }) },
-  { type: 'channel.follow', version: '2', condition: (userId) => ({ broadcaster_user_id: userId, moderator_user_id: userId }), activity: true },
-  { type: 'channel.subscribe', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
-  { type: 'channel.subscription.gift', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
-  { type: 'channel.subscription.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
-  { type: 'channel.cheer', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
-  { type: 'channel.raid', version: '1', condition: (userId) => ({ to_broadcaster_user_id: userId }), activity: true },
-]
-
-async function subscribeTwitchEvents(sessionId: string, generation = twitchEventSubGeneration) {
-  const token = await ensureToken('Twitch')
-  if (!token?.userId) return
-  const transport = { method: 'websocket', session_id: sessionId }
-  let chatOk = false
-  let activityFailed = false
-  let moderationFailed = false
-  for (const spec of twitchEventSubs) {
-    if (spec.activity && !settings.activityFallback) continue
-    try {
-      await twitchApi('/helix/eventsub/subscriptions', token, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: spec.type, version: spec.version, condition: spec.condition(token.userId), transport }),
-      })
-      if (spec.type === 'channel.chat.message') chatOk = true
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (/409|already exists|Conflict/i.test(message)) {
-        if (spec.type === 'channel.chat.message') chatOk = true
-        continue
-      }
-      if (spec.activity) activityFailed = true
-      else {
-        console.error(`Twitch EventSub ${spec.type}:`, message)
-        if (spec.type === 'channel.chat.message' && (message.includes('403') || message.includes('401') || message.includes('scope'))) {
-          twitchEventSubUnsupported = true
-          console.log('Twitch chat falling back to IRC. Reconnect Twitch in settings to grant user:read:chat if you want EventSub.')
-        }
-        if (spec.type === 'channel.unban' && (message.includes('403') || message.includes('401') || message.includes('scope'))) moderationFailed = true
-      }
-    }
-  }
-  if (!twitchEventSubSubscribeStillCurrent(generation, sessionId, twitchEventSubGeneration, twitchEventSubSessionId || '')) {
-    console.log('Twitch EventSub subscribe finished for a session that is no longer current')
-    return
-  }
-  if (chatOk) {
-    twitchEventSubReady = true
-    twitchIrc?.close()
-    setHealth('Twitch', 'ok')
-    console.log(`Twitch EventSub connected (${token.user})`)
-  } else connectTwitchIrc()
-  if (activityFailed) {
-    console.log('Twitch native alert backup needs a reconnect in settings (follow, sub, bits scopes).')
-    setActivityWarning('twitch-scopes', 'Reconnect Twitch to enable native follow/sub/bits backup')
-  } else setActivityWarning('twitch-scopes')
-  if (moderationFailed) {
-    console.log('Twitch EventSub unban needs the channel:moderate scope. Reconnect Twitch in settings to restore struck-through messages on unban.')
-    setChatWarning('twitch-moderate', 'Reconnect Twitch to grant channel:moderate so unbans restore struck-through messages')
-  } else setChatWarning('twitch-moderate')
-}
-
-function handleTwitchEventSub(payload: any) {
-  const type = String(payload?.metadata?.subscription_type || '')
-  const event = payload?.payload?.event
-  if (type === 'channel.chat.message') {
-    addMessage({
-      id: event?.message_id || crypto.randomUUID(),
-      platform: 'Twitch',
-      user: event?.chatter_user_name || event?.chatter_user_login || 'Twitch user',
-      handle: event?.chatter_user_login || undefined,
-      userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
-      color: event?.color || undefined,
-      badges: twitchBadgesFromList(event?.badges, twitchBadgeUrls),
-      avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
-      text: event?.message?.text || '',
-      time: new Date().toISOString(),
-      parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
-      emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
-    }, { source: 'EventSub' })
-    setHealth('Twitch', 'ok')
-    return
-  }
-  if (type === 'channel.chat.message_delete') {
-    applyChatModerationToState({ action: 'delete', platform: 'Twitch', messageId: event?.message_id ? String(event.message_id) : undefined, user: event?.target_user_name || event?.target_user_login })
-    return
-  }
-  if (type === 'channel.chat.clear_user_messages') {
-    applyChatModerationToState({ action: 'ban', platform: 'Twitch', userId: event?.target_user_id ? String(event.target_user_id) : undefined, user: event?.target_user_name || event?.target_user_login })
-    return
-  }
-  if (type === 'channel.unban') {
-    applyChatModerationToState({ action: 'unban', platform: 'Twitch', userId: event?.user_id ? String(event.user_id) : undefined, user: event?.user_name || event?.user_login })
-    return
-  }
-  const activity = twitchEventToActivity(type, event, payload?.metadata?.message_timestamp || new Date().toISOString())
-  if (activity) addNativeActivity(activity)
-}
-
-function watchTwitchEventSub() {
-  if (!twitchEventSub) return
-  if (twitchEventSubWatchdogShouldClose(twitchEventSubReady, twitchLastEventSub, Date.now(), twitchKeepaliveMs)) twitchEventSub.close()
-}
-
 function setHealth(platform: Platform, status: Health['status'], message = '') {
   const current = state.health[platform]
   if (current.status === status && current.message === message) return
   state.health[platform] = { status, message }
   broadcast()
-}
-
-function ensureTwitchChat() {
-  if (!tokens.Twitch) return
-  if (twitchEventSubReady) return
-  if (twitchIrc && twitchIrc.readyState === WebSocket.OPEN) return
-  if (twitchIrc) {
-    try { twitchIrc.close() } catch { twitchIrc = undefined; twitchIrcReady = false; connectTwitchIrc(); return }
-  }
-  connectTwitchIrc()
-}
-
-function refreshChatHealth() {
-  if (tokens.Twitch) {
-    const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
-    if (!shouldKeepTokenRefreshBanner(state.health.Twitch, Boolean(twitchAccount?.connected))) {
-      if (twitchEventSubReady || twitchIrcReady) { if (state.health.Twitch.status === 'down') setHealth('Twitch', 'ok') }
-      else setHealth('Twitch', 'down', 'Twitch chat disconnected — messages may be missing')
-    }
-    if (!twitchEventSubReady) ensureTwitchChat()
-  } else if (isTokenRefreshHealthMessage(state.health.Twitch.message)) {
-    setHealth('Twitch', 'ok')
-  }
-  if (tokens.Kick) {
-    const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
-    if (!shouldKeepTokenRefreshBanner(state.health.Kick, Boolean(kickAccount?.connected))) {
-      if (kickChat.connected) { if (state.health.Kick.status === 'down') setHealth('Kick', 'ok') }
-      else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
-    }
-  } else if (isTokenRefreshHealthMessage(state.health.Kick.message)) {
-    setHealth('Kick', 'ok')
-  }
-  if (tokens.YouTube) {
-    const account = state.accounts.find((item) => item.platform === 'YouTube')
-    if (!shouldKeepTokenRefreshBanner(state.health.YouTube, Boolean(account?.connected))) {
-      const quota = youtubeQuotaHealth()
-      if (quota && (youtubeQuotaBlocked() || youtubeQuotaUsed >= youtubeQuotaLimit)) setHealth('YouTube', quota.status, quota.message)
-      else if (account?.live && youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
-      else if (quota) setHealth('YouTube', quota.status, quota.message)
-      else if (youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
-      else if (account?.live && !youtubeLiveChatIds().length) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
-    }
-  } else if (isTokenRefreshHealthMessage(state.health.YouTube.message)) {
-    setHealth('YouTube', 'ok')
-  }
-}
-
-function connectTwitchIrc() {
-  if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
-  void ensureToken('Twitch').then(() => {
-    if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
-    openTwitchIrc()
-  })
-}
-
-function openTwitchIrc() {
-  if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
-  const nick = tokens.Twitch.user.toLowerCase()
-  twitchIrcReady = false
-  twitchIrc = new WebSocket('wss://irc-ws.chat.twitch.tv:443')
-  twitchIrc.on('open', () => {
-    const token = tokens.Twitch
-    if (!token || !twitchIrc) return
-    twitchIrc.send('CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership\r\n')
-    twitchIrc.send(`PASS oauth:${token.accessToken}\r\n`)
-    twitchIrc.send(`NICK ${nick}\r\n`)
-  })
-  twitchIrc.on('message', (data) => {
-    const raw = String(data)
-    if (raw.includes('NOTICE * :Login authentication failed') || raw.includes('NOTICE * :Improperly formatted auth')) {
-      console.error('Twitch IRC authentication failed; reconnect Twitch to refresh its token and chat scopes.')
-      setHealth('Twitch', 'down', 'Twitch chat login failed — reconnect Twitch in settings')
-      void refreshAccessToken('Twitch').then(() => twitchIrc?.close())
-      return
-    }
-    if (raw.includes(' 001 ')) {
-      twitchIrc?.send(`JOIN #${nick}\r\n`)
-      console.log(`Twitch IRC connected as ${nick}`)
-    }
-    if (raw.includes(' 366 ')) {
-      twitchIrcReady = true
-      setHealth('Twitch', 'ok')
-      console.log(`Twitch IRC joined #${nick}`)
-    }
-    parseTwitchLines(raw).forEach((message) => addMessage(message, { source: 'IRC' }))
-  })
-  twitchIrc.on('close', () => {
-    twitchIrc = undefined
-    twitchIrcReady = false
-    if (tokens.Twitch && !twitchEventSubReady) setTimeout(connectTwitchIrc, 5_000)
-  })
-  twitchIrc.on('error', (error) => {
-    if (!/closed before the connection was established/i.test(error.message)) console.error('Twitch IRC:', error.message)
-    twitchIrc?.close()
-  })
-}
-
-function parseTwitchLines(raw: string): ChatMessage[] {
-  return raw.split(/\r?\n/).flatMap((line) => {
-    const parsed = parseTwitchChatLine(line, { urls: twitchBadgeUrls })
-    if (parsed === 'ping') { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
-    if (parsed) return [{ ...parsed, avatar: parsed.userId ? twitchAvatars.get(parsed.userId) : undefined }]
-    const moderation = parseTwitchModerationLine(line)
-    if (moderation) applyChatModerationToState(moderation)
-    return []
-  })
-}
-
-async function ensureTwitchBadges() {
-  const token = await ensureToken('Twitch')
-  if (!token?.userId || twitchBadgesLoaded) return
-  try {
-    const [globalBadges, channelBadges] = await Promise.all([
-      twitchApi('/helix/chat/badges/global', token),
-      twitchApi(`/helix/chat/badges?broadcaster_id=${token.userId}`, token),
-    ])
-    twitchBadgeUrls.clear()
-    for (const set of [...(globalBadges.data || []), ...(channelBadges.data || [])]) {
-      for (const version of set.versions || []) {
-        twitchBadgeUrls.set(`${set.set_id}/${version.id}`, version.image_url_2x || version.image_url_1x)
-      }
-    }
-    twitchBadgesLoaded = true
-  } catch (error) {
-    console.error('Twitch badges:', error instanceof Error ? error.message : error)
-  }
-}
-
-function queueTwitchAvatar(userId?: string) {
-  if (!userId || twitchAvatars.has(userId) || twitchAvatarPending.has(userId)) return
-  twitchAvatarPending.add(userId)
-  if (twitchAvatarTimer) clearTimeout(twitchAvatarTimer)
-  twitchAvatarTimer = setTimeout(() => { void flushTwitchAvatars() }, 400)
-}
-
-async function flushTwitchAvatars() {
-  const token = await ensureToken('Twitch')
-  if (!token) return
-  const ids = [...twitchAvatarPending].slice(0, 80)
-  ids.forEach((id) => twitchAvatarPending.delete(id))
-  if (!ids.length) return
-  try {
-    const result = await twitchApi(`/helix/users?${ids.map((id) => `id=${encodeURIComponent(id)}`).join('&')}`, token)
-    for (const user of result.data || []) {
-      const avatar = normalizeAvatar(user.profile_image_url)
-      if (user.id && avatar) twitchAvatars.set(String(user.id), avatar)
-    }
-    let changed = false
-    state.messages = state.messages.map((item) => {
-      if (item.platform !== 'Twitch' || !item.userId) return item
-      const avatar = twitchAvatars.get(item.userId)
-      if (!avatar || item.avatar === avatar) return item
-      changed = true
-      return { ...item, avatar }
-    })
-    if (changed) {
-  scheduleChatSave()
-  broadcast()
-}
-  } catch (error) {
-    console.error('Twitch avatars:', error instanceof Error ? error.message : error)
-  }
-  if (twitchAvatarPending.size) queueTwitchAvatar([...twitchAvatarPending][0])
-}
-
-// Kick messages do not carry their author's picture, so profile pics are fetched in small batches and backfilled onto the matching rows
-function queueKickAvatar(slug?: string) {
-  const key = String(slug || '').trim().toLowerCase()
-  if (!key || kickAvatars.has(key) || kickAvatarPending.has(key)) return
-  kickAvatarPending.add(key)
-  if (kickAvatarTimer) clearTimeout(kickAvatarTimer)
-  kickAvatarTimer = setTimeout(() => { void flushKickAvatars() }, 400)
-}
-
-async function flushKickAvatars() {
-  await kickAvatarFlush.run(async () => {
-    const slugs = [...kickAvatarPending].slice(0, 5)
-    slugs.forEach((slug) => kickAvatarPending.delete(slug))
-    if (!slugs.length) return
-    const pics = await lookupKickProfilePics(slugs)
-    for (const [slug, url] of pics) {
-      const avatar = normalizeAvatar(url)
-      if (avatar) kickAvatars.set(slug, avatar)
-    }
-    let changed = false
-    state.messages = state.messages.map((item) => {
-      if (item.platform !== 'Kick') return item
-      const avatar = kickAvatars.get((item.handle || kickProfileSlug(item.user)).toLowerCase())
-      if (!avatar || item.avatar === avatar) return item
-      changed = true
-      return { ...item, avatar }
-    })
-    if (changed) {
-      scheduleChatSave()
-      broadcast()
-    }
-    if (kickAvatarPending.size) queueKickAvatar([...kickAvatarPending][0])
-  })
 }
 
 function rememberOutgoing(entry: { id: string; text: string; platforms: Platform[]; at: number }) {
@@ -2038,33 +468,6 @@ async function drainTranslations() {
     await Promise.all(batch.map((item) => applyTranslation(item)))
   }
   translating = false
-}
-
-function ingestYouTubeOfficialItem(item: any, chatId: string, chatIds: string[], preload = false) {
-  const moderation = youtubeOfficialModeration(item)
-  if (moderation) {
-    applyChatModerationToState(moderation)
-    return
-  }
-  const user = String(item.authorDetails?.displayName || 'YouTube user').replace(/^@+/, '')
-  const time = item.snippet?.publishedAt || new Date().toISOString()
-  const activity = youtubeOfficialToActivity(item)
-  if (activity) addNativeActivity(activity)
-  const type = String(item.snippet?.type || 'textMessageEvent')
-  if (type !== 'textMessageEvent' && !activity) return
-  if (preload) beginYouTubeHydration()
-  addMessage({
-    id: item.id,
-    platform: 'YouTube',
-    user,
-    userId: item.authorDetails?.channelId,
-    avatar: normalizeAvatar(item.authorDetails?.profileImageUrl),
-    badges: youtubeBadges(item.authorDetails),
-    sourceId: chatId,
-    sourceLabel: chatIds.length > 1 ? youtubeChatLabels.get(chatId) : undefined,
-    text: item.snippet?.textMessageDetails?.messageText || item.snippet?.displayMessage || '',
-    time,
-  }, { preload, ingest: 'official' })
 }
 
 function addActivity(event: ActivityEvent) {
@@ -2196,10 +599,10 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     ownHandles: ownHandles(),
     ownUserIds: ownUserIds(),
     recentOutgoing,
-    targets: youtubeTargets,
+    targets: youtube.youtubeTargets,
     max: chatMax,
   })
-  for (const id of result.seenIds) youtubeSeen.add(id)
+  for (const id of result.seenIds) youtube.youtubeSeen.add(id)
   if (!result.changed) return
   state.messages = result.messages
   scheduleChatSave()
@@ -2208,768 +611,8 @@ function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?
     const source = options?.preload ? 'history' : options?.source || (options?.ingest === 'official' ? 'official list' : options?.ingest === 'innertube' ? 'InnerTube' : 'chat')
     ingestLog.note(message.platform, source)
     queueTranslation(result.added)
-    if (result.added.platform === 'Twitch') queueTwitchAvatar(result.added.userId)
+    if (result.added.platform === 'Twitch') twitch.queueTwitchAvatar(result.added.userId)
   }
-}
-
-async function pollLiveState() {
-  const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
-  const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
-  const twitchWasLive = Boolean(twitchAccount?.live)
-  const kickWasLive = Boolean(kickAccount?.live)
-  // Poll each platform independently so a slow YouTube or Twitch poll cannot
-  // delay Kick's live/offline update. Per-platform guards prevent overlapping
-  // polls for the same platform.
-  const tasks: Promise<void>[] = []
-  if (tokens.Twitch) {
-    tasks.push((async () => {
-      if (twitchLivePollInFlight) return
-      twitchLivePollInFlight = true
-      try {
-        // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
-        if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
-          try { await pollTwitch(); logPolledLive('Twitch'); if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true; if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'ok' : 'down', twitchEventSubReady || twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            console.error('Twitch poll:', message)
-            if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitchEventSubReady || twitchIrcReady ? 'warn' : 'down', twitchEventSubReady || twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
-            ensureTwitchChat()
-          }
-        } else ensureTwitchChat()
-      } finally {
-        twitchLivePollInFlight = false
-      }
-    })())
-  }
-  if (tokens.YouTube && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtubeChat.connected })) {
-    tasks.push((async () => {
-      if (youtubeLivePollInFlight) return
-      youtubeLivePollInFlight = true
-      try {
-        try {
-          const checked = await pollYouTube()
-          if (checked) logPolledLive('YouTube')
-          if (!youtubeQuotaBlocked() && (youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
-        } catch (error) {
-          if (noteYouTubeQuota(error)) { /* site chat continues */ }
-          else {
-            const message = error instanceof Error ? error.message : String(error)
-            console.error('YouTube poll:', message)
-            if (!youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
-          }
-        }
-      } finally {
-        youtubeLivePollInFlight = false
-      }
-    })())
-  }
-  if (tokens.Kick) {
-    tasks.push((async () => {
-      if (kickLivePollInFlight) return
-      kickLivePollInFlight = true
-      try {
-        if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
-          try { await pollKick(); logPolledLive('Kick'); if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true; if (kickChat.connected) setHealth('Kick', 'ok'); else if (shouldWarnKickChatDown(kickChat.connected, kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            console.error('Kick poll:', message)
-            if (kickChat.connected) setHealth('Kick', 'warn', 'Kick status poll failed')
-            else setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
-          }
-          broadcast()
-        } else maintainKickChat()
-      } finally {
-        kickLivePollInFlight = false
-      }
-    })())
-  }
-  try {
-    await Promise.allSettled(tasks)
-    if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
-    if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtubeForceStatus = true
-    persistStreamInfo()
-    refreshChatHealth()
-    broadcast()
-  } catch (error) {
-    // A locked settings file or a thrown status poll must not reject void pollLiveState() and exit.
-    console.error('Live status poll:', error instanceof Error ? error.message : error)
-  }
-}
-
-async function pollTwitch() {
-  const token = await ensureToken('Twitch')
-  if (!token) return
-  const streams = await twitchApi(`/helix/streams?user_id=${token.userId}`, token)
-  const account = state.accounts.find((item) => item.platform === 'Twitch')!
-  const stream = streams.data?.[0]
-  restorePlatformConnection('Twitch')
-  Object.assign(account, { live: Boolean(stream), viewers: stream?.viewer_count || 0, handle: token.user || account.handle })
-  if (stream) {
-    state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: stream.title || '', category: stream.game_name || '', categoryId: stream.game_id || undefined, tags: normalizeTags(stream.tags) })
-  } else {
-    const channel = await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token)
-    const info = channel.data?.[0]
-    if (info) state.streamInfo.Twitch = applyLiveStreamDetails(state.streamInfo.Twitch, { title: info.title || '', category: info.game_name || '', categoryId: info.game_id || undefined, tags: normalizeTags(info.tags) })
-  }
-  void ensureTwitchBadges()
-  ensureTwitchChat()
-}
-
-function ingestYouTubeInnerModeration(event: YouTubeModeration) {
-  applyChatModerationToState({ action: event.action, platform: 'YouTube', messageId: event.messageId, userId: event.userId })
-}
-
-function ingestYouTubeInnerMessage(message: YouTubeChatMessage, target: YouTubeChatTarget) {
-  if (youtubeSeen.has(message.id)) return
-  youtubeSeen.add(message.id)
-  const multi = youtubeTargets.length > 1
-  if (message.activityKind) {
-    addNativeActivity({
-      id: message.id,
-      platform: 'YouTube',
-      kind: message.activityKind,
-      user: message.user,
-      userId: message.userId,
-      amount: message.amount,
-      message: message.activityKind === 'superchat' ? message.text.replace(/^\[.*?\]\s*/, '') : message.text,
-      time: message.time,
-    })
-  }
-  if (message.preload) beginYouTubeHydration()
-  addMessage({
-    id: message.id,
-    platform: 'YouTube',
-    user: message.user,
-    userId: message.userId,
-    avatar: normalizeAvatar(message.avatar),
-    badges: message.badges,
-    sourceId: target.liveChatId || message.videoId,
-    sourceLabel: multi ? target.label : undefined,
-    text: message.text,
-    time: message.time,
-    parts: message.parts,
-  }, { preload: Boolean(message.preload), ingest: 'innertube' })
-}
-
-async function pollYouTube(options?: { manual?: boolean }) {
-  return runYouTubePoll(() => pollYouTubeNow(options))
-}
-
-async function pollYouTubeNow(options?: { manual?: boolean }) {
-  const token = await ensureToken('YouTube')
-  if (!token) return false
-  const account = state.accounts.find((item) => item.platform === 'YouTube')
-  const live = Boolean(account?.live || youtubeChat.connected || youtubeTargets.length)
-  const auto = settings.autoLiveCheck.YouTube
-  const manual = Boolean(options?.manual)
-  // A failed site chat may force one official status look, but only while Auto is on.
-  if (!manual && auto && live && youtubeChat.failed) youtubeForceStatus = true
-  const interval = youtubeStatusIntervalMs(live)
-  const statusDue = youtubeForceStatus || !lastYouTubeStatusAt || Date.now() - lastYouTubeStatusAt >= interval
-  const checked = shouldRunYouTubeStatusCheck({ autoEnabled: auto, manual, due: statusDue })
-  if (checked) {
-    youtubeForceStatus = false
-    lastYouTubeStatusAt = Date.now()
-    if (youtubeQuotaBlocked()) await discoverYouTubeLive(token)
-    else {
-      try { await pollYouTubeStatus(token) }
-      catch (error) {
-        if (noteYouTubeQuota(error)) await discoverYouTubeLive(token)
-        else throw error
-      }
-    }
-  }
-  // Auto off must not spend a history-seed unit on a chat id saved from the last stream.
-  if (!manual && !auto && !youtubeChat.connected && !youtubeTargets.length) return checked
-  await recheckEndedYoutubePrivacy(token)
-  await syncYouTubeChat(token)
-  await seedYouTubeHistory(token)
-  await refreshYouTubeViewers()
-  return checked
-}
-
-/** Copy each live YouTube title onto the account so the tile tooltip can list them. Cleared when YouTube is offline. */
-function publishYouTubeStreams() {
-  const account = state.accounts.find((item) => item.platform === 'YouTube')
-  if (!account) return
-  const streams = account.live ? youtubeTargets.map((target) => {
-    const title = String(target.title || '').trim()
-    if (!title) return
-    const viewers = youtubeStreamViewers.get(target.videoId)
-    return { title, ...(target.label ? { label: target.label } : {}), ...(viewers != null ? { viewers } : {}) }
-  }).filter((item): item is { title: string; label?: string; viewers?: number } => Boolean(item)) : []
-  if (JSON.stringify(account.streams || []) === JSON.stringify(streams)) return
-  account.streams = streams
-  for (const id of [...youtubeStreamViewers.keys()]) {
-    if (!youtubeTargets.some((target) => target.videoId === id)) youtubeStreamViewers.delete(id)
-  }
-}
-
-function setYoutubePrivacy(notices: YoutubePrivacyNotice[]) {
-  const visible = notices.filter((item) => !youtubePrivacyDismissed.has(item.videoId))
-  const previous = state.youtubePrivacy
-  const same = previous.length === visible.length && previous.every((item, index) => item.videoId === visible[index]?.videoId && item.privacy === visible[index]?.privacy && item.title === visible[index]?.title)
-  for (const item of visible) {
-    if (announcedYoutubePrivacy.has(item.videoId)) continue
-    announcedYoutubePrivacy.add(item.videoId)
-    console.warn(youtubePrivacyMessage(item))
-  }
-  for (const id of [...announcedYoutubePrivacy]) {
-    if (!visible.some((item) => item.videoId === id)) announcedYoutubePrivacy.delete(id)
-  }
-  if (same) return
-  state.youtubePrivacy = visible
-  broadcast()
-}
-
-/** Remember live privacy from the broadcast list we already fetched, and keep those ids for a post-stream recheck. */
-function noteYouTubeLivePrivacy(liveItems: any[]) {
-  const now = Date.now()
-  const live = liveItems.map((item) => ({
-    videoId: String(item.id || ''),
-    title: String(item.snippet?.title || ''),
-    privacyStatus: item.status?.privacyStatus,
-  }))
-  youtubePrivacyWatch = nextYoutubePrivacyWatch(now, youtubePrivacyWatch, live).map((item) => {
-    const source = liveItems.find((entry) => String(entry.id || '') === item.videoId)
-    const previous = youtubePrivacyWatch.find((entry) => entry.videoId === item.videoId)
-    const status = source?.status && typeof source.status === 'object' ? source.status as Record<string, unknown> : previous?.status
-    return { ...item, status }
-  })
-  for (const item of live) {
-    if (youtubePrivacyValue(item.privacyStatus) === 'public') youtubePrivacyDismissed.delete(item.videoId)
-  }
-  const liveIds = new Set(live.map((item) => item.videoId))
-  const ended = state.youtubePrivacy.filter((item) => !liveIds.has(item.videoId))
-  setYoutubePrivacy([...youtubePrivacyNotices(live), ...ended])
-}
-
-/**
- * Recheck broadcasts that left the live list. videos.list is 1 unit and only
- * runs for those ids, so a still-unlisted stream keeps its warning.
- */
-async function recheckEndedYoutubePrivacy(token: Token) {
-  const ids = youtubePrivacyRecheckIds(Date.now(), lastYoutubePrivacyRecheck, youtubePrivacyWatch, youtubeTargets.map((item) => item.videoId), state.youtubePrivacy)
-  if (!ids.length || youtubeQuotaBlocked()) return
-  lastYoutubePrivacyRecheck = Date.now()
-  let listed: any
-  try {
-    listed = await youtubeApi(`/videos?part=status,snippet&id=${ids.map((id) => encodeURIComponent(id)).join(',')}`, token)
-  } catch (error) {
-    if (!noteYouTubeQuota(error)) console.error('YouTube privacy check:', error instanceof Error ? error.message : error)
-    return
-  }
-  const found = new Set<string>()
-  const endedNotices = youtubePrivacyNotices((listed.items || []).map((item: any) => {
-    const videoId = String(item.id || '')
-    found.add(videoId)
-    const watched = youtubePrivacyWatch.find((entry) => entry.videoId === videoId)
-    if (watched && item.status && typeof item.status === 'object') watched.status = item.status
-    if (watched && item.snippet?.title) watched.title = String(item.snippet.title)
-    if (youtubePrivacyValue(item.status?.privacyStatus) === 'public') youtubePrivacyDismissed.delete(videoId)
-    return { videoId, title: String(item.snippet?.title || watched?.title || ''), privacyStatus: item.status?.privacyStatus }
-  }))
-  const liveIds = new Set(youtubeTargets.map((item) => item.videoId))
-  const liveNotices = state.youtubePrivacy.filter((item) => liveIds.has(item.videoId))
-  const missing = ids.filter((id) => !found.has(id))
-  if (missing.length) youtubePrivacyWatch = youtubePrivacyWatch.filter((item) => !missing.includes(item.videoId))
-  setYoutubePrivacy([...liveNotices, ...endedNotices.filter((item) => !liveIds.has(item.videoId))])
-}
-
-/** Poll the official liveBroadcasts API for our live chats, and fall back to the site reader when quota blocks the official status check. */
-async function pollYouTubeStatus(token: Token) {
-  const account = state.accounts.find((item) => item.platform === 'YouTube')!
-  let broadcasts: any
-  try {
-    broadcasts = await youtubeApi('/liveBroadcasts?part=snippet,contentDetails,status&broadcastStatus=active&broadcastType=all&maxResults=10', token)
-  } catch (error) {
-    if (noteYouTubeQuota(error)) throw error
-    broadcasts = await youtubeApi('/liveBroadcasts?part=snippet,contentDetails,status&mine=true&maxResults=10', token)
-  }
-  const liveItems = (broadcasts.items || []).filter((item: any) => item.status?.lifeCycleStatus === 'live')
-  if (!youtubeQuotaBlocked() && (looksLikePlaceholder(token.user || '') || token.user === 'YouTube' || !token.channelId)) {
-    try { await hydrateYouTubeToken(token); saveTokens() } catch (error) { if (!noteYouTubeQuota(error)) console.error('YouTube profile:', error instanceof Error ? error.message : error) }
-  }
-  const previous = youtubeTargets
-  const next = liveItems.map((item: any) => {
-    const chatId = item.snippet?.liveChatId || item.contentDetails?.activeLiveChatId
-    const videoId = String(item.id)
-    const existing = previous.find((target) => target.videoId === videoId)
-    return {
-      videoId,
-      liveChatId: chatId ? String(chatId) : undefined,
-      title: String(item.snippet?.title || existing?.title || ''),
-      description: item.snippet?.description != null ? String(item.snippet.description) : existing?.description,
-      scheduledStartTime: item.snippet?.scheduledStartTime ? String(item.snippet.scheduledStartTime) : existing?.scheduledStartTime,
-    }
-  }).filter((item: YouTubeChatTarget) => item.videoId)
-  setYouTubeTargets(next)
-  noteYouTubeLivePrivacy(liveItems)
-  restorePlatformConnection('YouTube')
-  Object.assign(account, { live: liveItems.length > 0, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, channelId: token.channelId, ...(liveItems.length ? {} : { viewers: 0 }) })
-  publishYouTubeStreams()
-  if (liveItems.length) {
-    const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
-    console.log(`YouTube lives: ${liveItems.length} chat(s)${labels.length ? ` (${labels.join(', ')})` : ''}`)
-  }
-  if (!youtubeTargets.length) {
-    youtubeHistorySeeded.clear()
-    await youtubeChat.stop()
-  }
-  lastYouTubeViewersAt = 0
-}
-
-async function discoverYouTubeLive(token: Token) {
-  const account = state.accounts.find((item) => item.platform === 'YouTube')!
-  const found = await youtubeChat.discoverLive({ channelId: token.channelId, handle: token.user })
-  if (!found) {
-    if (!youtubeChat.connected) {
-      setYouTubeTargets([])
-      youtubeHistorySeeded.clear()
-      await youtubeChat.stop()
-      Object.assign(account, { live: false, viewers: 0, streams: [], handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle })
-    }
-    return
-  }
-  const existing = youtubeTargets.find((item) => item.videoId === found.videoId)
-  if (!existing) setYouTubeTargets([youtubeScrapedTarget(found)])
-  Object.assign(account, { live: true, handle: token.user && !looksLikePlaceholder(token.user) ? token.user : account.handle, ...(Number.isFinite(found.viewers) ? { viewers: found.viewers } : {}) })
-  publishYouTubeStreams()
-  lastYouTubeViewersAt = 0
-}
-
-async function refreshYouTubeViewers() {
-  if (!youtubeTargets.length) return
-  if (lastYouTubeViewersAt && Date.now() - lastYouTubeViewersAt < YOUTUBE_VIEWERS_MS) return
-  lastYouTubeViewersAt = Date.now()
-  const pages = await Promise.all(youtubeTargets.map(async (target) => ({ target, info: await youtubeChat.pageInfo(target.videoId) })))
-  const previousLabels = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',')
-  for (const { target, info } of pages) {
-    if (info?.title) target.title = info.title
-    if (Number.isFinite(info?.viewers)) youtubeStreamViewers.set(target.videoId, info!.viewers as number)
-  }
-  publishYouTubeStreams()
-  relabelYouTubeTargets()
-  const labelsChanged = youtubeTargets.map((target) => `${target.videoId}:${target.label || ''}`).join(',') !== previousLabels
-  if (labelsChanged) {
-    const labels = youtubeTargets.map((target) => target.label).filter(Boolean)
-    if (labels.length) console.log(`YouTube chats: ${labels.join(', ')}`)
-    retagYouTubeMessages()
-    await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage, ingestYouTubeInnerModeration)
-  }
-  const counts = pages.map((item) => item.info?.viewers).filter((count): count is number => Number.isFinite(count))
-  if (!counts.length) return
-  const viewers = counts.reduce((total, count) => total + count, 0)
-  const account = state.accounts.find((item) => item.platform === 'YouTube')
-  if (!account) return
-  const next = youtubeViewersWhileLive(account.live, account.viewers, viewers)
-  if (!next && !labelsChanged) return
-  if (next) Object.assign(account, next)
-}
-
-async function seedYouTubeHistory(token: Token) {
-  if (youtubeQuotaBlocked()) return
-  if (!youtubeTargets.length && !youtubeChat.connected) return
-  const chatIds = youtubeLiveChatIds()
-  if (youtubeChat.connected) {
-    for (const chatId of chatIds) youtubeHistorySeeded.add(chatId)
-    collapseYouTubeHydrationDuplicates()
-    return
-  }
-  const pending = chatIds.filter((chatId) => !youtubeHistorySeeded.has(chatId))
-  if (!pending.length) return
-  for (const chatId of pending) {
-    youtubeHistorySeeded.add(chatId)
-    beginYouTubeHydration()
-    try {
-      const messages = await youtubeApi(youtubeLiveChatListQuery(chatId, undefined, 200), token)
-      for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
-        youtubeSeen.add(item.id)
-        ingestYouTubeOfficialItem(item, chatId, chatIds, true)
-      }
-    } catch (error) {
-      if (noteYouTubeQuota(error)) return
-      if (isEndedYouTubeChat(error)) {
-        console.log('YouTube history seed skipped: live chat ended')
-        dropEndedYouTubeChat(chatId)
-        continue
-      }
-      youtubeHistorySeeded.delete(chatId)
-      console.error('YouTube history seed:', error instanceof Error ? error.message : error)
-    }
-  }
-  collapseYouTubeHydrationDuplicates()
-}
-
-async function syncYouTubeChat(token: Token) {
-  if (!youtubeTargets.length) {
-    await youtubeChat.stop()
-    return
-  }
-  beginYouTubeHydration()
-  await youtubeChat.start(youtubeTargets, ingestYouTubeInnerMessage, ingestYouTubeInnerModeration)
-  if (youtubeChat.connected || !youtubeChat.failed) return
-  if (youtubeQuotaBlocked()) {
-    setHealth('YouTube', 'warn', 'YouTube site chat failed and API quota is exhausted')
-    return
-  }
-  if (Date.now() - lastYouTubeOfficialChatAt < YOUTUBE_OFFICIAL_CHAT_MS) return
-  lastYouTubeOfficialChatAt = Date.now()
-  await pollYouTubeOfficialChat(token)
-}
-
-async function pollYouTubeOfficialChat(token: Token) {
-  const chatIds = youtubeLiveChatIds()
-  if (!chatIds.length) return
-  setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
-  let waitMs = YOUTUBE_OFFICIAL_CHAT_MS
-  for (const chatId of chatIds) {
-    try {
-      const cursor = youtubeOfficialCursors.get(chatId)
-      const messages = await youtubeApi(youtubeLiveChatListQuery(chatId, cursor?.pageToken), token)
-      const next = youtubeLiveChatCursor(messages)
-      if (next.pageToken) youtubeOfficialCursors.set(chatId, next)
-      else youtubeOfficialCursors.delete(chatId)
-      waitMs = Math.max(waitMs, next.waitMs)
-      for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
-        youtubeSeen.add(item.id)
-        ingestYouTubeOfficialItem(item, chatId, chatIds)
-      }
-    } catch (error) {
-      if (noteYouTubeQuota(error)) return
-      if (isEndedYouTubeChat(error)) {
-        dropEndedYouTubeChat(chatId)
-        continue
-      }
-      console.error('YouTube chat poll:', error instanceof Error ? error.message : error)
-    }
-  }
-  lastYouTubeOfficialChatAt = Date.now() - YOUTUBE_OFFICIAL_CHAT_MS + waitMs
-}
-
-function relabelYouTubeTargets() {
-  youtubeChatLabels.clear()
-  for (const target of youtubeTargets) {
-    target.label = youtubeChatLabel(youtubeTargets, target)
-    if (target.liveChatId && target.label) youtubeChatLabels.set(target.liveChatId, target.label)
-  }
-}
-
-function youtubeSourceLabel(sourceId?: string) {
-  if (!sourceId || youtubeTargets.length <= 1) return
-  const target = youtubeTargets.find((item) => item.liveChatId === sourceId || item.videoId === sourceId)
-  return target?.label || youtubeChatLabels.get(sourceId)
-}
-
-function retagYouTubeMessages() {
-  let changed = false
-  const next = state.messages.map((message) => {
-    const youtube = message.platform === 'YouTube' || (message.platforms || []).includes('YouTube')
-    if (!youtube) return message
-    const label = youtubeSourceLabel(message.sourceId)
-    if (!label || message.sourceLabel === label) return message
-    changed = true
-    return { ...message, sourceLabel: label }
-  })
-  if (!changed) return false
-  state.messages = next
-  scheduleChatSave()
-  return true
-}
-
-function youtubeLiveChatIds() {
-  return resolveYouTubeLiveChatIds(youtubeTargets, tokens.YouTube)
-}
-
-function setYouTubeTargets(targets: YouTubeChatTarget[]) {
-  youtubeTargets = targets
-  relabelYouTubeTargets()
-  retagYouTubeMessages()
-  collapseYouTubeHydrationDuplicates()
-  if (tokens.YouTube) syncYouTubeTokenChatIds(targets, tokens.YouTube)
-}
-
-async function pollKick() {
-  const token = await ensureToken('Kick')
-  if (!token) return
-  const response = await kickApi('/channels', token)
-  if (!response.ok) {
-    const failure = kickChannelPollFailure(response.status)
-    await response.text().catch(() => '')
-    if (failure?.refresh) await refreshAccessToken('Kick')
-    throw new Error(failure?.message || `Kick status poll failed (${response.status})`)
-  }
-  const payload = await response.json() as any
-  const channel = payload.data?.[0]
-  const account = state.accounts.find((item) => item.platform === 'Kick')!
-  const slug = channel?.slug || (!looksLikePlaceholder(token.user || '') ? token.user : '')
-  if (slug && token.user !== slug) {
-    token.user = slug
-    saveTokens()
-  }
-  if (channel?.broadcaster_user_id && token.userId !== String(channel.broadcaster_user_id)) {
-    token.userId = String(channel.broadcaster_user_id)
-    saveTokens()
-  }
-  restorePlatformConnection('Kick')
-  Object.assign(account, { live: Boolean(channel?.stream?.is_live), viewers: Number(channel?.stream?.viewer_count || 0), handle: slug || account.handle })
-  if (channel) state.streamInfo.Kick = applyLiveStreamDetails(state.streamInfo.Kick, kickStreamDetails(channel))
-  if (slug) startKickChat(slug)
-  else await kickChat.stop()
-}
-
-async function sendMessage(platform: Platform, text: string) {
-  if (!tokens[platform]) return { platform, ok: false, error: 'Not connected' }
-  try {
-    if (platform === 'Twitch') return { platform, ...(await sendTwitchMessage(text)) }
-    if (platform === 'Kick') return { platform, ...(await sendKickMessage(text)) }
-    if (platform === 'YouTube') return { platform, ...(await sendYouTubeMessage(text)) }
-  } catch (error) {
-    return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
-  return { platform, ok: false, error: `${platform} chat is not live or its API adapter is unavailable` }
-}
-
-async function sendTwitchMessage(text: string) {
-  const safeText = sanitizeIrcMessage(text)
-  const nick = tokens.Twitch?.user?.toLowerCase()
-  if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-    twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
-    return { ok: true }
-  }
-  const helix = await sendTwitchHelix(text)
-  if (helix.ok) return helix
-  await waitForTwitchIrc()
-  if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-    twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
-    return { ok: true }
-  }
-  return { ok: false, error: helix.error || 'Twitch chat is not ready; reconnect Twitch and try again' }
-}
-
-async function sendTwitchHelix(text: string) {
-  const token = await ensureToken('Twitch')
-  if (!token?.userId) return { ok: false, error: 'Twitch user id missing' }
-  try {
-    const result = await twitchApi('/helix/chat/messages', token, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ broadcaster_id: token.userId, sender_id: token.userId, message: text }),
-    })
-    if (result.data?.[0]?.is_sent === false) return { ok: false, error: result.data[0].drop_reason?.message || 'Twitch dropped the message' }
-    return { ok: true, id: result.data?.[0]?.message_id }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
-}
-
-async function sendKickMessage(text: string) {
-  const token = await ensureToken('Kick')
-  if (!token) return { ok: false, error: 'Not connected' }
-  const response = await kickApi('/chat', token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: text, type: 'user', ...(token.userId ? { broadcaster_user_id: Number(token.userId) } : {}) }),
-  })
-  if (response.ok) return { ok: true }
-  return { ok: false, error: await response.text() }
-}
-
-async function sendYouTubeMessage(text: string) {
-  if (youtubeQuotaBlocked()) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
-  const token = await ensureToken('YouTube')
-  if (!token) return { ok: false, error: 'Not connected' }
-  let chatIds = youtubeLiveChatIds()
-  if (!chatIds.length) {
-    try {
-      youtubeForceStatus = true
-      await pollYouTubeStatus(token)
-    } catch (error) {
-      if (noteYouTubeQuota(error)) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
-      return { ok: false, error: error instanceof Error ? error.message : String(error) }
-    }
-    chatIds = youtubeLiveChatIds()
-  }
-  const guard = youtubeSendGuard({ connected: true, quotaBlocked: false, chatIds })
-  if (guard.ok === false) return guard
-  const results = await Promise.all(chatIds.map(async (liveChatId) => ({ liveChatId, result: await youtubeRequest('/liveChat/messages?part=snippet', token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(youtubeLiveChatMessageBody(liveChatId, text)),
-  }) })))
-  const failed = results.filter((item) => !item.result.ok)
-  const sent = results.flatMap((item) => {
-    if (!item.result.ok) return []
-    const id = youtubeInsertedMessageId(item.result.text)
-    return id ? [{ id, sourceId: item.liveChatId }] : []
-  })
-  return { ok: results.some((item) => item.result.ok), error: failed.length ? failed.map((item) => youtubeApiErrorReason(item.result.text)).join(' | ') : undefined, ...(sent.length ? { sent } : {}) }
-}
-
-async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }) {
-  if (!tokens[platform]) return { ok: false, error: 'Not connected' }
-  if (platform === 'Twitch') return moderateTwitch(body)
-  if (platform === 'Kick') return moderateKick(body)
-  // YouTube liveChat/bans has no reason field, so moderateYouTube ignores body.reason.
-  if (platform === 'YouTube') return moderateYouTube(body)
-  return { ok: false, error: `${platform} moderation is not available` }
-}
-
-async function moderateTwitch(body: { action: string; messageId?: string; userId?: string; duration?: number; reason?: string }) {
-  const token = await ensureToken('Twitch')
-  if (!token?.userId) return { ok: false, error: 'Twitch is not connected' }
-  const id = token.userId
-  if (body.action === 'delete') {
-    if (!body.messageId) return { ok: false, error: 'Message id is required' }
-    await twitchApi(`/helix/moderation/chat?broadcaster_id=${id}&moderator_id=${id}&message_id=${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
-    return { ok: true }
-  }
-  if (!body.userId) return { ok: false, error: 'User id is required' }
-  if (body.action === 'unban') {
-    await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}&user_id=${encodeURIComponent(body.userId)}`, token, { method: 'DELETE' })
-    return { ok: true }
-  }
-  const data = twitchModerationBanData(body.userId, body.action, body.duration, body.reason)
-  await twitchApi(`/helix/moderation/bans?broadcaster_id=${id}&moderator_id=${id}`, token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data }),
-  })
-  return { ok: true, ...(data.reason ? { reason: data.reason } : {}) }
-}
-
-async function moderateKick(body: { action: string; messageId?: string; userId?: string; duration?: number; reason?: string }) {
-  const token = await ensureToken('Kick')
-  if (!token?.userId) return { ok: false, error: 'Kick is not connected' }
-  if (body.action === 'delete') {
-    if (!body.messageId) return { ok: false, error: 'Message id is required' }
-    const response = await kickApi(`/chat/${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
-    if (!response.ok) return { ok: false, error: await response.text() }
-    return { ok: true }
-  }
-  if (!body.userId) return { ok: false, error: 'User id is required' }
-  const payload = kickModerationBanPayload(token.userId, body.userId, body.action, body.duration, body.reason)
-  const response = await kickApi('/moderation/bans', token, {
-    method: body.action === 'unban' ? 'DELETE' : 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body.action === 'unban' ? { broadcaster_user_id: payload.broadcaster_user_id, user_id: payload.user_id } : payload),
-  })
-  if (!response.ok) return { ok: false, error: await response.text() }
-  return { ok: true, ...(body.action !== 'unban' && payload.reason ? { reason: payload.reason } : {}) }
-}
-
-const youtubeBanFile = path.join(dataDir, 'youtube-bans.json')
-const youtubeBanIds = loadYoutubeBanIds(readJsonFile(youtubeBanFile, {}))
-function saveYoutubeBans() {
-  writeJsonAtomic(youtubeBanFile, youtubeBanRecord(youtubeBanIds))
-}
-
-/** Sending via the official YouTube Data API: delete a message, unban by the ban id we stored, or ban/timeout across every live chat we have. */
-async function moderateYouTube(body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number }) {
-  if (youtubeQuotaBlocked()) return { ok: false, error: 'YouTube API quota exceeded until midnight Pacific' }
-  const token = await ensureToken('YouTube')
-  if (!token) return { ok: false, error: 'YouTube is not connected' }
-  if (body.action === 'delete') {
-    if (!body.messageId) return { ok: false, error: 'Message id is required' }
-    const result = await youtubeRequest(`/liveChat/messages?id=${encodeURIComponent(body.messageId)}`, token, { method: 'DELETE' })
-    if (!result.ok) return { ok: false, error: youtubeApiErrorReason(result.text) }
-    return { ok: true }
-  }
-  if (body.action === 'unban') {
-    if (!body.userId) return { ok: false, error: 'User id is required' }
-    const ids = youtubeBanIds.get(body.userId.toLowerCase()) || []
-    if (!ids.length) return { ok: false, error: 'Unban this chatter on YouTube. Relay only has a ban id after banning from this dock.' }
-    const results = await Promise.all(ids.map((id) => youtubeRequest(`/liveChat/bans?id=${encodeURIComponent(id)}`, token, { method: 'DELETE' })))
-    const failed = results.filter((result) => !result.ok)
-    if (!failed.length) {
-      youtubeBanIds.delete(body.userId.toLowerCase())
-      saveYoutubeBans()
-    }
-    return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => youtubeApiErrorReason(result.text)).join(' | ') : undefined }
-  }
-  const chatIds = youtubeBanChatIds(body.sourceId, youtubeTargets, token)
-  const userId = body.userId
-  if (!userId || !chatIds.length) return { ok: false, error: 'YouTube user or live chat is missing' }
-  const results = await Promise.all(chatIds.map((liveChatId) => youtubeRequest('/liveChat/bans?part=snippet', token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ snippet: youtubeLiveChatBanSnippet(liveChatId, userId, body.action, body.duration) }),
-  })))
-  const failed = results.filter((result) => !result.ok)
-  const remembered: string[] = []
-  for (const result of results) {
-    if (!result.ok || !result.text) continue
-    try {
-      const id = JSON.parse(result.text)?.id
-      if (id) remembered.push(String(id))
-    } catch { /* ignore */ }
-  }
-  if (remembered.length) {
-    youtubeBanIds.set(userId.toLowerCase(), remembered)
-    saveYoutubeBans()
-  }
-  return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }
-}
-
-async function waitForTwitchIrc() {
-  if (!twitchIrc && !twitchEventSubReady) connectTwitchIrc()
-  for (let attempt = 0; attempt < 40 && (!twitchIrc || twitchIrc.readyState !== WebSocket.OPEN || !twitchIrcReady); attempt++) {
-    if (twitchEventSubReady) return
-    await new Promise((resolve) => setTimeout(resolve, 250))
-  }
-}
-
-async function kickApi(endpoint: string, token = tokens.Kick!, options: RequestInit = {}, retried = false) {
-  const current = token || await ensureToken('Kick')
-  if (!current) throw new Error('Kick is not connected')
-  const base = process.env.KICK_API_BASE || 'https://api.kick.com/public/v1'
-  const response = await fetchTimed(`${base}${endpoint}`, {
-    ...options,
-    headers: { Authorization: `Bearer ${current.accessToken}`, Accept: 'application/json', ...options.headers },
-  })
-  if (response.status === 401 && !retried) {
-    const refreshed = await refreshAccessToken('Kick')
-    if (refreshed) return kickApi(endpoint, refreshed, options, true)
-  }
-  return response
-}
-
-async function searchCategories(platform: StreamPlatform, query: string) {
-  if (platform === 'Twitch') {
-    const token = await ensureToken('Twitch')
-    const result = await twitchApi(`/helix/search/categories?query=${encodeURIComponent(query)}`, token!)
-    return (result.data || []).map((item: any) => ({ id: String(item.id), name: item.name }))
-  }
-  const response = await kickApi(`/categories?q=${encodeURIComponent(query)}&page=1`)
-  if (!response.ok) throw new Error(`Kick categories ${response.status}: ${await response.text()}`)
-  const result = await response.json() as any
-  return (result.data || []).map((item: any) => ({ id: String(item.id), name: item.name }))
-}
-
-async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
-  if (!tokens[platform]) return { platform, ok: false, error: 'Not connected' }
-  if (platform === 'Twitch') {
-    const token = await ensureToken('Twitch')
-    if (!token) return { platform, ok: false, error: 'Not connected' }
-    const games = info.categoryId ? { data: [{ id: info.categoryId }] } : await twitchApi(`/helix/games?name=${encodeURIComponent(info.category)}`, token)
-    const tags = twitchTagsForApi(info.tags)
-    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}), ...(tags ? { tags } : {}) }
-    try {
-      await twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      return { platform, ok: true }
-    } catch (error) {
-      return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  }
-  if (platform === 'Kick') {
-    const patch = kickChannelPatch({ title: info.title, category: info.category, categoryId: info.categoryId, tags: info.tags })
-    try {
-      const response = await kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch.body) })
-      if (!response.ok) return { platform, ok: false, error: await response.text() }
-      return { platform, ok: true, ...(patch.warning ? { warning: patch.warning } : {}) }
-    } catch (error) {
-      return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  }
-  return { platform, ok: false, error: 'Unsupported stream platform' }
 }
 
 function writeSse(client: express.Response, chunk: string) {
@@ -3039,6 +682,512 @@ function broadcast() {
     else if (key === 'presence') pushSse(sseNamedEvent('presence', { seq: sseSeq, ...ssePresence() }))
     else pushSse(sseNamedEvent('settings', { seq: sseSeq, ...sseSettings() }))
   }
+}
+
+let twitch!: ReturnType<typeof createTwitchLive>
+let youtube!: ReturnType<typeof createYouTubeLive>
+let kick!: ReturnType<typeof createKickLive>
+
+const oauth = createOAuth({
+  tokens,
+  state,
+  oauthStates,
+  redirectUri,
+  twitchApi: (endpoint, token, options) => twitch.twitchApi(endpoint, token, options),
+  youtubeApi: (endpoint, token, options) => youtube.youtubeApi(endpoint, token, options),
+  kickApi: (endpoint, token, options, retried) => kick.kickApi(endpoint, token, options, retried),
+  saveTokens,
+  restorePlatformConnection,
+  setHealth,
+})
+
+twitch = createTwitchLive({
+  tokens,
+  state,
+  settings,
+  ensureToken: oauth.ensureToken,
+  refreshAccessToken: oauth.refreshAccessToken,
+  setHealth,
+  setActivityWarning,
+  setChatWarning,
+  addMessage,
+  addNativeActivity,
+  applyChatModerationToState,
+  restorePlatformConnection,
+  scheduleChatSave,
+  broadcast,
+})
+
+youtube = createYouTubeLive({
+  tokens,
+  state,
+  settings,
+  dataDir,
+  ensureToken: oauth.ensureToken,
+  refreshAccessToken: oauth.refreshAccessToken,
+  hydrateYouTubeToken: oauth.hydrateYouTubeToken,
+  saveTokens,
+  saveSettings,
+  restorePlatformConnection,
+  setHealth,
+  addMessage,
+  addNativeActivity,
+  applyChatModerationToState,
+  ownHandles,
+  ownUserIds,
+  scheduleChatSave,
+  broadcast,
+})
+youtube.rememberYouTubeFromChat(state.messages)
+
+kick = createKickLive({
+  tokens,
+  state,
+  ensureToken: oauth.ensureToken,
+  refreshAccessToken: oauth.refreshAccessToken,
+  saveTokens,
+  restorePlatformConnection,
+  setHealth,
+  addMessage,
+  addNativeActivity,
+  applyChatModerationToState,
+  scheduleChatSave,
+  broadcast,
+})
+
+function startAdapter(platform: Platform) {
+  if (platform === 'Twitch') {
+    twitch.twitchEventSubUnsupported = false
+    twitch.twitchBadgesLoaded = false
+    void twitch.ensureTwitchBadges()
+    twitch.connectTwitchEventSub()
+    // Auto off: keep EventSub/IRC up, but do not ask Helix whether the channel is live.
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) void twitch.pollTwitch().then(() => broadcast()).catch((error) => console.error('Twitch poll:', error instanceof Error ? error.message : error))
+    else twitch.ensureTwitchChat()
+  }
+  if (platform === 'Kick') {
+    if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) void kick.pollKick().then(() => broadcast()).catch((error) => console.error('Kick poll:', error instanceof Error ? error.message : error))
+    else kick.maintainKickChat()
+  }
+  if (platform === 'YouTube' && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtube.youtubeChat.connected })) {
+    void youtube.pollYouTube().then((checked) => { if (checked) logPolledLive('YouTube'); broadcast() }).catch((error) => console.error('YouTube poll:', error instanceof Error ? error.message : error))
+  }
+}
+
+async function checkLiveNow(platform: Platform) {
+  const pending = liveCheckLocks.get(platform)
+  if (pending) return pending
+  const work = (async () => {
+    if (platform === 'Twitch') { await twitch.pollTwitch(); logPolledLive('Twitch', true) }
+    else if (platform === 'Kick') { await kick.pollKick(); logPolledLive('Kick', true) }
+    else await youtube.runYouTubePoll(async () => {
+      youtube.youtubeForceStatus = true
+      youtube.beginYouTubeHydration()
+      await youtube.pollYouTubeNow({ manual: true })
+      const account = state.accounts.find((item) => item.platform === 'YouTube')
+      if (!account?.live) {
+        const token = await oauth.ensureToken('YouTube')
+        if (token) {
+          await youtube.discoverYouTubeLive(token)
+          await youtube.syncYouTubeChat(token)
+          await youtube.seedYouTubeHistory(token)
+          await youtube.refreshYouTubeViewers()
+        }
+      }
+      logPolledLive('YouTube', true)
+    })
+    refreshChatHealth()
+    broadcast()
+  })().finally(() => {
+    if (liveCheckLocks.get(platform) === work) liveCheckLocks.delete(platform)
+  })
+  liveCheckLocks.set(platform, work)
+  return work
+}
+
+function refreshChatHealth() {
+  if (tokens.Twitch) {
+    const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
+    if (!shouldKeepTokenRefreshBanner(state.health.Twitch, Boolean(twitchAccount?.connected))) {
+      if (twitch.twitchEventSubReady || twitch.twitchIrcReady) { if (state.health.Twitch.status === 'down') setHealth('Twitch', 'ok') }
+      else setHealth('Twitch', 'down', 'Twitch chat disconnected — messages may be missing')
+    }
+    if (!twitch.twitchEventSubReady) twitch.ensureTwitchChat()
+  } else if (isTokenRefreshHealthMessage(state.health.Twitch.message)) {
+    setHealth('Twitch', 'ok')
+  }
+  if (tokens.Kick) {
+    const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
+    if (!shouldKeepTokenRefreshBanner(state.health.Kick, Boolean(kickAccount?.connected))) {
+      if (kick.kickChat.connected) { if (state.health.Kick.status === 'down') setHealth('Kick', 'ok') }
+      else if (shouldWarnKickChatDown(kick.kickChat.connected, kick.kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing')
+    }
+  } else if (isTokenRefreshHealthMessage(state.health.Kick.message)) {
+    setHealth('Kick', 'ok')
+  }
+  if (tokens.YouTube) {
+    const account = state.accounts.find((item) => item.platform === 'YouTube')
+    if (!shouldKeepTokenRefreshBanner(state.health.YouTube, Boolean(account?.connected))) {
+      const quota = youtube.youtubeQuotaHealth()
+      if (quota && (youtube.youtubeQuotaBlocked() || youtube.youtubeQuotaUsed >= youtube.youtubeQuotaLimit)) setHealth('YouTube', quota.status, quota.message)
+      else if (account?.live && youtube.youtubeChat.failed) setHealth('YouTube', 'warn', 'YouTube site chat failed — using slow API fallback')
+      else if (quota) setHealth('YouTube', quota.status, quota.message)
+      else if (youtube.youtubeChat.connected) { if (state.health.YouTube.status === 'down' || /quota/i.test(state.health.YouTube.message)) setHealth('YouTube', 'ok') }
+      else if (account?.live && !youtube.youtubeLiveChatIds().length) setHealth('YouTube', 'down', 'YouTube is live but chat is unavailable')
+    }
+  } else if (isTokenRefreshHealthMessage(state.health.YouTube.message)) {
+    setHealth('YouTube', 'ok')
+  }
+}
+
+async function pollLiveState() {
+  const twitchAccount = state.accounts.find((item) => item.platform === 'Twitch')
+  const kickAccount = state.accounts.find((item) => item.platform === 'Kick')
+  const twitchWasLive = Boolean(twitchAccount?.live)
+  const kickWasLive = Boolean(kickAccount?.live)
+  // Poll each platform independently so a slow YouTube or Twitch poll cannot
+  // delay Kick's live/offline update. Per-platform guards prevent overlapping
+  // polls for the same platform.
+  const tasks: Promise<void>[] = []
+  if (tokens.Twitch) {
+    tasks.push((async () => {
+      if (twitchLivePollInFlight) return
+      twitchLivePollInFlight = true
+      try {
+        // Auto off skips the live-status API only. Chat sockets stay up, and live/offline is not updated until Check live.
+        if (shouldPollLiveStatus(settings.autoLiveCheck.Twitch, 'auto')) {
+          try { await twitch.pollTwitch(); logPolledLive('Twitch'); if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtube.youtubeForceStatus = true; if (state.health.Twitch.status === 'warn') setHealth('Twitch', twitch.twitchEventSubReady || twitch.twitchIrcReady ? 'ok' : 'down', twitch.twitchEventSubReady || twitch.twitchIrcReady ? '' : 'Twitch chat disconnected — messages may be missing') } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('Twitch poll:', message)
+            if (state.health.Twitch.status !== 'down') setHealth('Twitch', twitch.twitchEventSubReady || twitch.twitchIrcReady ? 'warn' : 'down', twitch.twitchEventSubReady || twitch.twitchIrcReady ? 'Twitch status poll failed' : `Twitch poll failed — messages may be missing`)
+            twitch.ensureTwitchChat()
+          }
+        } else twitch.ensureTwitchChat()
+      } finally {
+        twitchLivePollInFlight = false
+      }
+    })())
+  }
+  if (tokens.YouTube && shouldRunYouTubeMaintenance({ autoEnabled: settings.autoLiveCheck.YouTube, manual: false, chatConnected: youtube.youtubeChat.connected })) {
+    tasks.push((async () => {
+      if (youtubeLivePollInFlight) return
+      youtubeLivePollInFlight = true
+      try {
+        try {
+          const checked = await youtube.pollYouTube()
+          if (checked) logPolledLive('YouTube')
+          if (!youtube.youtubeQuotaBlocked() && (youtube.youtubeChat.connected || /poll failed/i.test(state.health.YouTube.message)) && state.health.YouTube.status === 'warn') setHealth('YouTube', 'ok')
+        } catch (error) {
+          if (youtube.noteYouTubeQuota(error)) { /* site chat continues */ }
+          else {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('YouTube poll:', message)
+            if (!youtube.youtubeChat.connected && !isTokenRefreshHealthMessage(state.health.YouTube.message)) setHealth('YouTube', 'warn', 'YouTube poll failed — chat or counts may be stale')
+          }
+        }
+      } finally {
+        youtubeLivePollInFlight = false
+      }
+    })())
+  }
+  if (tokens.Kick) {
+    tasks.push((async () => {
+      if (kickLivePollInFlight) return
+      kickLivePollInFlight = true
+      try {
+        if (shouldPollLiveStatus(settings.autoLiveCheck.Kick, 'auto')) {
+          try { await kick.pollKick(); logPolledLive('Kick'); if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtube.youtubeForceStatus = true; if (kick.kickChat.connected) setHealth('Kick', 'ok'); else if (shouldWarnKickChatDown(kick.kickChat.connected, kick.kickChat.failed)) setHealth('Kick', 'down', 'Kick chat disconnected — messages may be missing') } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            console.error('Kick poll:', message)
+            if (kick.kickChat.connected) setHealth('Kick', 'warn', 'Kick status poll failed')
+            else setHealth('Kick', 'down', 'Kick poll failed — messages may be missing')
+          }
+          broadcast()
+        } else kick.maintainKickChat()
+      } finally {
+        kickLivePollInFlight = false
+      }
+    })())
+  }
+  try {
+    await Promise.allSettled(tasks)
+    if (twitchWasLive && !twitchAccount?.live && settings.autoLiveCheck.YouTube) youtube.youtubeForceStatus = true
+    if (kickWasLive && !kickAccount?.live && settings.autoLiveCheck.YouTube) youtube.youtubeForceStatus = true
+    persistStreamInfo()
+    refreshChatHealth()
+    broadcast()
+  } catch (error) {
+    // A locked settings file or a thrown status poll must not reject void pollLiveState() and exit.
+    console.error('Live status poll:', error instanceof Error ? error.message : error)
+  }
+}
+
+async function sendMessage(platform: Platform, text: string) {
+  if (!tokens[platform]) return { platform, ok: false, error: 'Not connected' }
+  try {
+    if (platform === 'Twitch') return { platform, ...(await twitch.sendTwitchMessage(text)) }
+    if (platform === 'Kick') return { platform, ...(await kick.sendKickMessage(text)) }
+    if (platform === 'YouTube') return { platform, ...(await youtube.sendYouTubeMessage(text)) }
+  } catch (error) {
+    return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  return { platform, ok: false, error: `${platform} chat is not live or its API adapter is unavailable` }
+}
+
+async function moderate(platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }) {
+  if (!tokens[platform]) return { ok: false, error: 'Not connected' }
+  if (platform === 'Twitch') return twitch.moderateTwitch(body)
+  if (platform === 'Kick') return kick.moderateKick(body)
+  // YouTube liveChat/bans has no reason field, so moderateYouTube ignores body.reason.
+  if (platform === 'YouTube') return youtube.moderateYouTube(body)
+  return { ok: false, error: `${platform} moderation is not available` }
+}
+
+async function searchCategories(platform: StreamPlatform, query: string) {
+  if (platform === 'Twitch') {
+    const token = await oauth.ensureToken('Twitch')
+    const result = await twitch.twitchApi(`/helix/search/categories?query=${encodeURIComponent(query)}`, token!)
+    return (result.data || []).map((item: any) => ({ id: String(item.id), name: item.name }))
+  }
+  const response = await kick.kickApi(`/categories?q=${encodeURIComponent(query)}&page=1`)
+  if (!response.ok) throw new Error(`Kick categories ${response.status}: ${await response.text()}`)
+  const result = await response.json() as any
+  return (result.data || []).map((item: any) => ({ id: String(item.id), name: item.name }))
+}
+
+async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
+  if (!tokens[platform]) return { platform, ok: false, error: 'Not connected' }
+  if (platform === 'Twitch') {
+    const token = await oauth.ensureToken('Twitch')
+    if (!token) return { platform, ok: false, error: 'Not connected' }
+    const games = info.categoryId ? { data: [{ id: info.categoryId }] } : await twitch.twitchApi(`/helix/games?name=${encodeURIComponent(info.category)}`, token)
+    const tags = twitchTagsForApi(info.tags)
+    const body = { title: info.title, ...(games.data?.[0]?.id ? { game_id: games.data[0].id } : {}), ...(tags ? { tags } : {}) }
+    try {
+      await twitch.twitchApi(`/helix/channels?broadcaster_id=${token.userId}`, token, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      return { platform, ok: true }
+    } catch (error) {
+      return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  if (platform === 'Kick') {
+    const patch = kickChannelPatch({ title: info.title, category: info.category, categoryId: info.categoryId, tags: info.tags })
+    try {
+      const response = await kick.kickApi('/channels', undefined, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch.body) })
+      if (!response.ok) return { platform, ok: false, error: await response.text() }
+      return { platform, ok: true, ...(patch.warning ? { warning: patch.warning } : {}) }
+    } catch (error) {
+      return { platform, ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  return { platform, ok: false, error: 'Unsupported stream platform' }
+}
+
+app.use(cors({ origin: corsOriginDelegate(localApi) }))
+app.use(express.json())
+app.use(createControlGuard(localApi))
+registerHttpRoutes(app, {
+  state,
+  tokens,
+  settings,
+  activityStore,
+  port,
+  envPath,
+  dataDir,
+  envTemplatePath,
+  envBindHost,
+  localApi,
+  currentWatchUrl,
+  relayLogs,
+  companionHost,
+  shutdownCompanion,
+  applyManualYouTubeQuota: (line) => youtube.applyManualYouTubeQuota(line),
+  writeSse,
+  clients,
+  sendMessage,
+  rememberOutgoing,
+  addMessage,
+  scheduleChatSave,
+  broadcast,
+  moderate,
+  applyChatModerationToState,
+  youtubePrivacyDismissed: youtube.youtubePrivacyDismissed,
+  setYoutubePrivacy: (notices) => youtube.setYoutubePrivacy(notices),
+  youtubeQuotaBlocked: () => youtube.youtubeQuotaBlocked(),
+  ensureToken: oauth.ensureToken,
+  youtubeApi: (endpoint, token, options) => youtube.youtubeApi(endpoint, token, options),
+  searchCategories,
+  updateStreamInfo,
+  persistStreamInfo,
+  subscribeTwitchEvents: (sessionId, generation) => twitch.subscribeTwitchEvents(sessionId, generation),
+  setActivityWarning,
+  setChatWarning,
+  setHealth,
+  saveSettings,
+  saveTokens,
+  checkLiveNow,
+  rebindForWatch,
+  streamElementsJwtSlots,
+  startStreamElements,
+  streamElementsChannelFor,
+  closeTwitchChat: () => twitch.closeTwitchChat(),
+  kickChat: kick.kickChat,
+  setYouTubeTargets: (targets) => youtube.setYouTubeTargets(targets),
+  youtubeStreamViewers: youtube.youtubeStreamViewers,
+  publishYouTubeStreams: () => youtube.publishYouTubeStreams(),
+  youtubeChat: youtube.youtubeChat,
+  announcedYoutubePrivacy: youtube.announcedYoutubePrivacy,
+  startAdapter,
+  authorizationUrl: (platform) => oauth.authorizationUrl(platform),
+  exchangeCode: (platform, code, codeVerifier) => oauth.exchangeCode(platform, code, codeVerifier),
+  oauthStates,
+  get sseSeq() { return sseSeq },
+  get twitchEventSubSessionId() { return twitch.twitchEventSubSessionId },
+  get youtubeForceStatus() { return youtube.youtubeForceStatus },
+  set youtubeForceStatus(value) { youtube.youtubeForceStatus = value },
+  get youtubePrivacyWatch() { return youtube.youtubePrivacyWatch },
+  set youtubePrivacyWatch(value) { youtube.youtubePrivacyWatch = value },
+})
+
+const distPath = path.resolve(process.env.RELAY_APP_ROOT ? path.join(process.env.RELAY_APP_ROOT, 'dist') : isPackaged ? path.join(path.dirname(process.execPath), 'dist') : './dist')
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (_request, response) => response.sendFile(path.join(distPath, 'index.html')))
+}
+function dropSseClients() {
+  for (const response of [...clients]) {
+    try { response.end() } catch { /* ignore */ }
+  }
+  clients.clear()
+}
+
+/**
+ * Watch hosts or unhosts `/watch`. The socket only moves when bind is the
+ * default loopback: Watch on → 0.0.0.0, Watch off → 127.0.0.1. A sticky
+ * RELAY_BIND (0.0.0.0 or a LAN IP) stays put.
+ */
+async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const nextHost = listenHostFor(enabled, envBindHost)
+  if (enabled === localApi.lanEnabled && nextHost === localApi.bindHost && httpServer.listening) return { ok: true }
+  if (nextHost === localApi.bindHost && httpServer.listening) {
+    localApi.lanEnabled = enabled
+    if (enabled) ensureWatchToken()
+    return { ok: true }
+  }
+  const previousHost = localApi.bindHost
+  const previousEnabled = localApi.lanEnabled
+  try {
+    await closeListeningServer(httpServer, dropSseClients)
+    await listenOn(httpServer, port, nextHost)
+    localApi.bindHost = nextHost
+    localApi.lanEnabled = enabled
+    if (enabled) ensureWatchToken()
+    return { ok: true }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    try {
+      if (!httpServer.listening) await listenOn(httpServer, port, previousHost)
+      localApi.bindHost = previousHost
+      localApi.lanEnabled = previousEnabled
+    } catch {
+      try {
+        await listenOn(httpServer, port, previousHost || '127.0.0.1')
+        localApi.bindHost = previousHost || '127.0.0.1'
+        localApi.lanEnabled = previousEnabled
+      } catch { /* last-resort bind failed; the next request will error */ }
+    }
+    return { ok: false, error: `Could not ${enabled ? 'listen on the LAN' : 'return to this computer only'}: ${message}` }
+  }
+}
+
+function listenFailureMessage(error: NodeJS.ErrnoException) {
+  return error.code === 'EADDRINUSE'
+    ? `Relay Chat Dock is already running on port ${port}. Use the window that is already open.`
+    : `Relay backend failed to start: ${error.message}`
+}
+
+function printListenBanner() {
+  youtube.ensureYouTubeQuotaDay()
+  youtube.collapseYouTubeHydrationDuplicates()
+  const base = `http://127.0.0.1:${port}`
+  const missing = streamElementsJwtSlots().filter((slot) => !slot.jwt).map((slot) => slot.platform)
+  console.log(`Relay Chat Dock v${getCurrentVersion()}`)
+  console.log(`Data  ${dataDir}`)
+  console.log(`Log   ${resolveLogFilePath(filesDir)}`)
+  if (process.env.RELAY_ELECTRON !== '1') {
+    console.log(`Chat dock      ${base}`)
+    console.log(`Activity dock  ${base}/activity`)
+  }
+  if (localApi.lanEnabled) {
+    console.log(watchLogLine(currentWatchUrl()))
+    console.log(apiToken
+      ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
+      : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
+  } else {
+    console.log(stickyLanBind(envBindHost)
+      ? watchOffLogLine(envBindHost)
+      : 'Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
+  }
+  if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
+  if (youtube.youtubeQuotaUsed) console.log(`YouTube quota ${youtube.youtubeQuotaUsed.toLocaleString()} / ${youtube.youtubeQuotaLimit.toLocaleString()}`)
+  youtube.listenForYouTubeQuotaInput()
+  void checkForUpdates()
+  if (missing.length && !settings.ignoreMissingJwt) {
+    const keys = missing.map((platform) => `STREAMELEMENTS_JWT_${platform.toUpperCase()}`).join(', ')
+    console.error(`  StreamElements  missing JWT${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`)
+    console.error(`  Add ${keys} in the Relay Chat Dock window or production.env.`)
+    console.error('')
+  }
+  openCompanionWindow()
+}
+
+export const relayReady = new Promise<number>((resolve, reject) => {
+  void listenOn(httpServer, port, localApi.bindHost).then(() => {
+    printListenBanner()
+    resolve(port)
+  }, (error: NodeJS.ErrnoException) => {
+    const message = listenFailureMessage(error)
+    console.error(message)
+    reject(error)
+    holdConsoleAndExit(1, message)
+  })
+})
+function openCompanionWindow() {
+  if (!serverShouldOpenWindow({ packaged: isPackaged, platform: process.platform, argv: process.argv, env: process.env })) return
+  const native = findCompanionExe([exeDir, path.join(exeDir, 'deploy')], fs.existsSync)
+  if (native) {
+    const plan = nativeWindowPlan(native, `http://127.0.0.1:${port}/console`)
+    const child = spawn(plan.command, plan.args, plan.options)
+    companionChild = child
+    child.on('exit', (code) => {
+      companionChild = undefined
+      if (code === 2 || companionShutdown) return
+      shutdownCompanion()
+    })
+    child.on('error', (error) => {
+      console.error('Companion window:', error.message)
+      windowsMessageBox('Relay Chat Dock is running, but the companion window failed to open. OBS docks can still use the usual URLs.', 'Relay Chat Dock')
+    })
+    console.log('  Companion window  opening')
+    return
+  }
+  windowsMessageBox(`Relay Chat Dock is running, but relay-chat-dock-window.exe was not found beside the app.\n\nOBS docks still use http://127.0.0.1:${port}`, 'Relay Chat Dock')
+}
+
+for (const platform of ['Twitch', 'Kick', 'YouTube'] as Platform[]) if (tokens[platform]) startAdapter(platform)
+void startStreamElements(true)
+void pollLiveState()
+setInterval(() => { void pollLiveState() }, LIVE_STATUS_POLL_MS)
+setInterval(() => twitch.watchTwitchEventSub(), 2_000)
+setInterval(refreshChatHealth, 5_000)
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    flushChatSave()
+    ingestLog.flush()
+    flushRelayLog()
+    process.exit(0)
+  })
 }
 
 setInterval(() => {

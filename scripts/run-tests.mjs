@@ -5,10 +5,13 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const testsDir = path.join(root, 'tests')
-const files = readdirSync(testsDir)
-  .filter((name) => name.endsWith('.test.ts'))
-  .map((name) => path.join(testsDir, name))
-  .sort()
+const extra = process.argv.slice(2)
+const files = extra.length
+  ? extra.map((name) => path.resolve(root, name))
+  : readdirSync(testsDir)
+    .filter((name) => name.endsWith('.test.ts'))
+    .map((name) => path.join(testsDir, name))
+    .sort()
 
 if (!files.length) {
   console.error('No tests/*.test.ts files found')
