@@ -17,6 +17,8 @@ OBS docks / companion / watch
 
 The docks are static Vite pages served by the same Express app. They do not hold the source of truth. `state` in `server.ts` does. SSE pushes slices (`snapshot`, `chat`, `activity`, `presence`, `settings`).
 
+The chat dock skips `setMessages` when `chatSliceStamp` matches, so a presence frame does not rewrite the whole feed. The stamp includes avatar, color, badges, parts, and other in-place fields because Twitch and Kick backfill photos onto existing rows (#152).
+
 Unified chat send creates one local row; platform echoes merge through `mergeIncomingChat` in `server/logic/chat-merge.ts`.
 
 User-facing setup (OAuth apps, YouTube quota, Watch LAN, installer) lives in the README. Coding conventions live in `AGENTS.md`.

@@ -1,8 +1,8 @@
 /**
  * Shared helpers for the chat and activity docks: avatar/media URL proxying,
- * Kick handle normalization, category preference, feed filtering, combobox
- * highlight math, moderator profile links, and the YouTube Studio URL the
- * stream-controls link opens.
+ * failed-avatar retry policy, Kick handle normalization, category preference,
+ * feed filtering, combobox highlight math, moderator profile links, and the
+ * YouTube Studio URL the stream-controls link opens.
  */
 
 import type { Platform, YoutubePrivacyNotice as SharedYoutubePrivacyNotice, AccountStream } from '../server/types'
@@ -33,6 +33,19 @@ export function dockAvatarSrc(url?: string) {
     if (dockMediaHost(host)) return `/api/media?u=${encodeURIComponent(href)}`
   } catch { return url }
   return url
+}
+
+export const AVATAR_RETRY_MS = 1_500
+export const AVATAR_RETRY_MAX = 2
+
+/** Show the photo unless this exact `src` already failed. A later URL is a new try. */
+export function avatarShowsImage(src?: string, failedSrc?: string) {
+  return Boolean(src) && src !== failedSrc
+}
+
+/** Retry a failed `/api/media` load a couple of times; stop after the cap until `src` changes. */
+export function shouldRetryAvatar(src: string | undefined, failedSrc: string | undefined, attempts: number, maxAttempts = AVATAR_RETRY_MAX) {
+  return Boolean(src) && src === failedSrc && attempts < maxAttempts
 }
 
 /**

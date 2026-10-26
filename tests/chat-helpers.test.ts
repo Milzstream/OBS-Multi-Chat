@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { applyExactCategory, assignTagPlatforms, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, streamDashboardUrl, streamTitleTip, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { applyExactCategory, assignTagPlatforms, AVATAR_RETRY_MAX, avatarShowsImage, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, shouldRetryAvatar, streamDashboardUrl, streamTitleTip, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 
 describe('chat dock helpers', () => {
@@ -14,6 +14,19 @@ describe('chat dock helpers', () => {
     assert.equal(dockAvatarSrc('/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fx.png'), '/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fx.png')
     assert.equal(dockAvatarSrc('https://evil.example/a.png'), 'https://evil.example/a.png')
     assert.equal(dockAvatarSrc(undefined), undefined)
+  })
+
+  it('shows an avatar until that exact src fails, then retries a couple of times', () => {
+    const src = '/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fx.png'
+    assert.equal(avatarShowsImage(undefined, undefined), false)
+    assert.equal(avatarShowsImage(src, undefined), true)
+    assert.equal(avatarShowsImage(src, src), false)
+    assert.equal(avatarShowsImage('/api/media?u=https%3A%2F%2Fstatic-cdn.jtvnw.net%2Fy.png', src), true)
+    assert.equal(shouldRetryAvatar(src, src, 0), true)
+    assert.equal(shouldRetryAvatar(src, src, AVATAR_RETRY_MAX - 1), true)
+    assert.equal(shouldRetryAvatar(src, src, AVATAR_RETRY_MAX), false)
+    assert.equal(shouldRetryAvatar(src, undefined, 0), false)
+    assert.equal(shouldRetryAvatar(undefined, undefined, 0), false)
   })
 
   it('uses a Kick slug when present and otherwise converts underscores', () => {

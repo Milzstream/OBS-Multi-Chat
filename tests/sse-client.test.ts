@@ -69,4 +69,21 @@ describe('chat frame compare', () => {
     assert.equal(sameStringList(['a'], ['a']), true)
     assert.equal(sameHealth({ Twitch: { status: 'ok', message: '' } }, { Twitch: { status: 'warn', message: 'down' } }), false)
   })
+
+  it('treats an avatar backfill on the same id as a changed chat slice', () => {
+    const before = [{ id: '1', text: 'hi' }]
+    const after = [{ id: '1', text: 'hi', avatar: 'https://static-cdn.jtvnw.net/x.png' }]
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp(after))
+    assert.equal(chatSliceStamp(after), chatSliceStamp([{ id: '1', text: 'hi', avatar: 'https://static-cdn.jtvnw.net/x.png' }]))
+  })
+
+  it('changes when color, badges, emotes, or source label backfill on the same id', () => {
+    const before = [{ id: '1', text: 'hi', platform: 'Twitch' }]
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], color: '#a970ff' }]))
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], badges: [{ title: 'mod', url: 'https://static-cdn.jtvnw.net/badges/mod.png' }] }]))
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], parts: [{ type: 'emote', url: 'https://static-cdn.jtvnw.net/emote.png' }] }]))
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], sourceLabel: 'Shorts' }]))
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], originalText: 'hola' }]))
+    assert.notEqual(chatSliceStamp(before), chatSliceStamp([{ ...before[0], platforms: ['Twitch', 'Kick'] }]))
+  })
 })

@@ -3,7 +3,7 @@ import { Bell, Hash, Radio, Twitch, Users, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityPlatform } from './activity/ActivityRow'
 import { useAutoScroll, ScrollPausedBadge } from './autoScroll'
 import type { Account as Connection, ChatMessage, Health, Platform, StreamDetails } from '../server/types'
-import { chatProfileUrl, dockAvatarSrc, preferredCategory, profileLinkTitle, visibleChatMessages, youtubePrivacyMessage, type ChatPlatform, type YoutubePrivacyNotice } from './chat-helpers'
+import { AVATAR_RETRY_MS, avatarShowsImage, chatProfileUrl, dockAvatarSrc, preferredCategory, profileLinkTitle, shouldRetryAvatar, visibleChatMessages, youtubePrivacyMessage, type ChatPlatform, type YoutubePrivacyNotice } from './chat-helpers'
 import { ACTIVITY_KIND_GROUP_IDS, visibleActivityEvents } from './activity/format'
 import { ACTIVITY_FILTERS, CHAT_FILTERS, type ActivityFilter, type ChatFilter } from './dock-prefs'
 import { activityDockFields, applyActivitySlice, chatDockFields, subscribeDockSse } from './sse'
@@ -211,8 +211,21 @@ export default function WatchApp() {
 
 function WatchAvatar({ name, src, color }: { name: string; src?: string; color: string }) {
   const [failedSrc, setFailedSrc] = useState<string>()
-  const showImage = Boolean(src) && src !== failedSrc
-  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : displayLetter(name)}</div>
+  const [attempts, setAttempts] = useState(0)
+  const showImage = avatarShowsImage(src, failedSrc)
+  useEffect(() => {
+    setFailedSrc(undefined)
+    setAttempts(0)
+  }, [src])
+  useEffect(() => {
+    if (!shouldRetryAvatar(src, failedSrc, attempts)) return
+    const timer = window.setTimeout(() => {
+      setFailedSrc(undefined)
+      setAttempts((count) => count + 1)
+    }, AVATAR_RETRY_MS)
+    return () => window.clearTimeout(timer)
+  }, [src, failedSrc, attempts])
+  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img key={`${src}:${attempts}`} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : displayLetter(name)}</div>
 }
 
 function WatchMessage({ message, rowIndex, channelLogin, showTranslationMark, token }: { message: ChatMessage; rowIndex: number; channelLogin?: string; showTranslationMark: boolean; token: string }) {

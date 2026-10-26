@@ -26,12 +26,44 @@ function mixStamp(hash: number, value: string) {
   return next
 }
 
-export function chatSliceStamp(messages: { id: string; deleted?: boolean; text?: string }[]) {
+/**
+ * Cheap fingerprint of a chat slice so the dock can skip `setMessages` on a
+ * true no-op. Must include every in-place field the row renders: Twitch and
+ * Kick backfill `avatar` onto the same id about 400ms later, and hashing only
+ * id/deleted/text left letter fallbacks until an OBS refresh (#152).
+ */
+export type ChatSliceRow = {
+  id: string
+  deleted?: boolean
+  text?: string
+  avatar?: string
+  color?: string
+  originalText?: string
+  sourceLabel?: string
+  platform?: string
+  platforms?: string[]
+  badges?: { title?: string; url?: string; label?: string }[]
+  parts?: { type?: string; url?: string; text?: string }[]
+}
+
+export function chatSliceStamp(messages: ChatSliceRow[]) {
   let hash = messages.length >>> 0
   for (const message of messages) {
     hash = mixStamp(hash, message.id)
     hash = mixStamp(hash, message.deleted ? '1' : '0')
     hash = mixStamp(hash, message.text || '')
+    hash = mixStamp(hash, message.avatar || '')
+    hash = mixStamp(hash, message.color || '')
+    hash = mixStamp(hash, message.originalText || '')
+    hash = mixStamp(hash, message.sourceLabel || '')
+    hash = mixStamp(hash, message.platform || '')
+    if (message.platforms) for (const platform of message.platforms) hash = mixStamp(hash, platform)
+    if (message.badges) {
+      for (const badge of message.badges) hash = mixStamp(hash, badge.url || badge.label || badge.title || '')
+    }
+    if (message.parts) {
+      for (const part of message.parts) hash = mixStamp(hash, part.type === 'emote' ? part.url || '' : part.text || '')
+    }
   }
   return hash
 }

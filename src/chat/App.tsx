@@ -85,8 +85,8 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    // Subscribe to Relay's SSE stream; every frame type funnels back into
-    // applySnapshot so the dock mirrors backend state (messages, health, ...)
+    // Subscribe to Relay's SSE stream. chatSliceStamp skips true no-ops and
+    // still applies avatar/badge/emote backfills on the same message id.
     const applySnapshot = (remote: BackendState) => {
       const fields = chatDockFields(remote as unknown as Record<string, unknown>)
       if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)

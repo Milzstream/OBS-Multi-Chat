@@ -24,3 +24,5 @@ Chat, activity, and watch subscribe through `sse.ts`. Local filter/compact prefs
 | `chat/types.ts` | dock-only aliases over `server/types.ts` |
 
 Dock-only helpers (avatar proxy URLs, category combobox, mod menu labels) stay in `chat-helpers.ts`.
+
+`sse.ts` `chatSliceStamp` is the cheap skip for chat frames. It must hash avatar, color, badges, parts, and other in-place fields the row renders. Leave avatar out of the stamp and letter fallbacks stick until an OBS refresh (#152).

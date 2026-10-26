@@ -1,5 +1,5 @@
-import { useState, type MouseEvent } from 'react'
-import { chatProfileUrl, dockAvatarSrc, openDockUrl, profileLinkTitle } from '../chat-helpers'
+import { useEffect, useState, type MouseEvent } from 'react'
+import { AVATAR_RETRY_MS, avatarShowsImage, chatProfileUrl, dockAvatarSrc, openDockUrl, profileLinkTitle, shouldRetryAvatar } from '../chat-helpers'
 import { platformIcon, platformMeta } from './platform'
 import type { ChatMessage } from './types'
 
@@ -10,8 +10,21 @@ function displayLetter(name: string) {
 
 function Avatar({ name, src, color }: { name: string; src?: string; color: string }) {
   const [failedSrc, setFailedSrc] = useState<string>()
-  const showImage = Boolean(src) && src !== failedSrc
-  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : displayLetter(name)}</div>
+  const [attempts, setAttempts] = useState(0)
+  const showImage = avatarShowsImage(src, failedSrc)
+  useEffect(() => {
+    setFailedSrc(undefined)
+    setAttempts(0)
+  }, [src])
+  useEffect(() => {
+    if (!shouldRetryAvatar(src, failedSrc, attempts)) return
+    const timer = window.setTimeout(() => {
+      setFailedSrc(undefined)
+      setAttempts((count) => count + 1)
+    }, AVATAR_RETRY_MS)
+    return () => window.clearTimeout(timer)
+  }, [src, failedSrc, attempts])
+  return <div className="avatar" style={{ backgroundColor: showImage ? 'transparent' : color }}>{showImage ? <img key={`${src}:${attempts}`} src={src} alt="" referrerPolicy="no-referrer" onError={() => setFailedSrc(src)} /> : displayLetter(name)}</div>
 }
 
 export function MessageItem({ message, rowIndex, channelLogin, showTranslationMark, onModerate }: { message: ChatMessage; rowIndex: number; channelLogin?: string; showTranslationMark: boolean; onModerate: (event: MouseEvent, message: ChatMessage) => void }) {
