@@ -131,10 +131,13 @@ function activityNamesMatch(left: ActivityEvent, right: ActivityEvent) {
  * Same alert from StreamElements and the native backup. Follows, raids, and
  * memberships stay collapsed across the 14-day startup backfill. Repeating
  * kinds (subs, cheers, gifts) only collapse inside two minutes, and never
- * when both sides have different user ids.
+ * when both sides have different user ids. Power-ups are stored as cheers with
+ * a Bits amount, so they skip this heuristic and collapse only on matching id
+ * (EventSub redelivery).
  */
 export function activityIsDuplicate(existing: ActivityEvent, incoming: ActivityEvent) {
   if (existing.id && existing.id === incoming.id) return true
+  if (existing.powerUp || incoming.powerUp) return false
   if (existing.platform !== incoming.platform || existing.kind !== incoming.kind) return false
   if ((existing.amount || '') !== (incoming.amount || '')) return false
   if (existing.userId && incoming.userId && existing.userId !== incoming.userId) return false

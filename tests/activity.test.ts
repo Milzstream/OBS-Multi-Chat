@@ -75,6 +75,29 @@ describe('activity store', () => {
     }
   })
 
+  it('keeps Power-up Bits spends distinct from a cheer of the same amount', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-powerup-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      const cheer = { id: 'cheer-1', platform: 'Twitch' as const, kind: 'cheer' as const, user: 'Ada', userId: '7', amount: '100 Bits', time: '2026-09-02T12:00:00.000Z' }
+      const gigantify = { ...cheer, id: 'twitch-bits-msg-1', powerUp: 'gigantify' as const, time: '2026-09-02T12:00:05.000Z' }
+      const effect = { ...cheer, id: 'twitch-bits-msg-2', powerUp: 'message-effect' as const, time: '2026-09-02T12:00:08.000Z' }
+      assert.equal(store.add(cheer), true)
+      assert.equal(store.add(gigantify), true)
+      assert.equal(store.add(effect), true)
+      assert.equal(store.add({ ...gigantify }), false)
+      const ids = store.list().map((event) => event.id)
+      assert.equal(ids.includes('cheer-1'), true)
+      assert.equal(ids.includes('twitch-bits-msg-1'), true)
+      assert.equal(ids.includes('twitch-bits-msg-2'), true)
+      assert.equal(activityIsDuplicate(cheer, gigantify), false)
+      assert.equal(activityIsDuplicate(gigantify, effect), false)
+      assert.equal(activityIsDuplicate(gigantify, { ...gigantify }), true)
+    } finally {
+      try { fs.unlinkSync(file) } catch { /* ignore */ }
+    }
+  })
+
   it('rewrites a dead viewer-card URL back to the public profile', () => {
     const file = path.join(os.tmpdir(), `relay-activity-card-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
     try {
