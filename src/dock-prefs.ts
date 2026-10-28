@@ -8,6 +8,7 @@ export const CHAT_COMPACT_KEY = 'relay.chat.compactMode'
 export const CHAT_FILTER_KEY = 'relay.chat.filter'
 export const ACTIVITY_FILTER_KEY = 'relay.activity.filter'
 export const ACTIVITY_KIND_FILTER_KEY = 'relay.activity.kindFilter'
+export const ACTIVITY_GROUP_GIFTS_KEY = 'relay.activity.groupGifts'
 
 export const CHAT_FILTERS = ['All', 'Twitch', 'Kick', 'YouTube'] as const
 export const ACTIVITY_FILTERS = ['All', 'Twitch', 'Kick', 'YouTube', 'StreamElements'] as const

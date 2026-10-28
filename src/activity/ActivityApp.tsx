@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Bell, Filter, FlaskConical, Hash, Radio, Twitch, Youtube } from 'lucide-react'
 import { ActivityRow, platformColor, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './ActivityRow'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
-import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, ACTIVITY_KIND_FILTER_KEY, parseStoredFilter, parseStoredStringSet, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
-import { ACTIVITY_KIND_GROUP_IDS, ACTIVITY_KIND_GROUPS, visibleActivityEvents } from './format'
+import { ACTIVITY_FILTER_KEY, ACTIVITY_FILTERS, ACTIVITY_GROUP_GIFTS_KEY, ACTIVITY_KIND_FILTER_KEY, parseStoredBoolean, parseStoredFilter, parseStoredStringSet, readLocalPref, writeLocalPref, type ActivityFilter } from '../dock-prefs'
+import { ACTIVITY_KIND_GROUP_IDS, ACTIVITY_KIND_GROUPS, activityListRows, visibleActivityEvents } from './format'
 import { activityDockFields, applyActivitySlice, subscribeDockSse } from '../sse'
 import { ACTIVITY_ROW_ESTIMATE, useVirtualWindow } from '../virtualList'
 
@@ -120,6 +120,7 @@ export default function ActivityApp() {
   const [dismissedWarnings, setDismissedWarnings] = useState<string[]>([])
   const [filter, setFilter] = useState<Filter>(() => parseStoredFilter(readLocalPref(ACTIVITY_FILTER_KEY), ACTIVITY_FILTERS, 'All'))
   const [kindFilter, setKindFilter] = useState<string[]>(() => parseStoredStringSet(readLocalPref(ACTIVITY_KIND_FILTER_KEY), ACTIVITY_KIND_GROUP_IDS))
+  const [groupGifts, setGroupGifts] = useState(() => parseStoredBoolean(readLocalPref(ACTIVITY_GROUP_GIFTS_KEY), true))
   const [now, setNow] = useState(Date.now())
   const [backendOnline, setBackendOnline] = useState(false)
   const [showTests, setShowTests] = useState(false)
@@ -139,6 +140,10 @@ export default function ActivityApp() {
   useEffect(() => {
     writeLocalPref(ACTIVITY_KIND_FILTER_KEY, JSON.stringify(kindFilter))
   }, [kindFilter])
+
+  useEffect(() => {
+    writeLocalPref(ACTIVITY_GROUP_GIFTS_KEY, String(groupGifts))
+  }, [groupGifts])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 30_000)
@@ -177,8 +182,8 @@ export default function ActivityApp() {
     })
   }, [])
 
-  const visible = useMemo(() => visibleActivityEvents(events, filter, kindFilter), [events, filter, kindFilter])
-  const { paused, onScroll: onPinScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.id)
+  const visible = useMemo(() => activityListRows(visibleActivityEvents(events, filter, kindFilter), groupGifts), [events, filter, kindFilter, groupGifts])
+  const { paused, onScroll: onPinScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.event.id)
   const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.length, ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
   const kindsRestricted = kindFilter.length !== ACTIVITY_KIND_GROUP_IDS.length
   const warningMessages = [...new Set(activityWarnings)]
@@ -231,6 +236,10 @@ export default function ActivityApp() {
               </label>
             )
           })}
+          <label className="settings-toggle activity-view-toggle">
+            <span>Group gifted subs under the gifter</span>
+            <input type="checkbox" checked={groupGifts} onChange={() => setGroupGifts((on) => !on)} />
+          </label>
         </div>
       ) : null}
       {showTests ? (
@@ -256,8 +265,8 @@ export default function ActivityApp() {
           {visible.length ? (
             <>
               <div className="virtual-spacer" style={{ height: padTop }} aria-hidden="true" />
-              {visible.slice(start, end).map((event) => (
-                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} channelLogin={twitchChannel} onDelete={(id) => {
+              {visible.slice(start, end).map(({ event, nested, synthetic }) => (
+                <ActivityRow key={event.id} event={event} age={relativeTime(event.time, now)} channelLogin={twitchChannel} nested={nested} onDelete={synthetic ? undefined : (id) => {
                   setEvents((current) => current.filter((item) => item.id !== id))
                   void fetch('/api/activity/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }).then((response) => {
                     if (!response.ok) setTestStatus('Could not delete that alert')

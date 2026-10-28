@@ -46,6 +46,8 @@ export type ActivityEvent = {
   powerUp?: ActivityPowerUp
   feed?: ActivityFeed
   tier?: ActivitySubTier
+  /** Who gifted this sub. Set only on a gifted sub's row, which is the recipient's. */
+  giftedBy?: string
 }
 
 /** Kick handles in messages are the dash-separated URL slug, not the display username. Normalize to that form. */
@@ -227,7 +229,7 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
       try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
       return true
     },
-    /** `true` for a new row, `'updated'` when a duplicate filled in a missing sub plan, `false` when dropped. */
+    /** `true` for a new row, `'updated'` when a duplicate filled in a missing sub plan or gifter, `false` when dropped. */
     add(incoming: ActivityEvent): boolean | 'updated' {
       const user = String(incoming.user || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
       const source = incoming.source || incoming.platform
@@ -241,10 +243,18 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
       }
       const duplicate = events.find((item) => activityIsDuplicate(item, event))
       if (duplicate) {
-        // The first copy of a sub can lack the plan (channel.subscribe never says Prime).
-        // A later copy that knows it fills it in instead of being dropped.
-        if (!event.tier || duplicate.tier === event.tier || (duplicate.tier && event.tier !== 'prime')) return false
-        duplicate.tier = event.tier
+        // The first copy of a sub can lack the plan (channel.subscribe never says Prime) or
+        // the gifter. A later copy that knows them fills them in instead of being dropped.
+        let filled = false
+        if (event.tier && duplicate.tier !== event.tier && (!duplicate.tier || event.tier === 'prime')) {
+          duplicate.tier = event.tier
+          filled = true
+        }
+        if (event.giftedBy && !duplicate.giftedBy) {
+          duplicate.giftedBy = event.giftedBy
+          filled = true
+        }
+        if (!filled) return false
         if (!isTestEvent(duplicate)) {
           try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
         }

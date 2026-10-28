@@ -142,7 +142,9 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
     userId,
     amount,
     months: kind === 'subscription' || kind === 'membership' ? (Number.isFinite(months) && months > 0 ? months : undefined) : undefined,
-    tier: kind === 'subscription' && source === 'Twitch' ? normalizeSubTier(inner?.tier) : undefined,
+    tier: (kind === 'subscription' || kind === 'gift') && source === 'Twitch' ? normalizeSubTier(inner?.tier) : undefined,
+    // A gifted sub is the recipient's row; `sender` is the gifter's login.
+    giftedBy: kind === 'subscription' && inner?.gifted ? String(inner?.sender || '').replace(/^@+/, '').trim() || 'Anonymous' : undefined,
     viewers: kind === 'raid' && Number.isFinite(viewers) ? viewers : undefined,
     message: String(inner?.message || inner?.comment || root?.donation?.message || '').trim() || undefined,
     time: parseActivityTime(root?.createdAt || inner?.createdAt || payload?.ts),

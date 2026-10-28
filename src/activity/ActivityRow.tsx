@@ -30,6 +30,7 @@ export type ActivityEvent = {
   powerUp?: ActivityPowerUp
   feed?: ActivityFeed
   tier?: ActivitySubTier
+  giftedBy?: string
 }
 
 export const platformColor: Record<ActivityPlatform, string> = {
@@ -78,11 +79,12 @@ export function profileHref(event: ActivityEvent, channelLogin?: string) {
   return chatProfileUrl({ platform: source, user: event.user, userId: event.userId, handle: event.handle }, channelLogin) || event.profileUrl
 }
 
-export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelete }: { event: ActivityEvent; age: string; channelLogin?: string; openIn?: 'dock' | 'browser'; onDelete?: (id: string) => void }) {
+export function ActivityRow({ event, age, channelLogin, openIn = 'dock', nested = false, onDelete }: { event: ActivityEvent; age: string; channelLogin?: string; openIn?: 'dock' | 'browser'; nested?: boolean; onDelete?: (id: string) => void }) {
   const source = event.source || event.platform
   const color = platformColor[event.platform]
   const badge = kindColor(event)
-  const detail = activitySubtitle(event)
+  // Under its gift row the gifter is already shown, so the line skips it.
+  const detail = activitySubtitle(nested ? { ...event, giftedBy: undefined } : event)
   const plan = activityPlanLabel(event)
   const href = profileHref(event, source === 'Twitch' ? channelLogin : undefined)
   const [armed, setArmed] = useState(false)
@@ -100,7 +102,7 @@ export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelet
     click.preventDefault()
     setArmed((current) => !current)
   }
-  const className = href ? 'activity-row activity-row-link' : 'activity-row'
+  const className = [href ? 'activity-row activity-row-link' : 'activity-row', nested && !onDelete ? 'activity-nested' : ''].filter(Boolean).join(' ')
   const style = { ['--row-color' as string]: color }
   const title = href ? profileLinkTitle(source) : undefined
   const body = (
@@ -121,7 +123,7 @@ export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelet
     : <button type="button" className={className} style={style} title={title} onClick={href ? openProfile : undefined}>{body}</button>
   if (!onDelete) return row
   return (
-    <div className={armed ? 'activity-row-wrap armed' : 'activity-row-wrap'} onContextMenu={revealDelete}>
+    <div className={['activity-row-wrap', armed ? 'armed' : '', nested ? 'activity-nested' : ''].filter(Boolean).join(' ')} onContextMenu={revealDelete}>
       {row}
       <button type="button" className="activity-delete" aria-label={`Delete ${event.user}`} title="Delete alert" onClick={(click) => { click.stopPropagation(); onDelete(event.id) }}>
         <X size={14} />

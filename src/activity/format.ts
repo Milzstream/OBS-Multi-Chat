@@ -32,9 +32,9 @@ export function activityKindLabel(event: { platform: string; kind: string; power
 
 const planLabel: Record<string, string> = { prime: 'PRIME', '1000': 'TIER 1', '2000': 'TIER 2', '3000': 'TIER 3' }
 
-/** Twitch sub plan shown as its own chip beside the kind pill. Only subs carry one. */
+/** Twitch sub plan shown as its own chip beside the kind pill. Subs and gift subs carry one. */
 export function activityPlanLabel(event: { kind: string; tier?: string }) {
-  if (event.kind !== 'subscription' || !event.tier) return
+  if ((event.kind !== 'subscription' && event.kind !== 'gift') || !event.tier) return
   return planLabel[event.tier]
 }
 
@@ -84,12 +84,94 @@ export function visibleActivityEvents<T extends { platform: string; kind: string
   return [...rows].sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0))
 }
 
-/** Build the row's subtitle by joining whatever fields the event has: amount, streak months, viewer count, and/or message. */
-export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string }) {
+/** Build the row's subtitle by joining whatever fields the event has: gifter, amount, streak months, viewer count, and/or message. */
+export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string; giftedBy?: string }) {
   const bits: string[] = []
+  if (event.giftedBy) bits.push(`Gift from ${event.giftedBy}`)
   if (event.amount) bits.push(event.amount)
   if (event.months) bits.push(`${event.months} mo`)
   if (event.viewers != null) bits.push(`${event.viewers.toLocaleString()} viewers`)
   if (event.message) bits.push(event.message)
   return bits.join(' · ')
+}
+
+/** A gifted sub this close to a gift by the same gifter belongs to it. Gift bombs land within seconds. */
+export const GIFT_GROUP_MS = 2 * 60_000
+
+type GroupableEvent = { id: string; platform: string; kind: string; user: string; handle?: string; time: string; amount?: string; tier?: string; giftedBy?: string; source?: string }
+export type ActivityListRow<T> = { event: T; nested: boolean; synthetic?: boolean }
+
+function giftKey(value?: string) {
+  return String(value || '').replace(/^@+/, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+function at(event: { time: string }) {
+  return Date.parse(event.time) || 0
+}
+
+/**
+ * The dock's row list. With grouping on, each gifted sub moves under its
+ * gifter's gift row, oldest first. Gifted subs with no gift row nearby (a
+ * single sub gifted to one person, or a gift that came from another source)
+ * get a gift row made up from them. Expects `events` newest first, as
+ * `visibleActivityEvents` returns them.
+ */
+export function activityListRows<T extends GroupableEvent>(events: T[], groupGifts: boolean): ActivityListRow<T>[] {
+  if (!groupGifts) return events.map((event) => ({ event, nested: false }))
+  const gifts = events.filter((event) => event.kind === 'gift')
+  // A "3 gifts" row takes at most three subs, so a later gift by the same person starts its own group.
+  const room = new Map(gifts.map((gift) => [gift.id, Number(String(gift.amount || '').match(/^(\d+)/)?.[1]) || Infinity]))
+  const children = new Map<string, T[]>()
+  const orphans: T[] = []
+  for (const event of [...events].sort((left, right) => at(left) - at(right))) {
+    if (event.kind !== 'subscription' || !event.giftedBy) continue
+    const key = giftKey(event.giftedBy)
+    let best: T | undefined
+    for (const gift of gifts) {
+      if (gift.platform !== event.platform || (room.get(gift.id) || 0) <= 0) continue
+      if (giftKey(gift.user) !== key && giftKey(gift.handle) !== key) continue
+      const gap = Math.abs(at(gift) - at(event))
+      if (gap > GIFT_GROUP_MS) continue
+      if (!best || gap < Math.abs(at(best) - at(event))) best = gift
+    }
+    if (!best) {
+      orphans.push(event)
+      continue
+    }
+    room.set(best.id, (room.get(best.id) || 0) - 1)
+    children.set(best.id, [...(children.get(best.id) || []), event])
+  }
+  // Orphans from the same gifter close together share one made-up gift row.
+  const made: Array<{ parent: T; kids: T[] }> = []
+  for (const event of [...orphans].sort((left, right) => at(left) - at(right))) {
+    const group = made.find((item) => item.parent.platform === event.platform && giftKey(item.parent.user) === giftKey(event.giftedBy) && at(event) - at(item.kids[item.kids.length - 1]) <= GIFT_GROUP_MS)
+    if (group) {
+      group.kids.push(event)
+      continue
+    }
+    made.push({ parent: { ...event, id: `gift-group-${event.id}`, kind: 'gift', user: event.giftedBy || 'Anonymous', handle: undefined, giftedBy: undefined } as T, kids: [event] })
+  }
+  for (const group of made) {
+    const count = group.kids.length
+    const tiers = new Set(group.kids.map((kid) => kid.tier))
+    Object.assign(group.parent, {
+      time: group.kids[count - 1].time,
+      amount: `${count} gift${count === 1 ? '' : 's'}`,
+      tier: tiers.size === 1 ? group.kids[0].tier : undefined,
+      months: undefined,
+      message: undefined,
+      userId: undefined,
+    })
+  }
+  const nested = new Set([...children.values(), ...made.map((group) => group.kids)].flat().map((event) => event.id))
+  const madeById = new Map(made.map((group) => [group.parent.id, group]))
+  const top = [...events.filter((event) => !nested.has(event.id)), ...made.map((group) => group.parent)].sort((left, right) => at(right) - at(left))
+  const rows: ActivityListRow<T>[] = []
+  for (const event of top) {
+    const group = madeById.get(event.id)
+    rows.push({ event, nested: false, ...(group ? { synthetic: true } : {}) })
+    const kids = group ? group.kids : [...(children.get(event.id) || [])].sort((left, right) => at(left) - at(right))
+    for (const kid of kids) rows.push({ event: kid, nested: true })
+  }
+  return rows
 }

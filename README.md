@@ -231,6 +231,8 @@ The banner waits before it complains. StreamElements hydrates its JWTs over the 
 
 The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
 
+Gifted subs sit under the person who gifted them, slightly indented, so you see the gifter first. A gift row takes as many subs as it says it gifted, from within two minutes of it. A gifted sub with no gift row nearby, such as one sub gifted straight to one person, gets a gift row of its own built from the gifter's name. Turn off **Group gifted subs under the gifter** in the same funnel menu to list every row on its own instead; each gifted sub then says who gifted it. The choice is saved per dock. Gift rows show the tier chip too. Subs stored before this change have no gifter, so they stay where they are.
+
 Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Left-click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
 **Right-click a pill to delete it.** An X slides out from the right side. Click the X to remove that alert from the dock and from `activity.json`. Right-click again, or wait 5 seconds, and the X hides without deleting. Emulated alerts are saved like real ones, so this is how you clear a test. The watch page does not get this control.
