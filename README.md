@@ -231,7 +231,7 @@ The banner waits before it complains. StreamElements hydrates its JWTs over the 
 
 The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
 
-Gifted subs sit under the person who gifted them, slightly indented, so you see the gifter first. A gift row takes as many subs as it says it gifted, from within two minutes of it. A gifted sub with no gift row nearby, such as one sub gifted straight to one person, gets a gift row of its own built from the gifter's name. Turn off **Group gifted subs under the gifter** in the same funnel menu to list every row on its own instead; each gifted sub then says who gifted it. The choice is saved per dock. Gift rows show the tier chip too. Subs stored before this change have no gifter, so they stay where they are.
+Gifted subs sit under the person who gifted them, slightly indented, so you see the gifter first. A gift row takes as many subs as it says it gifted, from within two minutes of it. A gifted sub with no gift row nearby, such as one sub gifted straight to one person, gets a gift row of its own built from the gifter's name. Turn off **Group gifted subs under the gifter** in the same funnel menu to list every row on its own instead; each gifted sub then says who gifted it. The choice is saved per dock. Gift rows show the tier chip too. Older gifted subs pick up their gifter from StreamElements on the next launch, as long as they are under 60 days old.
 
 Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Left-click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
 
@@ -245,7 +245,7 @@ A Twitch sub keeps its **SUBSCRIPTION** pill, and a second chip beside it shows 
 
 Twitch Power-ups paid with Bits (Gigantify an Emote, Message Effects, On-Screen Celebrations) show as Bits alerts labeled **GIGANTIFY**, **MESSAGE EFFECT**, or **CELEBRATION**. A custom Power-up the streamer made shows as **POWER-UP** with its title, and so does any new built-in Power-up Twitch adds later. A Power-up never fires a normal cheer, so Relay reads them from Twitch directly, even when native backup is off. They use the Cheer alert toggle and sound.
 
-On launch, Relay also loads the last 14 days of StreamElements activity, so an alert that arrived while the app was closed still shows up, and a sub stored earlier without its plan picks up Prime or its tier. Older rows stay as they are.
+On launch, Relay also loads the last 14 days of StreamElements activity, so an alert that arrived while the app was closed still shows up, and a sub stored earlier without its plan picks up Prime or its tier. For subs and gifts up to 60 days old it only fills in a missing plan or gifter on rows already in the feed; it never adds those older rows back, so an alert you deleted stays deleted.
 
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 

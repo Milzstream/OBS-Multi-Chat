@@ -7,7 +7,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { activityIsDuplicate, createActivityStore, normalizeSubTier, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
-import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
+import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, STREAMELEMENTS_REPAIR_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { kindColor, platformColor, profileHref } from '../src/activity/ActivityRow.tsx'
 import { activityKindLabel, activityListRows, activityPlanColor, activityPlanLabel, activitySubtitle, GIFT_GROUP_MS, kindLabel, pillTextColor } from '../src/activity/format.ts'
@@ -289,6 +289,29 @@ describe('gifted subs', () => {
       ev('far', 'subscription', 'Late', GIFT_GROUP_MS / 1000 + 5, { giftedBy: 'gin1336' }),
     ])
     assert.deepEqual(shape(activityListRows(events, true)), ['gin1336* 1 gift', '  Late', 'gin1336* 1 gift', '  KickKid', 'gin1336 1 gift'])
+  })
+
+  it('fills older rows from history without adding rows that are not stored', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-fill-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      const stored = { id: '6acbf0327f7cecfdcde49ce8', platform: 'Twitch' as const, kind: 'subscription' as const, user: 'VannyVenture', handle: 'vannyventure', time: at(0) }
+      assert.equal(store.add(stored), true)
+      assert.equal(store.add({ ...stored, giftedBy: 'gin1336', tier: '1000' }, { fillOnly: true }), 'updated')
+      assert.equal(store.list()[0].giftedBy, 'gin1336')
+      assert.equal(store.list()[0].tier, '1000')
+      assert.equal(store.add({ id: 'deleted-long-ago', platform: 'Twitch', kind: 'subscription', user: 'Gone', time: at(10) }, { fillOnly: true }), false)
+      assert.equal(store.list().length, 1)
+    } finally {
+      fs.rmSync(file, { force: true })
+      fs.rmSync(`${file}.bak`, { force: true })
+    }
+  })
+
+  it('asks for a longer window of only subs and gifts when repairing', () => {
+    const url = new URL(streamElementsHistoryUrl('chan', Date.parse('2026-10-28T12:00:00.000Z'), 60, STREAMELEMENTS_REPAIR_TYPES))
+    assert.equal(url.searchParams.get('after'), '2026-08-29T12:00:00.000Z')
+    assert.deepEqual(url.searchParams.getAll('types'), ['subscriber', 'subscription', 'communitygiftpurchase'])
   })
 
   it('fills in a gifter missing from the first copy of a gifted sub', () => {

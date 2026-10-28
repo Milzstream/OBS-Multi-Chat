@@ -229,8 +229,11 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
       try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
       return true
     },
-    /** `true` for a new row, `'updated'` when a duplicate filled in a missing sub plan or gifter, `false` when dropped. */
-    add(incoming: ActivityEvent): boolean | 'updated' {
+    /**
+     * `true` for a new row, `'updated'` when a duplicate filled in a missing sub plan or gifter, `false` when dropped.
+     * `fillOnly` never adds a row; it only fills in rows that are already stored.
+     */
+    add(incoming: ActivityEvent, options: { fillOnly?: boolean } = {}): boolean | 'updated' {
       const user = String(incoming.user || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
       const source = incoming.source || incoming.platform
       const event: ActivityEvent = {
@@ -260,6 +263,7 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
         }
         return 'updated'
       }
+      if (options.fillOnly) return false
       const next = [event, ...events]
       const tests = next.filter(isTestEvent)
       const real = newestFirst(next.filter((item) => !isTestEvent(item))).slice(0, cap)

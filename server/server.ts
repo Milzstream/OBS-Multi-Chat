@@ -19,7 +19,7 @@ import { closeListeningServer, corsOriginDelegate, createControlGuard, lanWatchU
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
-import { StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
+import { STREAMELEMENTS_REPAIR_DAYS, STREAMELEMENTS_REPAIR_TYPES, StreamElementsClient, fetchRecentActivities, hydrateStreamElements } from './streamelements.js'
 import { checkForUpdates, getCurrentVersion, isDesktopPackaged } from './check-update.js'
 import { installRelayObsDocks, obsProcessRunning, operatorFilesDir } from './obs-docks.js'
 import { registerHttpRoutes } from './http-routes.js'
@@ -470,8 +470,8 @@ async function drainTranslations() {
   translating = false
 }
 
-function addActivity(event: ActivityEvent) {
-  const added = activityStore.add(event)
+function addActivity(event: ActivityEvent, options?: { fillOnly?: boolean }) {
+  const added = activityStore.add(event, options)
   if (!added) return
   state.activity = activityStore.list()
   if (added === true) console.log(activityLogLine(event))
@@ -483,8 +483,8 @@ function addNativeActivity(event: ActivityEvent, options: { always?: boolean } =
   addActivity({ ...event, feed: event.feed || 'native' })
 }
 
-function addStreamElementsActivity(event: ActivityEvent) {
-  addActivity({ ...event, feed: event.feed || 'streamelements' })
+function addStreamElementsActivity(event: ActivityEvent, options?: { fillOnly?: boolean }) {
+  addActivity({ ...event, feed: event.feed || 'streamelements' }, options)
 }
 
 async function streamElementsChannelFor(provider: string, anyChannel = false) {
@@ -594,6 +594,9 @@ async function startStreamElements(backfill = false) {
     for (const channel of channels) {
       const events = await fetchRecentActivities(channel)
       for (const event of events) addStreamElementsActivity(event)
+      // Older sub and gift rows only get a missing gifter or plan filled in. Nothing is re-added.
+      const older = await fetchRecentActivities(channel, { days: STREAMELEMENTS_REPAIR_DAYS, types: STREAMELEMENTS_REPAIR_TYPES, tips: false })
+      for (const event of older) addStreamElementsActivity(event, { fillOnly: true })
     }
   }
   return failed
