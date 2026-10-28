@@ -477,8 +477,8 @@ function addActivity(event: ActivityEvent) {
   broadcast()
 }
 
-function addNativeActivity(event: ActivityEvent) {
-  if (!settings.activityFallback) return
+function addNativeActivity(event: ActivityEvent, options: { always?: boolean } = {}) {
+  if (!settings.activityFallback && !options.always) return
   addActivity(event)
 }
 

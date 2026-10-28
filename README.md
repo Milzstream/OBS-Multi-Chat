@@ -239,6 +239,8 @@ Newest alerts stay at the top; older rows drop down. Each row shows the platform
 
 **Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. A YouTube member join is a membership. A YouTube subscriber is its own alert, not a member. Subscribers were not shown before 0.9.3.
 
+Twitch Power-ups paid with Bits (Gigantify an Emote, Message Effects, On-Screen Celebrations) show as Bits alerts labeled **GIGANTIFY**, **MESSAGE EFFECT**, or **CELEBRATION**. A custom Power-up the streamer made shows as **POWER-UP** with its title, and so does any new built-in Power-up Twitch adds later. A Power-up never fires a normal cheer, so Relay reads them from Twitch directly, even when native backup is off. They use the Cheer alert toggle and sound.
+
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 
 The flask fires a StreamElements mock activity, the same call the overlay editor makes when Preview LIVE on stream is checked. The row shows up when that event comes back on the activities socket, and it is saved like any other alert. A replay of an alert already in history is dropped, because StreamElements reuses the activity id.

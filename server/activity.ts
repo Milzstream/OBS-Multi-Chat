@@ -11,6 +11,11 @@ import { ACTIVITY_MAX } from './types.js'
 
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
+/**
+ * Twitch Power-up bought with Bits. Stored on a `cheer` so filters, alert toggles, and sounds treat it as Bits.
+ * `custom` is one the streamer made; `other` is a built-in type this build does not know yet.
+ */
+export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
 
 export type ActivityEvent = {
   id: string
@@ -26,6 +31,7 @@ export type ActivityEvent = {
   time: string
   profileUrl?: string
   source?: ActivityPlatform
+  powerUp?: ActivityPowerUp
 }
 
 /** Kick handles in messages are the dash-separated URL slug, not the display username. Normalize to that form. */

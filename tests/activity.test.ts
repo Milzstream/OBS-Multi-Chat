@@ -10,7 +10,7 @@ import { missingStreamElementsMessage, twitchEventToActivity } from '../server/l
 import { activityFromStreamElements, postStreamElementsMock, streamElementsEmulatePlan, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { profileHref } from '../src/activity/ActivityRow.tsx'
-import { activitySubtitle, kindLabel } from '../src/activity/format.ts'
+import { activityKindLabel, activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
 describe('activity time and profiles', () => {
   it('parses unix seconds, millis, ISO, and $date wrappers', () => {
@@ -117,6 +117,61 @@ describe('Twitch EventSub activity', () => {
     assert.equal(twitchEventToActivity('channel.subscription.gift', { is_anonymous: true, total: 5 }, now)?.user, 'Anonymous')
     assert.equal(twitchEventToActivity('channel.cheer', { user_name: 'Ada', bits: 100, message: 'pog' }, now)?.amount, '100 Bits')
     assert.equal(twitchEventToActivity('channel.raid', { from_broadcaster_user_login: 'host', from_broadcaster_user_id: '9', viewers: 40 }, now)?.viewers, 40)
+  })
+
+  it('maps Power-ups from channel.bits.use and leaves plain cheers to channel.cheer', () => {
+    const gigantify = twitchEventToActivity('channel.bits.use', {
+      user_id: '7', user_login: 'ada', user_name: 'Ada', bits: 30, type: 'power_up',
+      power_up: { type: 'gigantify_an_emote', emote: { id: '25', name: 'Kappa' } },
+      message: { text: 'look Kappa', fragments: [] },
+    }, now, 'msg-1')
+    assert.equal(gigantify?.kind, 'cheer')
+    assert.equal(gigantify?.powerUp, 'gigantify')
+    assert.equal(gigantify?.amount, '30 Bits')
+    assert.equal(gigantify?.message, 'Kappa')
+    assert.equal(gigantify?.id, 'twitch-bits-msg-1')
+    assert.equal(activityKindLabel(gigantify!), 'GIGANTIFY')
+
+    const effect = twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 100, type: 'power_up', power_up: { type: 'message_effect', message_effect_id: 'cosmic' }, message: { text: 'hello' } }, now)
+    assert.equal(effect?.powerUp, 'message-effect')
+    assert.equal(effect?.message, 'hello')
+    assert.equal(activityKindLabel(effect!), 'MESSAGE EFFECT')
+
+    const celebration = twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 250, type: 'power_up', power_up: { type: 'celebration' } }, now)
+    assert.equal(celebration?.powerUp, 'celebration')
+    assert.equal(celebration?.message, undefined)
+
+    assert.equal(twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 100, type: 'cheer', message: { text: 'Cheer100' } }, now), undefined)
+  })
+
+  it('shows custom Power-ups with their title and keeps unknown types as a generic Power-up', () => {
+    const custom = twitchEventToActivity('channel.bits.use', {
+      user_name: 'Ada', bits: 50, type: 'custom_power_up',
+      custom_power_up: { title: 'Hydrate!', reward_id: 'r1' },
+      message: { text: 'drink water' },
+    }, now, 'msg-2')
+    assert.equal(custom?.kind, 'cheer')
+    assert.equal(custom?.powerUp, 'custom')
+    assert.equal(custom?.amount, '50 Bits')
+    assert.equal(custom?.message, 'Hydrate! · drink water')
+    assert.equal(activityKindLabel(custom!), 'POWER-UP')
+    assert.equal(twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 50, type: 'custom_power_up', custom_power_up: { title: 'Hydrate!' } }, now)?.message, 'Hydrate!')
+
+    const newBuiltIn = twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 20, type: 'power_up', power_up: { type: 'confetti_rain', emote: { name: 'Kappa' } } }, now)
+    assert.equal(newBuiltIn?.powerUp, 'other')
+    assert.equal(newBuiltIn?.message, 'Kappa')
+    assert.equal(activityKindLabel(newBuiltIn!), 'POWER-UP')
+
+    const newTopLevel = twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 10, type: 'mystery_spend' }, now)
+    assert.equal(newTopLevel?.powerUp, 'other')
+    assert.equal(newTopLevel?.amount, '10 Bits')
+
+    assert.equal(twitchEventToActivity('channel.bits.use', { user_name: 'Ada', bits: 0, type: 'power_up', power_up: { type: 'celebration' } }, now), undefined)
+  })
+
+  it('keeps the plain CHEER label when there is no Power-up', () => {
+    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'cheer' }), 'CHEER')
+    assert.equal(activityKindLabel({ platform: 'Kick', kind: 'cheer' }), 'KICKS')
   })
 })
 

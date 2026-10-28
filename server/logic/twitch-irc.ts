@@ -3,7 +3,7 @@
  */
 
 import crypto from 'node:crypto'
-import type { ActivityEvent } from '../activity.js'
+import type { ActivityEvent, ActivityPowerUp } from '../activity.js'
 import type { ChatBadge, ChatMessage, ChatModeration, MessagePart } from '../types.js'
 
 export function twitchBadgeLabel(set: string) {
@@ -147,7 +147,14 @@ export function sanitizeIrcMessage(text: string) {
 }
 
 
-export function twitchEventToActivity(type: string, event: any, now = new Date().toISOString()): ActivityEvent | undefined {
+const TWITCH_POWER_UPS: Record<string, ActivityPowerUp> = {
+  gigantify_an_emote: 'gigantify',
+  message_effect: 'message-effect',
+  celebration: 'celebration',
+}
+
+/** `messageId` is the EventSub notification id, so a redelivered notification collapses to one row. */
+export function twitchEventToActivity(type: string, event: any, now = new Date().toISOString(), messageId?: string): ActivityEvent | undefined {
   const time = now
   if (type === 'channel.follow') {
     return { id: `twitch-follow-${event?.user_id}-${event?.followed_at || time}`, platform: 'Twitch', kind: 'follow', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time: event?.followed_at || time }
@@ -179,6 +186,30 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
     const bits = Number(event?.bits)
     const user = event?.is_anonymous ? 'Anonymous' : event?.user_name || event?.user_login || 'Twitch user'
     return { id: `twitch-cheer-${event?.user_id || 'anon'}-${time}`, platform: 'Twitch', kind: 'cheer', user, userId: event?.user_id ? String(event.user_id) : undefined, amount: Number.isFinite(bits) ? `${bits} Bits` : undefined, message: String(event?.message || '').trim() || undefined, time }
+  }
+  if (type === 'channel.bits.use') {
+    // Plain cheers also arrive here, but `channel.cheer` already covers them. Everything else
+    // is a Power-up: built-in (`power_up`), streamer-made (`custom_power_up`), or a type
+    // Twitch adds later, which still shows as a generic Power-up instead of being dropped.
+    if (event?.type === 'cheer') return
+    const bits = Number(event?.bits)
+    if (!Number.isFinite(bits) || bits <= 0) return
+    const custom = event?.type === 'custom_power_up'
+    const powerUp: ActivityPowerUp = custom ? 'custom' : TWITCH_POWER_UPS[String(event?.power_up?.type || '')] || 'other'
+    const emote = String(event?.power_up?.emote?.name || '').trim()
+    const text = String(event?.message?.text || '').trim()
+    const title = String(event?.custom_power_up?.title || '').trim()
+    return {
+      id: messageId ? `twitch-bits-${messageId}` : `twitch-powerup-${event?.user_id || 'anon'}-${time}`,
+      platform: 'Twitch',
+      kind: 'cheer',
+      powerUp,
+      user: event?.user_name || event?.user_login || 'Twitch user',
+      userId: event?.user_id ? String(event.user_id) : undefined,
+      amount: `${bits} Bits`,
+      message: (powerUp === 'gigantify' ? emote : custom ? [title, text].filter(Boolean).join(' · ') : text || emote) || undefined,
+      time,
+    }
   }
   if (type === 'channel.raid') {
     const viewers = Number(event?.viewers)
