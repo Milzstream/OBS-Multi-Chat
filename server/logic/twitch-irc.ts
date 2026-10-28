@@ -207,6 +207,7 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
       return {
         id: messageId ? `twitch-notice-${messageId}` : `twitch-sub_gift-${gift.recipient_user_id}-${time}`,
         platform: 'Twitch',
+        feed: 'twitch-notice',
         kind: 'subscription',
         user: recipient,
         userId: gift.recipient_user_id ? String(gift.recipient_user_id) : undefined,
@@ -221,6 +222,7 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
     return {
       id: messageId ? `twitch-notice-${messageId}` : `twitch-${notice}-${event?.chatter_user_id}-${time}`,
       platform: 'Twitch',
+      feed: 'twitch-notice',
       kind: 'subscription',
       user: event?.chatter_user_login || event?.chatter_user_name || 'Twitch user',
       userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,

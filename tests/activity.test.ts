@@ -98,6 +98,27 @@ describe('activity store', () => {
     }
   })
 
+  it('folds a Twitch sub notice into the channel.subscribe row and keeps its Prime plan', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-notice-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      const now = '2026-09-02T12:00:00.000Z'
+      const subscribe = { ...twitchEventToActivity('channel.subscribe', { user_login: 'ada', user_id: '7', tier: '1000' }, now)!, feed: 'native' as const }
+      const notice = { ...twitchEventToActivity('channel.chat.notification', { notice_type: 'sub', chatter_user_id: '7', chatter_user_login: 'ada', sub: { sub_tier: '1000', is_prime: true } }, '2026-09-02T12:00:01.000Z', 'n1')!, feed: 'native' as const }
+      assert.equal(twitchEventToActivity('channel.chat.notification', { notice_type: 'sub', chatter_user_id: '7', sub: {} }, now)?.feed, 'twitch-notice')
+      assert.equal(store.add(subscribe), true)
+      // addNativeActivity keeps a feed the parser already set, so the notice stays on its own wire.
+      assert.equal(store.add({ ...notice, feed: 'twitch-notice' }), 'updated')
+      assert.equal(store.list().length, 1)
+      assert.equal(store.list()[0].tier, 'prime')
+      // A second channel.subscribe for the same person is a second spend and stays its own row.
+      assert.equal(store.add({ ...subscribe, id: 'twitch-sub-7-again', time: '2026-09-02T12:00:30.000Z' }), true)
+    } finally {
+      fs.rmSync(file, { force: true })
+      fs.rmSync(`${file}.bak`, { force: true })
+    }
+  })
+
   it('collapses a cheer across feeds and keeps two sends on the same feed', () => {
     const file = path.join(os.tmpdir(), `relay-activity-feed-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
     try {

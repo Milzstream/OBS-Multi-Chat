@@ -16,8 +16,12 @@ export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'
  * `custom` is one the streamer made; `other` is a built-in type this build does not know yet.
  */
 export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
-/** Which wire delivered the alert. `source` is the platform the event is about. */
-export type ActivityFeed = 'native' | 'streamelements'
+/**
+ * Which wire delivered the alert. `source` is the platform the event is about.
+ * `twitch-notice` is Twitch's chat notification for a sub, resub, or gifted sub: the
+ * same spend `channel.subscribe` reports, sent on a second wire, so the two fold together.
+ */
+export type ActivityFeed = 'native' | 'streamelements' | 'twitch-notice'
 /** Twitch sub plan. `prime` is a Prime Gaming sub; the numbers are Twitch's tier codes. */
 export type ActivitySubTier = 'prime' | '1000' | '2000' | '3000'
 
