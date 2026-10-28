@@ -267,12 +267,27 @@ export async function hydrateStreamElements(jwt: string): Promise<StreamElements
   return { jwt, channelId, handle, provider: payload?.provider ? String(payload.provider) : undefined }
 }
 
+/** Every activity type `kindFromSe` maps, so the history covers the same alerts as the live socket. */
+export const STREAMELEMENTS_HISTORY_TYPES = [
+  'follow', 'follower', 'fan', 'subscriber', 'subscription', 'communitygiftpurchase', 'cheer', 'cheerpurchase', 'kicks',
+  'raid', 'host', 'sponsor', 'supporter', 'superchat', 'tip', 'charitycampaigndonation', 'merch', 'purchase', 'redemption',
+] as const
+
+/**
+ * Recent activity for the startup backfill. StreamElements answers an empty
+ * list unless the query has `types`, `after`, and `before` together, so all
+ * three are always sent.
+ */
+export function streamElementsHistoryUrl(channelId: string, now = Date.now(), days = 14) {
+  const params = new URLSearchParams({ limit: '100', after: new Date(now - days * 24 * 60 * 60 * 1000).toISOString(), before: new Date(now).toISOString() })
+  for (const type of STREAMELEMENTS_HISTORY_TYPES) params.append('types', type)
+  return `${API_BASE}/activities/${encodeURIComponent(channelId)}?${params}`
+}
+
 export async function fetchRecentActivities(channel: StreamElementsChannel): Promise<ActivityEvent[]> {
   const headers = { Authorization: `Bearer ${channel.jwt}`, Accept: 'application/json' }
-  const after = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
   const urls = [
-    `${API_BASE}/activities/${encodeURIComponent(channel.channelId)}?limit=50&after=${encodeURIComponent(after)}`,
-    `${API_BASE}/activities/${encodeURIComponent(channel.channelId)}?limit=50`,
+    streamElementsHistoryUrl(channel.channelId),
     `${API_BASE}/tips/${encodeURIComponent(channel.channelId)}?limit=25`,
   ]
   const events: ActivityEvent[] = []

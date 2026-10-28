@@ -7,7 +7,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { activityIsDuplicate, createActivityStore, normalizeSubTier, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
-import { activityFromStreamElements, postStreamElementsMock, streamElementsEmulatePlan, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
+import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { profileHref } from '../src/activity/ActivityRow.tsx'
 import { activityKindLabel, activitySubtitle, kindLabel } from '../src/activity/format.ts'
@@ -294,6 +294,18 @@ describe('Twitch sub plans', () => {
 })
 
 describe('StreamElements activity', () => {
+  it('asks for history with types, after, and before, which StreamElements needs to return any rows', () => {
+    const now = Date.parse('2026-10-28T12:00:00.000Z')
+    const url = new URL(streamElementsHistoryUrl('chan id', now))
+    assert.equal(url.pathname, '/kappa/v2/activities/chan%20id')
+    assert.equal(url.searchParams.get('after'), '2026-10-14T12:00:00.000Z')
+    assert.equal(url.searchParams.get('before'), '2026-10-28T12:00:00.000Z')
+    assert.deepEqual(url.searchParams.getAll('types'), [...STREAMELEMENTS_HISTORY_TYPES])
+    for (const type of STREAMELEMENTS_HISTORY_TYPES) {
+      assert.ok(activityFromStreamElements({ type, provider: type === 'kicks' ? 'kick' : 'twitch', data: { username: 'ada', amount: 1 }, _id: type }), type)
+    }
+  })
+
   it('maps tips, follows, cheers, and merch', () => {
     const tip = activityFromStreamElements({ type: 'tip', provider: 'twitch', data: { username: 'Ada', amount: 5, currency: 'USD', message: 'thanks' }, _id: 't1', createdAt: '2026-09-02T12:00:00.000Z' })
     assert.equal(tip?.platform, 'StreamElements')

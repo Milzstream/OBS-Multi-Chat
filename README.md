@@ -243,6 +243,8 @@ A Twitch Prime Gaming sub shows as **PRIME SUB**, and Tier 2 and Tier 3 subs say
 
 Twitch Power-ups paid with Bits (Gigantify an Emote, Message Effects, On-Screen Celebrations) show as Bits alerts labeled **GIGANTIFY**, **MESSAGE EFFECT**, or **CELEBRATION**. A custom Power-up the streamer made shows as **POWER-UP** with its title, and so does any new built-in Power-up Twitch adds later. A Power-up never fires a normal cheer, so Relay reads them from Twitch directly, even when native backup is off. They use the Cheer alert toggle and sound.
 
+On launch, Relay also loads the last 14 days of StreamElements activity, so an alert that arrived while the app was closed still shows up, and a sub stored earlier without its plan picks up Prime or its tier. Older rows stay as they are.
+
 Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
 
 The flask fires a StreamElements mock activity, the same call the overlay editor makes when Preview LIVE on stream is checked. The row shows up when that event comes back on the activities socket, and it is saved like any other alert. A replay of an alert already in history is dropped, because StreamElements reuses the activity id.
