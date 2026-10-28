@@ -1,0 +1,26 @@
+[
+ {
+  "id": "54fa8f1401e468494b85b537",
+  "code": ":tf:",
+  "imageType": "png",
+  "animated": false,
+  "userId": "5561169bd6b9d206222a8c19",
+  "modifier": false
+ },
+ {
+  "id": "54fa8fce01e468494b85b53c",
+  "code": "CiGrip",
+  "imageType": "png",
+  "animated": false,
+  "userId": "5561169bd6b9d206222a8c19",
+  "modifier": false
+ },
+ {
+  "id": "6468f7acaee1f7f47567708e",
+  "code": "c!",
+  "imageType": "png",
+  "animated": false,
+  "userId": "5561169bd6b9d206222a8c19",
+  "modifier": true
+ }
+]

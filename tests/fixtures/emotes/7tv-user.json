@@ -1,0 +1,78 @@
+{
+ "id": "71092938",
+ "platform": "TWITCH",
+ "username": "channel",
+ "emote_set": {
+  "id": "01J9MMS2R800036CR40E1041ED",
+  "emotes": [
+   {
+    "id": "01G3WEGZN0000ET2J0MQP5YJ0G",
+    "name": "GAMBA",
+    "flags": 0,
+    "data": {
+     "id": "01G3WEGZN0000ET2J0MQP5YJ0G",
+     "name": "GAMBA",
+     "flags": 0,
+     "animated": true,
+     "host": {
+      "url": "//cdn.7tv.app/emote/01G3WEGZN0000ET2J0MQP5YJ0G",
+      "files": [
+       {
+        "name": "1x.webp",
+        "static_name": "1x_static.webp",
+        "width": 39,
+        "height": 32,
+        "frame_count": 102,
+        "size": 72376,
+        "format": "WEBP"
+       },
+       {
+        "name": "2x.webp",
+        "static_name": "2x_static.webp",
+        "width": 78,
+        "height": 64,
+        "frame_count": 105,
+        "size": 223606,
+        "format": "WEBP"
+       }
+      ]
+     }
+    }
+   },
+   {
+    "id": "01F6M3YPSR000AXRNAAMW9C2DA",
+    "name": "zyzzBass",
+    "flags": 0,
+    "data": {
+     "id": "01F6M3YPSR000AXRNAAMW9C2DA",
+     "name": "zyzzBass",
+     "flags": 0,
+     "animated": true,
+     "host": {
+      "url": "//cdn.7tv.app/emote/01F6M3YPSR000AXRNAAMW9C2DA",
+      "files": [
+       {
+        "name": "1x.webp",
+        "static_name": "1x_static.webp",
+        "width": 32,
+        "height": 32,
+        "frame_count": 63,
+        "size": 43858,
+        "format": "WEBP"
+       },
+       {
+        "name": "2x.webp",
+        "static_name": "2x_static.webp",
+        "width": 64,
+        "height": 64,
+        "frame_count": 63,
+        "size": 102742,
+        "format": "WEBP"
+       }
+      ]
+     }
+    }
+   }
+  ]
+ }
+}

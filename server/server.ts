@@ -27,9 +27,11 @@ import { createKickLive } from './kick-live.js'
 import { createOAuth } from './oauth.js'
 import { createTwitchLive } from './twitch-live.js'
 import { createYouTubeLive } from './youtube-live.js'
+import { createThirdPartyEmotes } from './third-party-emotes.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
+  applyThirdPartyEmotes,
   defaultAppSettings,
   LIVE_STATUS_POLL_MS,
   shouldPollLiveStatus,
@@ -603,7 +605,24 @@ async function startStreamElements(backfill = false) {
   return failed
 }
 
-function addMessage(message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube'; source?: string }) {
+const thirdPartyEmotes = createThirdPartyEmotes()
+
+function emoteChannelId(platform: Platform) {
+  return platform === 'YouTube' ? tokens.YouTube?.channelId : tokens[platform]?.userId
+}
+
+/** 7TV / BTTV / FFZ words become emotes. Not on the optimistic send row: its platform echoes carry the native emotes and merge into it. */
+function withThirdPartyEmotes(message: ChatMessage, source?: string) {
+  if (source === 'send') return message
+  const emotes = thirdPartyEmotes.emotesFor(message.platform, emoteChannelId(message.platform))
+  if (!emotes.size) return message
+  const parts = message.parts?.length ? message.parts : [{ type: 'text' as const, text: message.text }]
+  const next = applyThirdPartyEmotes(parts, emotes)
+  return next === parts ? message : { ...message, parts: next }
+}
+
+function addMessage(incoming: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube'; source?: string }) {
+  const message = withThirdPartyEmotes(incoming, options?.source)
   const result = mergeIncomingChat(state.messages, message, options, {
     ownHandles: ownHandles(),
     ownUserIds: ownUserIds(),
@@ -766,6 +785,7 @@ kick = createKickLive({
 })
 
 function startAdapter(platform: Platform) {
+  void thirdPartyEmotes.ready(platform, emoteChannelId(platform))
   if (platform === 'Twitch') {
     twitch.twitchEventSubUnsupported = false
     twitch.twitchBadgesLoaded = false

@@ -1,0 +1,14 @@
+{
+ "id": "55ae669b911d882c66cfbfd8",
+ "bots": [],
+ "channelEmotes": [
+  {
+   "id": "58cd5f2357baeb710f65a5d1",
+   "code": "RareHug",
+   "imageType": "gif",
+   "animated": true,
+   "userId": "55ae669b911d882c66cfbfd8"
+  }
+ ],
+ "sharedEmotes": []
+}

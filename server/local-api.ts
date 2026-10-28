@@ -415,7 +415,7 @@ export function isSafeExternalUrl(raw: string) {
   return false
 }
 
-const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt4.ggpht.com', 'yt3.googleusercontent.com'])
+const MEDIA_HOSTS = new Set(['files.kick.com', 'static-cdn.jtvnw.net', 'yt3.ggpht.com', 'yt4.ggpht.com', 'yt3.googleusercontent.com', 'cdn.7tv.app', 'cdn.betterttv.net', 'cdn.frankerfacez.com'])
 const MEDIA_HOST_SUFFIXES = ['.kick.com', '.ggpht.com', '.googleusercontent.com']
 
 /** Allowlist avatar/media URLs to platform image hosts the docks load through `/api/media`. Keep in sync with `dockAvatarSrc`. */

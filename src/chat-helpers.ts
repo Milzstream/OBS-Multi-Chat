@@ -18,6 +18,9 @@ function dockMediaHost(host: string) {
     || host === 'yt3.ggpht.com'
     || host === 'yt4.ggpht.com'
     || host === 'yt3.googleusercontent.com'
+    || host === 'cdn.7tv.app'
+    || host === 'cdn.betterttv.net'
+    || host === 'cdn.frankerfacez.com'
     || host.endsWith('.kick.com')
     || host.endsWith('.ggpht.com')
     || host.endsWith('.googleusercontent.com')

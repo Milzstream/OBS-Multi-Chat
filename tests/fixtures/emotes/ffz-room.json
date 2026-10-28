@@ -1,0 +1,22 @@
+{
+ "room": {
+  "set": 166907
+ },
+ "sets": {
+  "166907": {
+   "id": 166907,
+   "emoticons": [
+    {
+     "id": 246878,
+     "name": "WideHard",
+     "modifier": false,
+     "urls": {
+      "1": "https://cdn.frankerfacez.com/emote/246878/1",
+      "2": "https://cdn.frankerfacez.com/emote/246878/2",
+      "4": "https://cdn.frankerfacez.com/emote/246878/4"
+     }
+    }
+   ]
+  }
+ }
+}

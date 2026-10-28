@@ -1,0 +1,58 @@
+{
+ "default_sets": [
+  3,
+  1539687
+ ],
+ "sets": {
+  "3": {
+   "id": 3,
+   "emoticons": [
+    {
+     "id": 9,
+     "name": "ZrehplaR",
+     "modifier": false,
+     "urls": {
+      "1": "https://cdn.frankerfacez.com/emote/9/1",
+      "2": "https://cdn.frankerfacez.com/emote/9/2",
+      "4": "https://cdn.frankerfacez.com/emote/9/4"
+     }
+    },
+    {
+     "id": 6,
+     "name": "YooHoo",
+     "modifier": false,
+     "urls": {
+      "1": "https://cdn.frankerfacez.com/emote/6/1",
+      "2": "https://cdn.frankerfacez.com/emote/6/2",
+      "4": "https://cdn.frankerfacez.com/emote/6/4"
+     }
+    }
+   ]
+  },
+  "1539687": {
+   "id": 1539687,
+   "emoticons": [
+    {
+     "id": 723890,
+     "name": "ffzW",
+     "modifier": true,
+     "urls": {
+      "1": "https://cdn.frankerfacez.com/emote/723890/1",
+      "2": "https://cdn.frankerfacez.com/emote/723890/2",
+      "4": "https://cdn.frankerfacez.com/emote/723890/4"
+     }
+    },
+    {
+     "id": 720508,
+     "name": "ffzX",
+     "modifier": true,
+     "urls": {
+      "1": "https://cdn.frankerfacez.com/emote/720508/1",
+      "2": "https://cdn.frankerfacez.com/emote/720508/2",
+      "4": "https://cdn.frankerfacez.com/emote/720508/4"
+     }
+    }
+   ]
+  }
+ }
+}

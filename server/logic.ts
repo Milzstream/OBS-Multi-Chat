@@ -186,3 +186,5 @@ export {
   translateFailureMessage,
 } from './logic/translate.js'
 export type { TranslateProvider } from './logic/translate.js'
+export { applyThirdPartyEmotes, bttvEmotes, ffzEmotes, mergeEmoteMaps, sevenTvEmotes } from './logic/third-party-emotes.js'
+export type { EmoteMap } from './logic/third-party-emotes.js'
