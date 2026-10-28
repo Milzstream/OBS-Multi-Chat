@@ -1,5 +1,11 @@
 name: Build and Release
 
+# Fork pull_request runs use this YAML from the PR branch, with a read-only
+# GITHUB_TOKEN and no secrets. That is GitHub-hosted isolation, not a local
+# runner issue. Do not switch this workflow to pull_request_target. Keep
+# jobs on windows-latest (GitHub-hosted); a self-hosted runner would persist
+# untrusted code. Fork PRs still need maintainer approval before they run.
+
 on:
   push:
     branches: [main]
@@ -22,8 +28,12 @@ concurrency:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -40,6 +50,7 @@ jobs:
         run: npm run build
 
       - name: Compile installer script
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         shell: pwsh
         run: |
           choco install innosetup --no-progress -y
@@ -56,10 +67,15 @@ jobs:
           npm run installer:win
 
   package-smoke:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -85,6 +101,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -165,7 +183,7 @@ jobs:
 
       - name: Publish GitHub Release
         if: steps.gate.outputs.publish == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Relay Chat Dock ${{ steps.version.outputs.tag }}
