@@ -131,6 +131,7 @@ export {
   twitchBadgeLabel,
   twitchBadgesFromList,
   twitchBadgesFromTag,
+  gigantifyLastEmote,
   twitchEmoteUrl,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,

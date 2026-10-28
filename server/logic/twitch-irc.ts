@@ -58,8 +58,24 @@ export function twitchBadgesFromList(badges?: { set_id?: string; id?: string }[]
 }
 
 
-export function twitchEmoteUrl(id: string) {
-  return `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(id)}/default/dark/2.0`
+export function twitchEmoteUrl(id: string, scale: '2.0' | '3.0' = '2.0') {
+  return `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(id)}/default/dark/${scale}`
+}
+
+/**
+ * The Gigantify an Emote Power-up always enlarges the last emote in the
+ * message. Mark that one `big` and switch it to Twitch's largest scale so it
+ * stays sharp at the larger size.
+ */
+export function gigantifyLastEmote(parts: MessagePart[]): MessagePart[] {
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index]
+    if (part.type !== 'emote') continue
+    const next = [...parts]
+    next[index] = { ...part, big: true, url: part.url.replace(/\/default\/dark\/2\.0$/, '/default/dark/3.0') }
+    return next
+  }
+  return parts
 }
 
 
@@ -104,6 +120,7 @@ export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: 
   if (!match) return
   const tags = parseIrcTags(match[1] || '')
   const userId = tags['user-id'] || undefined
+  const parts = parseTwitchEmoteParts(match[3], tags.emotes)
   return {
     id: tags.id || crypto.randomUUID(),
     platform: 'Twitch',
@@ -114,7 +131,7 @@ export function parseTwitchChatLine(line: string, options: { now?: Date; urls?: 
     badges: twitchBadgesFromTag(tags.badges, options.urls),
     text: match[3],
     time: (options.now || new Date()).toISOString(),
-    parts: parseTwitchEmoteParts(match[3], tags.emotes),
+    parts: tags['msg-id'] === 'gigantified-emote-message' ? gigantifyLastEmote(parts) : parts,
     emotes: tags.emotes ? tags.emotes.split('/').map((item: string) => item.split(':')[0]) : [],
   }
 }

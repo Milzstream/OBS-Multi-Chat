@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import React, { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import {
+  gigantifyLastEmote,
   kickEmoteUrl,
   needsTranslation,
   normalizeAvatar,
@@ -20,8 +23,39 @@ import {
   twitchEventSubWatchdogShouldClose,
   TWITCH_EVENTSUB_DEFAULT_URL,
 } from '../server/logic.js'
+import { MessageItem } from '../src/chat/MessageItem.tsx'
 
 describe('Twitch IRC', () => {
+  it('marks the last emote of a gigantified IRC message big at the largest scale', () => {
+    const line = '@display-name=Ada;emotes=25:0-4,11-15;id=g1;msg-id=gigantified-emote-message;user-id=99 :ada!ada@ada.tmi.twitch.tv PRIVMSG #ada :Kappa then Kappa'
+    const parsed = parseTwitchChatLine(line)
+    assert.ok(parsed && parsed !== 'ping')
+    const emotes = parsed.parts!.filter((part) => part.type === 'emote')
+    assert.equal(emotes.length, 2)
+    assert.equal(emotes[0].big, undefined)
+    assert.equal(emotes[0].url, twitchEmoteUrl('25'))
+    assert.equal(emotes[1].big, true)
+    assert.equal(emotes[1].url, twitchEmoteUrl('25', '3.0'))
+  })
+
+  it('leaves ordinary IRC messages and emote-free parts alone', () => {
+    const parsed = parseTwitchChatLine('@display-name=Ada;emotes=25:0-4;id=n1 :ada!ada@ada.tmi.twitch.tv PRIVMSG #ada :Kappa')
+    assert.ok(parsed && parsed !== 'ping')
+    assert.equal(parsed.parts!.some((part) => part.type === 'emote' && part.big), false)
+    const text = [{ type: 'text' as const, text: 'no emotes' }]
+    assert.equal(gigantifyLastEmote(text), text)
+  })
+
+  it('gigantifies EventSub fragments the same way', () => {
+    const parts = gigantifyLastEmote(partsFromTwitchFragments([
+      { type: 'text', text: 'hype ' },
+      { type: 'emote', text: 'PogChamp', emote: { id: '305954156' } },
+    ], 'hype PogChamp'))
+    const emote = parts[1]
+    assert.equal(emote.type === 'emote' && emote.big, true)
+    assert.equal(emote.type === 'emote' && emote.url, twitchEmoteUrl('305954156', '3.0'))
+  })
+
   it('parses PRIVMSG tags, badges, and emotes', () => {
     const now = new Date('2026-09-02T12:00:00.000Z')
     const urls = new Map([['broadcaster/1', 'https://badge.example/host.png']])
@@ -135,5 +169,32 @@ describe('Twitch EventSub reconnect', () => {
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 5, 'session-a'), true)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 6, 'session-a'), false)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, '', 5, ''), false)
+  })
+})
+
+describe('gigantified emote rendering', () => {
+  // tsx runs tests with the classic JSX transform, and MessageItem does not import React itself.
+  ;(globalThis as { React?: typeof React }).React ??= React
+
+  it('draws a big emote with the emote-big class and a normal one without it', () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: {
+        id: 'g1',
+        platform: 'Twitch',
+        user: 'Ada',
+        text: 'Kappa Kappa',
+        time: '2026-09-02T12:00:00.000Z',
+        parts: [
+          { type: 'emote', name: 'Kappa', url: twitchEmoteUrl('25') },
+          { type: 'text', text: ' ' },
+          { type: 'emote', name: 'Kappa', url: twitchEmoteUrl('25', '3.0'), big: true },
+        ],
+      },
+      rowIndex: 0,
+      showTranslationMark: false,
+      onModerate: () => {},
+    }))
+    assert.equal((html.match(/class="emote emote-big"/g) || []).length, 1)
+    assert.equal((html.match(/class="emote"/g) || []).length, 1)
   })
 })

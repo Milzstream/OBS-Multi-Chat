@@ -246,7 +246,7 @@ function WatchMessage({ message, rowIndex, channelLogin, showTranslationMark, to
           <time>{new Date(message.time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
         </div>
         <p title={showTranslationMark ? message.originalText || undefined : undefined}>
-          {parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className="emote" src={watchMediaSrc(part.url, token)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}
+          {parts.map((part, index) => part.type === 'emote' ? <img key={`${part.url}-${index}`} className={part.big ? 'emote emote-big' : 'emote'} src={watchMediaSrc(part.url, token)} alt={part.name} title={part.name} referrerPolicy="no-referrer" /> : <span key={index}>{part.text}</span>)}
           {showTranslationMark && message.originalText ? <span className="translated-mark" title={message.originalText}>EN</span> : null}
         </p>
       </div>

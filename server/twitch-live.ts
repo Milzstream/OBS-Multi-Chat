@@ -4,6 +4,7 @@ import { fetchTimed } from './fetch-timed.js'
 import {
   TWITCH_EVENTSUB_DEFAULT_URL,
   applyLiveStreamDetails,
+  gigantifyLastEmote,
   normalizeAvatar,
   normalizeTags,
   parseTwitchChatLine,
@@ -282,6 +283,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     const type = String(payload?.metadata?.subscription_type || '')
     const event = payload?.payload?.event
     if (type === 'channel.chat.message') {
+      const parts = partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || '')
       addMessage({
         id: event?.message_id || crypto.randomUUID(),
         platform: 'Twitch',
@@ -293,7 +295,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
         avatar: normalizeAvatar(twitchAvatars.get(String(event?.chatter_user_id || ''))),
         text: event?.message?.text || '',
         time: new Date().toISOString(),
-        parts: partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || ''),
+        parts: event?.message_type === 'power_ups_gigantified_emote' ? gigantifyLastEmote(parts) : parts,
         emotes: (event?.message?.fragments || []).filter((item: any) => item.type === 'emote').map((item: any) => item.emote?.id).filter(Boolean),
       }, { source: 'EventSub' })
       setHealth('Twitch', 'ok')
