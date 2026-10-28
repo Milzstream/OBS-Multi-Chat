@@ -101,6 +101,7 @@ export function chatDockFields(remote: Record<string, unknown>) {
     youtubeQuota: remote.youtubeQuota && typeof remote.youtubeQuota === 'object' ? remote.youtubeQuota : undefined,
     streamelements: remote.streamelements && typeof remote.streamelements === 'object' ? remote.streamelements : undefined,
     streamInfo: remote.streamInfo && typeof remote.streamInfo === 'object' ? remote.streamInfo : undefined,
+    mentionKeywords: Array.isArray(remote.mentionKeywords) ? remote.mentionKeywords.filter((item): item is string => typeof item === 'string') : undefined,
   }
 }
 

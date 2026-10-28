@@ -169,6 +169,7 @@ export {
   parseAlertSettings,
   parseAppSettings,
   parseAutoLiveCheck,
+  parseMentionKeywords,
 } from './logic/settings.js'
 export {
   isPermanentTokenRefreshError,

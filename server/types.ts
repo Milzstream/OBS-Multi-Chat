@@ -54,6 +54,8 @@ export type AppSettings = {
   ignoreMissingJwt: boolean
   dropOldAlerts: boolean
   translateChat: boolean
+  /** Extra words that highlight a chat line, on top of the connected account names. */
+  mentionKeywords: string[]
   autoLiveCheck: AutoLiveCheck
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota

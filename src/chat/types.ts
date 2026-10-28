@@ -15,6 +15,7 @@ export type BackendState = {
   messages: ChatMessage[]
   health: Record<Platform, Health>
   translateChat?: boolean
+  mentionKeywords?: string[]
   youtubeQuota?: YoutubeQuotaStatus
   youtubePrivacy?: YoutubePrivacyNotice[]
 }

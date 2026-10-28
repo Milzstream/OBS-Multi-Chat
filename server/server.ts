@@ -179,7 +179,7 @@ if (process.argv.includes('--add-obs-docks')) {
   process.exit()
 }
 
-type State = { bootId: string; accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; alerts: AlertSettings; activityMax: number; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
+type State = { bootId: string; accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; mentionKeywords: string[]; alerts: AlertSettings; activityMax: number; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
 const { lanEnabled: envLanEnabled } = resolveBindHost()
@@ -267,6 +267,7 @@ const state: State = {
   dropOldAlerts: settings.dropOldAlerts,
   translateChat: settings.translateChat,
   translateError: '',
+  mentionKeywords: [...settings.mentionKeywords],
   alerts: { ...settings.alerts, disabled: [...settings.alerts.disabled] },
   activityMax,
   autoLiveCheck: { ...settings.autoLiveCheck },
@@ -654,6 +655,7 @@ function sseSettings() {
     dropOldAlerts: state.dropOldAlerts,
     translateChat: state.translateChat,
     translateError: state.translateError,
+    mentionKeywords: state.mentionKeywords,
     alerts: state.alerts,
     activityMax: state.activityMax,
     autoLiveCheck: state.autoLiveCheck,

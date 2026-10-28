@@ -165,6 +165,9 @@ export default function ConsoleApp() {
   const inFlightRef = useRef(new Set<string>())
   const settingsEpoch = useRef(0)
   const jwtEditedRef = useRef(new Set<Platform>())
+  const [mentionDraft, setMentionDraft] = useState('')
+  const mentionSavedRef = useRef('')
+  const mentionEditingRef = useRef(false)
   settingsRef.current = settings
 
   useEffect(() => {
@@ -196,6 +199,12 @@ export default function ConsoleApp() {
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
         setSettings((current) => mergePolledSettings(current, remote, inFlightRef.current))
         if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
+        const words = (data as { mentionKeywords?: unknown }).mentionKeywords
+        if (Array.isArray(words) && !mentionEditingRef.current) {
+          const text = words.filter((item) => typeof item === 'string').join(', ')
+          mentionSavedRef.current = text
+          setMentionDraft(text)
+        }
       }).catch(() => undefined)
     }
     const loadJwts = () => {
@@ -225,6 +234,21 @@ export default function ConsoleApp() {
     if (stickRef.current && node) node.scrollTop = node.scrollHeight
   }, [lines])
 
+  const saveMentionKeywords = () => {
+    const words = mentionDraft.split(',').map((word) => word.trim()).filter(Boolean)
+    if (words.join(', ') === mentionSavedRef.current) return
+    void fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mentionKeywords: words }) })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as { mentionKeywords?: string[]; error?: string }
+        const error = settingsSaveError(response.ok, response.status, data)
+        if (error) return setSettingsError(error)
+        setSettingsError('')
+        const text = (data.mentionKeywords || words).join(', ')
+        mentionSavedRef.current = text
+        if (!mentionEditingRef.current) setMentionDraft(text)
+      })
+      .catch(() => setSettingsError(settingsSaveError(false, 0, {})))
+  }
   const patchSettings = (body: SettingsPatch) => {
     const keys = settingsInFlightKeys(body)
     if (!keys.length || keys.some((key) => inFlightRef.current.has(key))) return
@@ -436,6 +460,19 @@ export default function ConsoleApp() {
             <input type="checkbox" checked={settings.translateChat} onChange={() => patchSettings({ translateChat: !settings.translateChat })} />
           </label>
           {settings.translateChat && settings.translateError ? <p className="settings-note">{settings.translateError}</p> : null}
+          <label className="settings-field">
+            <span>Highlight words</span>
+            <input
+              type="text"
+              value={mentionDraft}
+              placeholder="comma separated, e.g. mod, giveaway"
+              onFocus={() => { mentionEditingRef.current = true }}
+              onChange={(event) => setMentionDraft(event.target.value)}
+              onBlur={() => { mentionEditingRef.current = false; saveMentionKeywords() }}
+              onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }}
+            />
+          </label>
+          <p className="settings-note">Chat lines that name your connected accounts are always highlighted. Add other words here.</p>
           <div className="settings-divider" />
           <button type="button" className="console-optional" onClick={() => setShowQuota((open) => !open)}>
             <span>YouTube quota</span>

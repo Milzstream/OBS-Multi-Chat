@@ -11,6 +11,7 @@ import {
   missingStreamElementsMessage,
   normalizeTags,
   parseAlertDisabled,
+  parseMentionKeywords,
   parseYouTubeQuotaInput,
   sseNamedEvent,
   youtubePublicVideoBody,
@@ -55,6 +56,7 @@ export type HttpRouteDeps = {
     dropOldAlerts: boolean
     translateChat: boolean
     translateError: string
+    mentionKeywords: string[]
     alerts: AlertSettings
     activityMax: number
     autoLiveCheck: AppSettings['autoLiveCheck']
@@ -373,7 +375,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     }
   })
   app.post('/api/settings', async (request, response) => {
-    const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean; alerts?: Partial<AlertSettings> }
+    const body = request.body as { activityFallback?: boolean; ignoreMissingJwt?: boolean; dropOldAlerts?: boolean; translateChat?: boolean; mentionKeywords?: unknown; autoLiveCheck?: Partial<Record<Platform, boolean>>; lanWatch?: boolean; alerts?: Partial<AlertSettings> }
     let changed = false
     let watchError = ''
     const turnedOn: Platform[] = []
@@ -403,6 +405,14 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       settings.translateChat = body.translateChat
       state.translateChat = body.translateChat
       changed = true
+    }
+    if (Array.isArray(body.mentionKeywords)) {
+      const words = parseMentionKeywords(body.mentionKeywords)
+      if (JSON.stringify(words) !== JSON.stringify(settings.mentionKeywords)) {
+        settings.mentionKeywords = words
+        state.mentionKeywords = [...words]
+        changed = true
+      }
     }
     let watchChanged = false
     if (typeof body.lanWatch === 'boolean' && body.lanWatch !== localApi.lanEnabled) {
@@ -450,6 +460,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       ignoreMissingJwt: settings.ignoreMissingJwt,
       dropOldAlerts: settings.dropOldAlerts,
       translateChat: settings.translateChat,
+      mentionKeywords: settings.mentionKeywords,
       autoLiveCheck: settings.autoLiveCheck,
       alerts: settings.alerts,
       streamelements: state.streamelements,

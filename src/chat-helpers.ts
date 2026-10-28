@@ -114,6 +114,32 @@ export function visibleChatMessages<T extends { platform: ChatPlatform; platform
 }
 
 /** Send targets default to every connected platform minus any the user has opted out of this session. */
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function nameKey(value?: string) {
+  return String(value || '').replace(/^@+/, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
+}
+
+/**
+ * Highlight test for the chat dock: a line mentions you when it contains one
+ * of your connected account names (with or without `@`) or a highlight word,
+ * as a whole word and in any case. Your own lines are never highlighted.
+ */
+export function mentionMatcher(accountNames: Array<string | undefined>, keywords: readonly string[] = []) {
+  const names = accountNames.map((name) => String(name || '').replace(/^@+/, '').trim()).filter((name) => name.length >= 2)
+  const terms = [...new Set([...names, ...keywords].map((term) => term.trim().toLowerCase()).filter(Boolean))]
+  if (!terms.length) return () => false
+  terms.sort((left, right) => right.length - left.length)
+  const pattern = new RegExp(`(?:^|[^\\p{L}\\p{N}_])@?(?:${terms.map(escapeRegExp).join('|')})(?=$|[^\\p{L}\\p{N}_])`, 'iu')
+  const own = new Set(names.map(nameKey).filter(Boolean))
+  return (message: { user: string; handle?: string; text: string; originalText?: string }) => {
+    if (own.has(nameKey(message.user)) || own.has(nameKey(message.handle))) return false
+    return pattern.test(message.text) || Boolean(message.originalText && pattern.test(message.originalText))
+  }
+}
+
 export function selectedSendPlatforms(connected: ChatPlatform[], optOut: Iterable<ChatPlatform> = []) {
   const skip = new Set(optOut)
   return (['Twitch', 'Kick', 'YouTube'] as ChatPlatform[]).filter((platform) => connected.includes(platform) && !skip.has(platform))

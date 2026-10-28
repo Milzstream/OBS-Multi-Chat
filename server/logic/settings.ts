@@ -91,6 +91,26 @@ export function parseAlertSettings(value: unknown): AlertSettings {
   }
 }
 
+export const MENTION_KEYWORDS_MAX = 20
+export const MENTION_KEYWORD_MAX_LENGTH = 40
+
+/** Trim, drop blanks and case-insensitive repeats, and cap the highlight word list. */
+export function parseMentionKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const seen = new Set<string>()
+  const words: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const word = item.replace(/\s+/g, ' ').trim().replace(/^@+/, '').slice(0, MENTION_KEYWORD_MAX_LENGTH).trim()
+    const key = word.toLowerCase()
+    if (!word || seen.has(key)) continue
+    seen.add(key)
+    words.push(word)
+    if (words.length >= MENTION_KEYWORDS_MAX) break
+  }
+  return words
+}
+
 export function defaultAppSettings(): AppSettings {
   return {
     alerts: defaultAlertSettings(),
@@ -98,6 +118,7 @@ export function defaultAppSettings(): AppSettings {
     ignoreMissingJwt: false,
     dropOldAlerts: false,
     translateChat: true,
+    mentionKeywords: [],
     autoLiveCheck: defaultAutoLiveCheck(),
     streamInfo: emptyStreamInfo(),
     youtubeQuota: { day: '', used: 0 },
@@ -114,6 +135,7 @@ export function parseAppSettings(value: unknown): AppSettings {
     ignoreMissingJwt: parsed.ignoreMissingJwt === true,
     dropOldAlerts: parsed.dropOldAlerts === true,
     translateChat: parsed.translateChat !== false,
+    mentionKeywords: parseMentionKeywords(parsed.mentionKeywords),
     autoLiveCheck: parseAutoLiveCheck(parsed.autoLiveCheck),
     streamInfo: loadStreamInfo(parsed.streamInfo),
     youtubeQuota: loadYouTubeQuota(parsed.youtubeQuota),
