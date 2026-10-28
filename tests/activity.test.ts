@@ -9,7 +9,7 @@ import { activityIsDuplicate, createActivityStore, normalizeSubTier, parseActivi
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
-import { profileHref } from '../src/activity/ActivityRow.tsx'
+import { kindColor, platformColor, profileHref } from '../src/activity/ActivityRow.tsx'
 import { activityKindLabel, activitySubtitle, kindLabel } from '../src/activity/format.ts'
 
 describe('activity time and profiles', () => {
@@ -220,6 +220,20 @@ describe('Twitch EventSub activity', () => {
   it('keeps the plain CHEER label when there is no Power-up', () => {
     assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'cheer' }), 'CHEER')
     assert.equal(activityKindLabel({ platform: 'Kick', kind: 'cheer' }), 'KICKS')
+  })
+})
+
+describe('activity colors', () => {
+  const at = '2026-09-02T12:00:00.000Z'
+  const event = (platform: 'Twitch' | 'Kick' | 'YouTube', kind: 'subscription' | 'gift' | 'membership' | 'cheer') => ({ id: 'x', platform, kind, user: 'Ada', time: at })
+
+  it('colors Twitch subs and gift subs Twitch purple and leaves other subs red', () => {
+    assert.equal(kindColor(event('Twitch', 'subscription')), platformColor.Twitch)
+    assert.equal(kindColor({ ...event('Twitch', 'subscription'), tier: 'prime' }), platformColor.Twitch)
+    assert.equal(kindColor(event('Twitch', 'gift')), platformColor.Twitch)
+    assert.equal(kindColor(event('Kick', 'subscription')), '#ff4d57')
+    assert.equal(kindColor(event('YouTube', 'membership')), '#ff4d57')
+    assert.equal(kindColor(event('Twitch', 'cheer')), '#00d4ff')
   })
 })
 

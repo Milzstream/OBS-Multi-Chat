@@ -41,6 +41,8 @@ export const platformColor: Record<ActivityPlatform, string> = {
 
 export function kindColor(event: ActivityEvent) {
   if (event.kind === 'follow') return platformColor[event.platform]
+  // Twitch subs and gift subs wear Twitch purple; other platforms' subs, gifts, and members stay red.
+  if ((event.kind === 'subscription' || event.kind === 'gift') && event.platform === 'Twitch') return platformColor.Twitch
   if (event.kind === 'subscription' || event.kind === 'membership' || event.kind === 'gift') return '#ff4d57'
   if (event.kind === 'donation' || event.kind === 'merch') return '#f3af61'
   if (event.kind === 'raid') return '#f3af61'
