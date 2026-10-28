@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, X, Youtube, Zap } from 'lucide-react'
 import { chatProfileUrl, openDockUrl, profileLinkTitle } from '../chat-helpers'
-import { activityKindLabel, activitySubtitle } from './format'
+import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, pillTextColor } from './format'
 
 /**
  * One activity row for the dock: platform and kind icons, user, subtitle,
@@ -83,6 +83,7 @@ export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelet
   const color = platformColor[event.platform]
   const badge = kindColor(event)
   const detail = activitySubtitle(event)
+  const plan = activityPlanLabel(event)
   const href = profileHref(event, source === 'Twitch' ? channelLogin : undefined)
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -110,7 +111,8 @@ export function ActivityRow({ event, age, channelLogin, openIn = 'dock', onDelet
         <strong>{event.user}</strong>
         {detail ? <small>{detail}</small> : null}
       </div>
-      <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{activityKindLabel(event)}</span>
+      {plan ? <span className="activity-plan" style={{ color: activityPlanColor(event.tier) }}>{plan}</span> : null}
+      <span className="activity-kind" style={{ background: badge, color: pillTextColor(badge) }}>{activityKindLabel(event)}</span>
       <time className="activity-age">{age}</time>
     </>
   )

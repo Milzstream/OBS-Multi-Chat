@@ -10,7 +10,7 @@ import { missingStreamElementsMessage, twitchEventToActivity } from '../server/l
 import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { kindColor, platformColor, profileHref } from '../src/activity/ActivityRow.tsx'
-import { activityKindLabel, activitySubtitle, kindLabel } from '../src/activity/format.ts'
+import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, kindLabel, pillTextColor } from '../src/activity/format.ts'
 
 describe('activity time and profiles', () => {
   it('parses unix seconds, millis, ISO, and $date wrappers', () => {
@@ -252,7 +252,8 @@ describe('Twitch sub plans', () => {
   it('reads the plan from StreamElements Twitch subs only', () => {
     const prime = activityFromStreamElements({ type: 'subscriber', provider: 'twitch', data: { username: 'ada', displayName: 'Ada', tier: 'prime', amount: 1 }, _id: 'p1', createdAt: now })
     assert.equal(prime?.tier, 'prime')
-    assert.equal(activityKindLabel(prime!), 'PRIME SUB')
+    assert.equal(activityKindLabel(prime!), 'SUBSCRIPTION')
+    assert.equal(activityPlanLabel(prime!), 'PRIME')
     const kick = activityFromStreamElements({ type: 'subscriber', provider: 'kick', data: { username: 'ada', tier: 'prime' }, _id: 'k1', createdAt: now })
     assert.equal(kick?.tier, undefined)
     const cheer = activityFromStreamElements({ type: 'cheer', provider: 'twitch', data: { username: 'ada', amount: 100, tier: 'prime' }, _id: 'c1', createdAt: now })
@@ -274,11 +275,21 @@ describe('Twitch sub plans', () => {
     assert.equal(twitchEventToActivity('channel.subscribe', { user_name: 'Ada', user_id: '7', tier: '3000' }, now)?.tier, '3000')
   })
 
-  it('labels Prime and shows higher tiers in the subtitle', () => {
-    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'subscription', tier: 'prime' }), 'PRIME SUB')
-    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'subscription', tier: '1000' }), 'SUBSCRIPTION')
-    assert.equal(activitySubtitle({ tier: '1000' }), '')
-    assert.equal(activitySubtitle({ tier: '3000', months: 6 }), 'Tier 3 · 6 mo')
+  it('keeps SUBSCRIPTION as the pill and puts the plan on its own chip', () => {
+    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'subscription', tier: 'prime' }), 'SUBSCRIPTION')
+    assert.equal(activityPlanLabel({ kind: 'subscription', tier: 'prime' }), 'PRIME')
+    assert.equal(activityPlanLabel({ kind: 'subscription', tier: '1000' }), 'TIER 1')
+    assert.equal(activityPlanLabel({ kind: 'subscription', tier: '3000' }), 'TIER 3')
+    assert.equal(activityPlanLabel({ kind: 'subscription' }), undefined)
+    assert.equal(activityPlanLabel({ kind: 'gift', tier: '1000' }), undefined)
+    assert.notEqual(activityPlanColor('prime'), activityPlanColor('2000'))
+    assert.equal(activitySubtitle({ months: 6 }), '6 mo')
+  })
+
+  it('puts near-black text on the bright pill colors and white on dark ones', () => {
+    for (const color of ['#a970ff', '#ff4d57', '#00d4ff', '#f3af61', '#62c554', '#4aa3ff']) assert.equal(pillTextColor(color), '#0d1013', color)
+    assert.equal(pillTextColor('#202729'), '#fff')
+    assert.equal(pillTextColor('not-a-color'), '#fff')
   })
 
   it('lets a later copy that knows Prime upgrade the first copy, and never downgrades it', () => {

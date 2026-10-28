@@ -23,12 +23,40 @@ const powerUpLabel: Record<string, string> = {
   other: 'POWER-UP',
 }
 
-export function activityKindLabel(event: { platform: string; kind: string; powerUp?: string; tier?: string }) {
-  if (event.kind === 'subscription' && event.tier === 'prime') return 'PRIME SUB'
+export function activityKindLabel(event: { platform: string; kind: string; powerUp?: string }) {
   if (event.kind === 'cheer' && event.powerUp && powerUpLabel[event.powerUp]) return powerUpLabel[event.powerUp]
   if (event.platform === 'YouTube' && event.kind === 'subscription') return 'SUBSCRIBER'
   if (event.platform === 'Kick' && event.kind === 'cheer') return 'KICKS'
   return kindLabel[event.kind as keyof typeof kindLabel] || event.kind.toUpperCase()
+}
+
+const planLabel: Record<string, string> = { prime: 'PRIME', '1000': 'TIER 1', '2000': 'TIER 2', '3000': 'TIER 3' }
+
+/** Twitch sub plan shown as its own chip beside the kind pill. Only subs carry one. */
+export function activityPlanLabel(event: { kind: string; tier?: string }) {
+  if (event.kind !== 'subscription' || !event.tier) return
+  return planLabel[event.tier]
+}
+
+/** Prime gets Prime blue so it stands out; paid tiers share a light Twitch purple. */
+export function activityPlanColor(tier?: string) {
+  return tier === 'prime' ? '#4fc3ff' : '#c4a3ff'
+}
+
+function luminance(hex: string) {
+  const value = hex.replace('#', '')
+  const channels = [0, 2, 4].map((index) => parseInt(value.slice(index, index + 2), 16) / 255)
+  const [r, g, b] = channels.map((channel) => channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** Near-black or white, whichever reads better on a pill color. The bright alert colors all get near-black. */
+export function pillTextColor(background: string) {
+  if (!/^#[0-9a-f]{6}$/i.test(background)) return '#fff'
+  const light = luminance(background)
+  const onDark = (light + 0.05) / (luminance('#0d1013') + 0.05)
+  const onWhite = 1.05 / (light + 0.05)
+  return onDark >= onWhite ? '#0d1013' : '#fff'
 }
 
 export const ACTIVITY_KIND_GROUPS = [
@@ -57,10 +85,8 @@ export function visibleActivityEvents<T extends { platform: string; kind: string
 }
 
 /** Build the row's subtitle by joining whatever fields the event has: amount, streak months, viewer count, and/or message. */
-export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string; tier?: string }) {
+export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string }) {
   const bits: string[] = []
-  if (event.tier === '2000') bits.push('Tier 2')
-  if (event.tier === '3000') bits.push('Tier 3')
   if (event.amount) bits.push(event.amount)
   if (event.months) bits.push(`${event.months} mo`)
   if (event.viewers != null) bits.push(`${event.viewers.toLocaleString()} viewers`)

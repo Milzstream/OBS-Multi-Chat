@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { KindIcon, PlatformMark, kindColor, platformColor, type ActivityEvent } from '../activity/ActivityRow'
-import { activityKindLabel, activitySubtitle } from '../activity/format'
+import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, pillTextColor } from '../activity/format'
 import { activityDockFields, subscribeDockSse } from '../sse'
 import { DEFAULT_ALERT_SETTINGS, alertSoundGroup, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, type AlertSettings } from './alerts'
 import { playAlertSound } from './sounds'
@@ -81,6 +81,8 @@ export default function AlertsApp() {
   const label = showPlatform ? activityKindLabel(current) : neutralAlertLabel(current)
   const subtitle = activitySubtitle(current)
   const detail = showPlatform ? subtitle : neutralAlertText(subtitle)
+  // PRIME and the tier name Twitch, so the platform-neutral pill leaves the plan out.
+  const plan = showPlatform ? activityPlanLabel(current) : undefined
   return (
     <main className="alerts-stage">
       <div
@@ -94,7 +96,8 @@ export default function AlertsApp() {
           <strong>{current.user}</strong>
           {detail ? <small>{detail}</small> : null}
         </div>
-        <span className="activity-kind" style={{ background: badge, color: '#fff' }}>{label}</span>
+        {plan ? <span className="activity-plan" style={{ color: activityPlanColor(current.tier) }}>{plan}</span> : null}
+        <span className="activity-kind" style={{ background: badge, color: pillTextColor(badge) }}>{label}</span>
       </div>
     </main>
   )
