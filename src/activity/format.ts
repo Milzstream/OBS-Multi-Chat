@@ -23,7 +23,8 @@ const powerUpLabel: Record<string, string> = {
   other: 'POWER-UP',
 }
 
-export function activityKindLabel(event: { platform: string; kind: string; powerUp?: string }) {
+export function activityKindLabel(event: { platform: string; kind: string; powerUp?: string; tier?: string }) {
+  if (event.kind === 'subscription' && event.tier === 'prime') return 'PRIME SUB'
   if (event.kind === 'cheer' && event.powerUp && powerUpLabel[event.powerUp]) return powerUpLabel[event.powerUp]
   if (event.platform === 'YouTube' && event.kind === 'subscription') return 'SUBSCRIBER'
   if (event.platform === 'Kick' && event.kind === 'cheer') return 'KICKS'
@@ -56,8 +57,10 @@ export function visibleActivityEvents<T extends { platform: string; kind: string
 }
 
 /** Build the row's subtitle by joining whatever fields the event has: amount, streak months, viewer count, and/or message. */
-export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string }) {
+export function activitySubtitle(event: { amount?: string; months?: number; viewers?: number; message?: string; tier?: string }) {
   const bits: string[] = []
+  if (event.tier === '2000') bits.push('Tier 2')
+  if (event.tier === '3000') bits.push('Tier 3')
   if (event.amount) bits.push(event.amount)
   if (event.months) bits.push(`${event.months} mo`)
   if (event.viewers != null) bits.push(`${event.viewers.toLocaleString()} viewers`)

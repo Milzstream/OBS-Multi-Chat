@@ -12,6 +12,7 @@ export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
 export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
 export type ActivityFeed = 'native' | 'streamelements'
+export type ActivitySubTier = 'prime' | '1000' | '2000' | '3000'
 export type ActivityEvent = {
   id: string
   platform: ActivityPlatform
@@ -28,6 +29,7 @@ export type ActivityEvent = {
   source?: ActivityPlatform
   powerUp?: ActivityPowerUp
   feed?: ActivityFeed
+  tier?: ActivitySubTier
 }
 
 export const platformColor: Record<ActivityPlatform, string> = {

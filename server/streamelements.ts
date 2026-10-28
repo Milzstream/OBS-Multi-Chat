@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import WebSocket from 'ws'
-import { parseActivityTime, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './activity.js'
+import { normalizeSubTier, parseActivityTime, type ActivityEvent, type ActivityKind, type ActivityPlatform } from './activity.js'
 
 /**
  * StreamElements feed for the Activity dock: the source of truth for follows,
@@ -142,6 +142,7 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
     userId,
     amount,
     months: kind === 'subscription' || kind === 'membership' ? (Number.isFinite(months) && months > 0 ? months : undefined) : undefined,
+    tier: kind === 'subscription' && source === 'Twitch' ? normalizeSubTier(inner?.tier) : undefined,
     viewers: kind === 'raid' && Number.isFinite(viewers) ? viewers : undefined,
     message: String(inner?.message || inner?.comment || root?.donation?.message || '').trim() || undefined,
     time: parseActivityTime(root?.createdAt || inner?.createdAt || payload?.ts),

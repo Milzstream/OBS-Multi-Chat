@@ -3,7 +3,7 @@
  */
 
 import crypto from 'node:crypto'
-import type { ActivityEvent, ActivityPowerUp } from '../activity.js'
+import { normalizeSubTier, type ActivityEvent, type ActivityPowerUp } from '../activity.js'
 import type { ChatBadge, ChatMessage, ChatModeration, MessagePart } from '../types.js'
 
 export function twitchBadgeLabel(set: string) {
@@ -179,7 +179,7 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
   if (type === 'channel.subscribe') {
     // Gifted subs arrive via `channel.subscription.gift` instead; skip so they aren't double-counted.
     if (event?.is_gift) return
-    return { id: `twitch-sub-${event?.user_id}-${time}`, platform: 'Twitch', kind: 'subscription', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, time }
+    return { id: `twitch-sub-${event?.user_id}-${time}`, platform: 'Twitch', kind: 'subscription', user: event?.user_login || event?.user_name || 'Twitch user', userId: event?.user_id ? String(event.user_id) : undefined, tier: normalizeSubTier(event?.tier), time }
   }
   if (type === 'channel.subscription.message') {
     const months = Number(event?.cumulative_months || event?.duration_months)
@@ -191,6 +191,26 @@ export function twitchEventToActivity(type: string, event: any, now = new Date()
       userId: event?.user_id ? String(event.user_id) : undefined,
       months: Number.isFinite(months) && months > 0 ? months : undefined,
       message: String(event?.message?.text || '').trim() || undefined,
+      tier: normalizeSubTier(event?.tier),
+      time,
+    }
+  }
+  if (type === 'channel.chat.notification') {
+    // Only sub and resub notices say whether the plan was Prime. The other notice
+    // types (gifts, raids, ...) already arrive on their own EventSub topics.
+    const notice = String(event?.notice_type || '')
+    if (notice !== 'sub' && notice !== 'resub') return
+    const detail = event?.[notice] || {}
+    const months = Number(detail.cumulative_months || detail.duration_months)
+    return {
+      id: messageId ? `twitch-notice-${messageId}` : `twitch-${notice}-${event?.chatter_user_id}-${time}`,
+      platform: 'Twitch',
+      kind: 'subscription',
+      user: event?.chatter_user_login || event?.chatter_user_name || 'Twitch user',
+      userId: event?.chatter_user_id ? String(event.chatter_user_id) : undefined,
+      months: notice === 'resub' && Number.isFinite(months) && months > 0 ? months : undefined,
+      message: String(event?.message?.text || '').trim() || undefined,
+      tier: detail.is_prime ? 'prime' : normalizeSubTier(detail.sub_tier),
       time,
     }
   }

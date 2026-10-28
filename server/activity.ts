@@ -18,6 +18,16 @@ export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'
 export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
 /** Which wire delivered the alert. `source` is the platform the event is about. */
 export type ActivityFeed = 'native' | 'streamelements'
+/** Twitch sub plan. `prime` is a Prime Gaming sub; the numbers are Twitch's tier codes. */
+export type ActivitySubTier = 'prime' | '1000' | '2000' | '3000'
+
+/** Normalize a Twitch or StreamElements sub plan (`Prime`, `prime`, `1000`, ...). Anything else is unknown. */
+export function normalizeSubTier(raw: unknown): ActivitySubTier | undefined {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (value === 'prime') return 'prime'
+  if (value === '1000' || value === '2000' || value === '3000') return value
+  return
+}
 
 export type ActivityEvent = {
   id: string
@@ -35,6 +45,7 @@ export type ActivityEvent = {
   source?: ActivityPlatform
   powerUp?: ActivityPowerUp
   feed?: ActivityFeed
+  tier?: ActivitySubTier
 }
 
 /** Kick handles in messages are the dash-separated URL slug, not the display username. Normalize to that form. */
@@ -216,7 +227,8 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
       try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
       return true
     },
-    add(incoming: ActivityEvent) {
+    /** `true` for a new row, `'updated'` when a duplicate filled in a missing sub plan, `false` when dropped. */
+    add(incoming: ActivityEvent): boolean | 'updated' {
       const user = String(incoming.user || 'Anonymous').replace(/^@+/, '') || 'Anonymous'
       const source = incoming.source || incoming.platform
       const event: ActivityEvent = {
@@ -227,7 +239,17 @@ export function createActivityStore(filePath: string, maxEvents = ACTIVITY_MAX) 
         time: parseActivityTime(incoming.time),
         profileUrl: profileUrl(source, incoming.user || user, incoming.userId, incoming.handle) || incoming.profileUrl,
       }
-      if (events.some((item) => activityIsDuplicate(item, event))) return false
+      const duplicate = events.find((item) => activityIsDuplicate(item, event))
+      if (duplicate) {
+        // The first copy of a sub can lack the plan (channel.subscribe never says Prime).
+        // A later copy that knows it fills it in instead of being dropped.
+        if (!event.tier || duplicate.tier === event.tier || (duplicate.tier && event.tier !== 'prime')) return false
+        duplicate.tier = event.tier
+        if (!isTestEvent(duplicate)) {
+          try { save() } catch (error) { console.error('Activity save:', error instanceof Error ? error.message : error) }
+        }
+        return 'updated'
+      }
       const next = [event, ...events]
       const tests = next.filter(isTestEvent)
       const real = newestFirst(next.filter((item) => !isTestEvent(item))).slice(0, cap)

@@ -471,9 +471,10 @@ async function drainTranslations() {
 }
 
 function addActivity(event: ActivityEvent) {
-  if (!activityStore.add(event)) return
+  const added = activityStore.add(event)
+  if (!added) return
   state.activity = activityStore.list()
-  console.log(activityLogLine(event))
+  if (added === true) console.log(activityLogLine(event))
   broadcast()
 }
 

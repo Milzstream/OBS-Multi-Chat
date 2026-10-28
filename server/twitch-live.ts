@@ -220,6 +220,8 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     { type: 'channel.subscribe', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
     { type: 'channel.subscription.gift', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
     { type: 'channel.subscription.message', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
+    // Sub and resub notices are the only place Twitch says a sub was Prime.
+    { type: 'channel.chat.notification', version: '1', condition: (userId) => ({ broadcaster_user_id: userId, user_id: userId }), activity: true },
     { type: 'channel.cheer', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true },
     // Power-ups (gigantify, message effects, celebrations) spend Bits without a `channel.cheer`.
     { type: 'channel.bits.use', version: '1', condition: (userId) => ({ broadcaster_user_id: userId }), activity: true, always: true },

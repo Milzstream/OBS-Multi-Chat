@@ -5,7 +5,7 @@ import path from 'node:path'
 import { describe, it, type TestContext } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { activityIsDuplicate, createActivityStore, parseActivityTime, profileUrl } from '../server/activity.js'
+import { activityIsDuplicate, createActivityStore, normalizeSubTier, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
 import { activityFromStreamElements, postStreamElementsMock, streamElementsEmulatePlan, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
@@ -220,6 +220,76 @@ describe('Twitch EventSub activity', () => {
   it('keeps the plain CHEER label when there is no Power-up', () => {
     assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'cheer' }), 'CHEER')
     assert.equal(activityKindLabel({ platform: 'Kick', kind: 'cheer' }), 'KICKS')
+  })
+})
+
+describe('Twitch sub plans', () => {
+  const now = '2026-09-02T12:00:00.000Z'
+
+  it('normalizes Prime and tier codes from either source', () => {
+    assert.equal(normalizeSubTier('Prime'), 'prime')
+    assert.equal(normalizeSubTier('prime'), 'prime')
+    assert.equal(normalizeSubTier('2000'), '2000')
+    assert.equal(normalizeSubTier(3000), '3000')
+    assert.equal(normalizeSubTier(''), undefined)
+    assert.equal(normalizeSubTier('gold'), undefined)
+  })
+
+  it('reads the plan from StreamElements Twitch subs only', () => {
+    const prime = activityFromStreamElements({ type: 'subscriber', provider: 'twitch', data: { username: 'ada', displayName: 'Ada', tier: 'prime', amount: 1 }, _id: 'p1', createdAt: now })
+    assert.equal(prime?.tier, 'prime')
+    assert.equal(activityKindLabel(prime!), 'PRIME SUB')
+    const kick = activityFromStreamElements({ type: 'subscriber', provider: 'kick', data: { username: 'ada', tier: 'prime' }, _id: 'k1', createdAt: now })
+    assert.equal(kick?.tier, undefined)
+    const cheer = activityFromStreamElements({ type: 'cheer', provider: 'twitch', data: { username: 'ada', amount: 100, tier: 'prime' }, _id: 'c1', createdAt: now })
+    assert.equal(cheer?.tier, undefined)
+  })
+
+  it('reads Prime from sub and resub chat notifications and ignores other notices', () => {
+    const sub = twitchEventToActivity('channel.chat.notification', { notice_type: 'sub', chatter_user_id: '7', chatter_user_login: 'ada', chatter_user_name: 'Ada', sub: { sub_tier: '1000', is_prime: true, duration_months: 1 } }, now, 'n1')
+    assert.equal(sub?.kind, 'subscription')
+    assert.equal(sub?.tier, 'prime')
+    assert.equal(sub?.months, undefined)
+    assert.equal(sub?.id, 'twitch-notice-n1')
+    const resub = twitchEventToActivity('channel.chat.notification', { notice_type: 'resub', chatter_user_id: '7', chatter_user_login: 'ada', resub: { sub_tier: '2000', is_prime: false, cumulative_months: 14 }, message: { text: 'still here' } }, now)
+    assert.equal(resub?.tier, '2000')
+    assert.equal(resub?.months, 14)
+    assert.equal(resub?.message, 'still here')
+    assert.equal(twitchEventToActivity('channel.chat.notification', { notice_type: 'raid', raid: { viewer_count: 5 } }, now), undefined)
+    assert.equal(twitchEventToActivity('channel.chat.notification', { notice_type: 'community_sub_gift' }, now), undefined)
+    assert.equal(twitchEventToActivity('channel.subscribe', { user_name: 'Ada', user_id: '7', tier: '3000' }, now)?.tier, '3000')
+  })
+
+  it('labels Prime and shows higher tiers in the subtitle', () => {
+    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'subscription', tier: 'prime' }), 'PRIME SUB')
+    assert.equal(activityKindLabel({ platform: 'Twitch', kind: 'subscription', tier: '1000' }), 'SUBSCRIPTION')
+    assert.equal(activitySubtitle({ tier: '1000' }), '')
+    assert.equal(activitySubtitle({ tier: '3000', months: 6 }), 'Tier 3 · 6 mo')
+  })
+
+  it('lets a later copy that knows Prime upgrade the first copy, and never downgrades it', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-prime-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      const native = { id: 'twitch-sub-7', platform: 'Twitch' as const, kind: 'subscription' as const, user: 'ada', userId: '7', tier: '1000' as const, time: now }
+      assert.equal(store.add(native), true)
+      assert.equal(store.add({ ...native, id: 'twitch-notice-n1', tier: 'prime', time: '2026-09-02T12:00:01.000Z' }), 'updated')
+      assert.equal(store.list().length, 1)
+      assert.equal(store.list()[0].tier, 'prime')
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { tier?: string }[]
+      assert.equal(saved[0].tier, 'prime')
+      assert.equal(store.add({ ...native, id: 'se-1', tier: '1000', time: '2026-09-02T12:00:02.000Z' }), false)
+      assert.equal(store.list()[0].tier, 'prime')
+      assert.equal(store.add({ ...native, id: 'se-2', tier: undefined, time: '2026-09-02T12:00:03.000Z' }), false)
+
+      const fill = { id: 'se-mel', platform: 'Twitch' as const, kind: 'subscription' as const, user: 'Mel', userId: '8', time: now }
+      assert.equal(store.add(fill), true)
+      assert.equal(store.add({ ...fill, id: 'native-mel', tier: '2000' }), 'updated')
+      assert.equal(store.list().find((event) => event.userId === '8')?.tier, '2000')
+    } finally {
+      fs.rmSync(file, { force: true })
+      fs.rmSync(`${file}.bak`, { force: true })
+    }
   })
 })
 
