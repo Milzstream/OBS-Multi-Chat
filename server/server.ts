@@ -479,7 +479,11 @@ function addActivity(event: ActivityEvent) {
 
 function addNativeActivity(event: ActivityEvent, options: { always?: boolean } = {}) {
   if (!settings.activityFallback && !options.always) return
-  addActivity(event)
+  addActivity({ ...event, feed: event.feed || 'native' })
+}
+
+function addStreamElementsActivity(event: ActivityEvent) {
+  addActivity({ ...event, feed: event.feed || 'streamelements' })
 }
 
 async function streamElementsChannelFor(provider: string, anyChannel = false) {
@@ -580,7 +584,7 @@ async function startStreamElements(backfill = false) {
   // The socket callback is also how the dock learns the connection really is
   // live: a drop only reaches it once the client has waited out its grace
   // period, so a short reconnect never shows up as an alert.
-  await streamElements.start(channels, (event) => addActivity(event), (message) => {
+  await streamElements.start(channels, (event) => addStreamElementsActivity(event), (message) => {
     setActivityWarning('streamelements-live', message)
     updateStreamElementsStatus({ connected: streamElements.connected })
   })
@@ -588,7 +592,7 @@ async function startStreamElements(backfill = false) {
   if (backfill) {
     for (const channel of channels) {
       const events = await fetchRecentActivities(channel)
-      for (const event of events) addActivity(event)
+      for (const event of events) addStreamElementsActivity(event)
     }
   }
   return failed

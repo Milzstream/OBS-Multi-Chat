@@ -98,6 +98,31 @@ describe('activity store', () => {
     }
   })
 
+  it('collapses a cheer across feeds and keeps two sends on the same feed', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-feed-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      const native = { id: 'twitch-cheer-1', platform: 'Twitch' as const, kind: 'cheer' as const, user: 'Ada', userId: '7', amount: '100 Bits', feed: 'native' as const, time: '2026-09-02T12:00:00.000Z' }
+      const se = { ...native, id: 'se-cheer-1', feed: 'streamelements' as const, time: '2026-09-02T12:00:05.000Z' }
+      const nativeAgain = { ...native, id: 'twitch-cheer-2', time: '2026-09-02T12:00:08.000Z' }
+      assert.equal(store.add(native), true)
+      assert.equal(store.add(se), false)
+      assert.equal(store.add(nativeAgain), true)
+      const ids = store.list().map((event) => event.id)
+      assert.equal(ids.includes('twitch-cheer-1'), true)
+      assert.equal(ids.includes('se-cheer-1'), false)
+      assert.equal(ids.includes('twitch-cheer-2'), true)
+      assert.equal(activityIsDuplicate(native, se), true)
+      assert.equal(activityIsDuplicate(native, nativeAgain), false)
+      assert.equal(activityIsDuplicate(
+        { ...se, time: '2026-09-02T12:00:00.000Z' },
+        { ...se, id: 'se-cheer-2', time: '2026-09-02T12:00:05.000Z' },
+      ), false)
+    } finally {
+      try { fs.unlinkSync(file) } catch { /* ignore */ }
+    }
+  })
+
   it('rewrites a dead viewer-card URL back to the public profile', () => {
     const file = path.join(os.tmpdir(), `relay-activity-card-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
     try {
@@ -216,6 +241,7 @@ describe('StreamElements activity', () => {
     assert.equal(follow?.platform, 'YouTube')
     const cheer = activityFromStreamElements({ type: 'cheer', provider: 'twitch', data: { username: 'Pat', amount: 50 }, _id: 'c1' })
     assert.equal(cheer?.amount, '50 Bits')
+    assert.equal(cheer?.feed, 'streamelements')
     const merch = activityFromStreamElements({ type: 'merch', provider: 'streamelements', data: { username: 'Ada', item: { name: 'Hat' }, amount: 20, currency: 'USD' }, _id: 'm1' })
     assert.equal(merch?.kind, 'merch')
     assert.equal(activityFromStreamElements({ type: 'hypetrainstart' }), undefined)

@@ -11,6 +11,7 @@ import { activityKindLabel, activitySubtitle } from './format'
 export type ActivityPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid' | 'donation' | 'membership' | 'superchat' | 'merch'
 export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
+export type ActivityFeed = 'native' | 'streamelements'
 export type ActivityEvent = {
   id: string
   platform: ActivityPlatform
@@ -26,6 +27,7 @@ export type ActivityEvent = {
   profileUrl?: string
   source?: ActivityPlatform
   powerUp?: ActivityPowerUp
+  feed?: ActivityFeed
 }
 
 export const platformColor: Record<ActivityPlatform, string> = {

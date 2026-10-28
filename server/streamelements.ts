@@ -135,6 +135,7 @@ export function activityFromStreamElements(payload: any): ActivityEvent | undefi
     id: String(root?._id || root?.activityId || inner?._id || payload?.id || crypto.randomUUID()),
     platform,
     source,
+    feed: 'streamelements',
     kind,
     user,
     handle: pickHandle(inner?.donation?.user ? { ...inner, ...inner.donation.user } : inner),

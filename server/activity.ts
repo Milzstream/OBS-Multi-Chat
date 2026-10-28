@@ -16,6 +16,8 @@ export type ActivityKind = 'follow' | 'subscription' | 'gift' | 'cheer' | 'raid'
  * `custom` is one the streamer made; `other` is a built-in type this build does not know yet.
  */
 export type ActivityPowerUp = 'gigantify' | 'message-effect' | 'celebration' | 'custom' | 'other'
+/** Which wire delivered the alert. `source` is the platform the event is about. */
+export type ActivityFeed = 'native' | 'streamelements'
 
 export type ActivityEvent = {
   id: string
@@ -32,6 +34,7 @@ export type ActivityEvent = {
   profileUrl?: string
   source?: ActivityPlatform
   powerUp?: ActivityPowerUp
+  feed?: ActivityFeed
 }
 
 /** Kick handles in messages are the dash-separated URL slug, not the display username. Normalize to that form. */
@@ -131,9 +134,9 @@ function activityNamesMatch(left: ActivityEvent, right: ActivityEvent) {
  * Same alert from StreamElements and the native backup. Follows, raids, and
  * memberships stay collapsed across the 14-day startup backfill. Repeating
  * kinds (subs, cheers, gifts) only collapse inside two minutes, and never
- * when both sides have different user ids. Power-ups are stored as cheers with
- * a Bits amount, so they skip this heuristic and collapse only on matching id
- * (EventSub redelivery).
+ * when both sides have different user ids. The same wire sending again is a
+ * second spend, so native+native or SE+SE keep both rows. Cross-feed copies
+ * still fold. Power-ups skip this heuristic and collapse only on matching id.
  */
 export function activityIsDuplicate(existing: ActivityEvent, incoming: ActivityEvent) {
   if (existing.id && existing.id === incoming.id) return true
@@ -143,6 +146,7 @@ export function activityIsDuplicate(existing: ActivityEvent, incoming: ActivityE
   if (existing.userId && incoming.userId && existing.userId !== incoming.userId) return false
   const sameUser = Boolean(existing.userId && incoming.userId && existing.userId === incoming.userId) || activityNamesMatch(existing, incoming)
   if (!sameUser) return false
+  if (existing.feed && incoming.feed && existing.feed === incoming.feed) return false
   const delta = Math.abs((Date.parse(existing.time) || 0) - (Date.parse(incoming.time) || 0))
   return delta < (FOLLOW_LIKE.has(existing.kind) ? BACKFILL_MS : REPEAT_MS)
 }
