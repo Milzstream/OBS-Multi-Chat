@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { KindIcon, PlatformMark, kindColor, platformColor, type ActivityEvent } from '../activity/ActivityRow'
 import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, pillTextColor } from '../activity/format'
 import { activityDockFields, subscribeDockSse } from '../sse'
-import { DEFAULT_ALERT_SETTINGS, alertSoundGroup, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, type AlertSettings } from './alerts'
+import { DEFAULT_ALERT_SETTINGS, alertSoundGroup, createAlertPresenter, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, type AlertSettings } from './alerts'
 import { playAlertSound } from './sounds'
 
 const GAP_MS = 400
@@ -15,7 +15,7 @@ export default function AlertsApp() {
   const [settings, setSettings] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS)
   const settingsRef = useRef(settings)
   const capRef = useRef(DEFAULT_CAP)
-  const trackerRef = useRef(createAlertTracker())
+  const trackerRef = useRef(createAlertPresenter())
   settingsRef.current = settings
 
   useEffect(() => {

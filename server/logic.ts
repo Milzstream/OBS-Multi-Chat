@@ -159,8 +159,10 @@ export {
 export {
   ALERT_DISPLAY_MAX,
   ALERT_DISPLAY_MIN,
+  ALERT_KIND_SCHEMA,
   clampAlertSeconds,
   defaultAlertSettings,
+  migrateAlertDisabled,
   defaultAppSettings,
   defaultAutoLiveCheck,
   mergeAutoLiveCheck,

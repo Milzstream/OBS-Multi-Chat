@@ -53,10 +53,20 @@ export function mergeAutoLiveCheck(current: AutoLiveCheck, patch: unknown): Auto
 export const ALERT_DISPLAY_MIN = 1
 export const ALERT_DISPLAY_MAX = 30
 const ALERT_PLATFORMS = ['Twitch', 'Kick', 'YouTube', 'StreamElements']
-const ALERT_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'raid', 'donation', 'membership', 'superchat', 'merch']
+const ALERT_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'powerup', 'raid', 'donation', 'membership', 'superchat', 'merch']
+/** Power-up is its own disabled key. Older files inherit from Cheer once. Keep in sync with `src/alerts/alerts.ts`. */
+export const ALERT_KIND_SCHEMA = 2
 
 export function defaultAlertSettings(): AlertSettings {
-  return { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] }
+  return { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [], kindSchema: ALERT_KIND_SCHEMA }
+}
+
+/** Old denylists only had Cheer. Copy that off-state onto Power-up so a quiet Cheer stays quiet. */
+export function migrateAlertDisabled(disabled: readonly string[], kindSchema?: number) {
+  if (kindSchema === ALERT_KIND_SCHEMA) return [...disabled]
+  const keys = new Set(disabled)
+  if (keys.has('Twitch:cheer')) keys.add('Twitch:powerup')
+  return [...keys]
 }
 
 /** Clamp a display time to whole-or-half seconds the page can honor. */
@@ -87,7 +97,8 @@ export function parseAlertSettings(value: unknown): AlertSettings {
     sound: parsed.sound !== false,
     showPlatform: parsed.showPlatform !== false,
     displaySec: clampAlertSeconds(parsed.displaySec, defaults.displaySec),
-    disabled: parseAlertDisabled(parsed.disabled),
+    disabled: migrateAlertDisabled(parseAlertDisabled(parsed.disabled), parsed.kindSchema),
+    kindSchema: ALERT_KIND_SCHEMA,
   }
 }
 
