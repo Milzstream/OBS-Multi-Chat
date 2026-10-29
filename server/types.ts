@@ -39,6 +39,50 @@ export type Connection = Account
 export type LiveStreamTip = AccountStream
 /** Per-platform automatic live-status polls. Missing or true means on. Chat sockets are not gated by this. */
 export type AutoLiveCheck = Record<Platform, boolean>
+/** Platforms that can have an on-stream look. StreamElements is tips/merch, not a chat dock. */
+export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
+
+/** Uploaded alert file. Bytes live at `data/alerts/<id>`; this is what settings.json stores. */
+export type AlertAssetRef = {
+  id: string
+  mime: string
+  name: string
+}
+
+export type AlertTextAlign = 'left' | 'center' | 'right'
+
+/** One placed line on the overlay. `x` / `y` / `width` / `fontSize` are percents of the OBS source. */
+export type AlertTextBox = {
+  text: string
+  x: number
+  y: number
+  width?: number
+  align?: AlertTextAlign
+  color?: string
+  fontSize?: number
+  fontWeight?: number
+}
+
+/**
+ * One visual + sound recipe. `null` on an override clears that field from a less-specific look.
+ * Missing fields inherit.
+ */
+export type AlertLook = {
+  image?: AlertAssetRef | null
+  video?: AlertAssetRef | null
+  audio?: AlertAssetRef | null
+  textBoxes?: AlertTextBox[] | null
+  displaySec?: number | null
+}
+
+/** Cascade: `slots` (`Platform:kind`) → `kinds` → `platforms` → `default` → the pill. */
+export type AlertLooks = {
+  default?: AlertLook
+  platforms?: Partial<Record<AlertPlatform, AlertLook>>
+  kinds?: Partial<Record<string, AlertLook>>
+  slots?: Record<string, AlertLook>
+}
+
 /** On-stream alert page settings. `disabled` holds `Platform:kind` keys the page skips. */
 export type AlertSettings = {
   enabled: boolean
@@ -46,6 +90,7 @@ export type AlertSettings = {
   showPlatform: boolean
   displaySec: number
   disabled: string[]
+  looks?: AlertLooks
 }
 
 export type AppSettings = {

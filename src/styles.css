@@ -195,6 +195,10 @@ a.activity-row { color: inherit; text-decoration: none; }
 .alerts-page, .alerts-page body, .alerts-page #root { background: transparent; }
 .alerts-page body { min-width: 0; min-height: 0; overflow: hidden; }
 .alerts-stage { display: flex; align-items: flex-start; justify-content: center; min-height: 100vh; padding: 2.4vmin; box-sizing: border-box; font-size: min(5vw, 28vh); }
+.alerts-stage-look { padding: 0; align-items: stretch; justify-content: stretch; }
+.alert-look { position: relative; width: 100%; height: 100vh; overflow: hidden; opacity: 0; animation: alert-in .4s ease-out forwards, alert-out .4s ease-in forwards; animation-delay: 0s, calc(var(--alert-sec, 5s) - .4s); }
+.alert-look-media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.alert-look-text { position: absolute; box-sizing: border-box; margin: 0; line-height: 1.15; white-space: pre-wrap; overflow-wrap: anywhere; pointer-events: none; text-shadow: 0 1px 2px rgba(0, 0, 0, .65); }
 .alert-pill { width: auto; min-width: 12em; max-width: 100%; margin: 0; padding: .6em .8em; gap: .5em; border-radius: .45em; font-size: 1em; opacity: 0; animation: alert-in .4s ease-out forwards, alert-out .4s ease-in forwards; animation-delay: 0s, calc(var(--alert-sec, 5s) - .4s); }
 .alert-pill .activity-copy strong { font-size: .85em; }
 .alert-pill .activity-copy small { font-size: .6em; white-space: normal; }

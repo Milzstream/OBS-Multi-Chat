@@ -3,11 +3,20 @@
  * which sound group an event plays, and the one-at-a-time arrival queue.
  */
 
-import { activityListRows, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
+import { activityKindLabel, activityListRows, activityPlanLabel, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
+import {
+  alertAssetUrl,
+  fillAlertTemplate,
+  parseAlertLooks,
+  resolveAlertLook,
+  usesCustomAlertLook,
+} from '../../server/logic/alert-looks'
+import type { AlertLook, AlertPlatform, AlertSettings } from '../../server/types'
 
-export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
+export type { AlertAssetRef, AlertLook, AlertLooks, AlertPlatform, AlertSettings, AlertTextBox } from '../../server/types'
+export { alertAssetUrl, fillAlertTemplate, parseAlertLooks, resolveAlertLook, usesCustomAlertLook }
+
 export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
-export type AlertSettings = { enabled: boolean; sound: boolean; showPlatform: boolean; displaySec: number; disabled: string[] }
 export type AlertEvent = { id: string; platform: string; kind: string; time: string }
 export type AlertPresentEvent = AlertEvent & { user?: string; handle?: string; amount?: string; tier?: string; giftedBy?: string; powerUp?: string }
 
@@ -98,13 +107,48 @@ export function parseAlertSettings(value: unknown): AlertSettings {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...DEFAULT_ALERT_SETTINGS }
   const raw = value as Partial<AlertSettings>
   const seconds = Number(raw.displaySec)
+  const looks = parseAlertLooks((raw as { looks?: unknown }).looks)
   return {
     enabled: raw.enabled === true,
     sound: raw.sound !== false,
     showPlatform: raw.showPlatform !== false,
     displaySec: Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_ALERT_SETTINGS.displaySec,
     disabled: Array.isArray(raw.disabled) ? raw.disabled.filter((item): item is string => typeof item === 'string') : [],
+    ...(looks ? { looks } : {}),
   }
+}
+
+export type AlertTemplateEvent = {
+  user?: string
+  amount?: string
+  message?: string
+  platform: string
+  kind: string
+  source?: string
+  months?: number
+  viewers?: number
+  tier?: string
+  giftedBy?: string
+  powerUp?: string
+}
+
+/** Values for `{name}` `{amount}` `{message}` `{kind}` `{platform}` `{months}` `{viewers}` `{plan}` `{gifter}`. */
+export function alertTemplateValues(event: AlertTemplateEvent, showPlatform: boolean): Record<string, string> {
+  return {
+    name: event.user || '',
+    amount: event.amount || '',
+    message: event.message || '',
+    kind: showPlatform ? activityKindLabel(event) : neutralAlertLabel(event),
+    platform: showPlatform ? (event.source || event.platform) : '',
+    months: event.months != null ? String(event.months) : '',
+    viewers: event.viewers != null ? String(event.viewers) : '',
+    plan: activityPlanLabel(event) || '',
+    gifter: event.giftedBy || '',
+  }
+}
+
+export function alertHoldSeconds(settings: AlertSettings, look: AlertLook | undefined) {
+  return look?.displaySec && look.displaySec > 0 ? look.displaySec : settings.displaySec
 }
 
 /**

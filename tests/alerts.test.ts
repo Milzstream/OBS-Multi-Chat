@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { alertSoundGroup, createAlertPresenter, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings } from '../src/alerts/alerts.ts'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { AlertLookView } from '../src/alerts/AlertsApp.tsx'
+import { alertSoundGroup, alertTemplateValues, createAlertPresenter, createAlertTracker, enqueueAlerts, fillAlertTemplate, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, resolveAlertLook, usesCustomAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
-import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAppSettings } from '../server/logic.js'
+import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAlertLooks, parseAppSettings } from '../server/logic.js'
+
+const ASSET = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', mime: 'image/png', name: 'banner.png' }
+const SOUND = { id: 'ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbbb', mime: 'audio/mpeg', name: 'cheer.mp3' }
 
 const NOW = Date.parse('2026-01-01T12:00:00Z')
 const event = (id: string, secondsAgo = 1, extra: Record<string, string> = {}) => ({ id, platform: 'Twitch', kind: 'follow', user: 'Ada', time: new Date(NOW - secondsAgo * 1000).toISOString(), ...extra })
@@ -142,4 +148,117 @@ test('Power-ups stay out of the on-stream overlay', () => {
   assert.equal(out.length, 1)
   assert.equal(isAlertAllowed(out[0], []), false)
   assert.equal(isAlertAllowed(event('c', 1, { kind: 'cheer' }), []), true)
+})
+
+test('old alert settings still parse without a looks object', () => {
+  const parsed = parseAppSettings({ alerts: { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'], extra: 1, kindSchema: { Twitch: { powerup: true } } } })
+  assert.deepEqual(parsed.alerts, { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'] })
+  assert.equal('looks' in parsed.alerts, false)
+  assert.deepEqual(parseAlertLooks(undefined), undefined)
+  assert.deepEqual(parseAlertLooks({}), undefined)
+  const withLooks = parseAppSettings({ alerts: { enabled: true, looks: { default: { image: ASSET } } } })
+  assert.equal(withLooks.alerts.looks?.default?.image?.id, ASSET.id)
+})
+
+test('look cascade is platform+kind, then kind, then platform, then default, field by field', () => {
+  const settings = parseAlertSettings({
+    enabled: true,
+    looks: {
+      default: { image: ASSET, audio: SOUND, textBoxes: [{ text: '{name}', x: 10, y: 20 }], displaySec: 6 },
+      platforms: { Twitch: { audio: { ...SOUND, name: 'twitch.mp3' } } },
+      kinds: { follow: { textBoxes: [{ text: 'FOLLOW {name}', x: 5, y: 5 }] } },
+      slots: { 'Twitch:follow': { image: { ...ASSET, name: 'follow.png' } } },
+    },
+  })
+  const twitchFollow = resolveAlertLook(settings, { platform: 'Twitch', kind: 'follow' })
+  assert.equal(twitchFollow?.image?.name, 'follow.png')
+  assert.equal(twitchFollow?.audio?.name, 'twitch.mp3')
+  assert.equal(twitchFollow?.textBoxes?.[0]?.text, 'FOLLOW {name}')
+  assert.equal(twitchFollow?.displaySec, 6)
+
+  const kickFollow = resolveAlertLook(settings, { platform: 'Kick', kind: 'follow' })
+  assert.equal(kickFollow?.image?.name, 'banner.png')
+  assert.equal(kickFollow?.audio?.name, 'cheer.mp3')
+  assert.equal(kickFollow?.textBoxes?.[0]?.text, 'FOLLOW {name}')
+
+  const twitchCheer = resolveAlertLook(settings, { platform: 'Twitch', kind: 'cheer' })
+  assert.equal(twitchCheer?.image?.name, 'banner.png')
+  assert.equal(twitchCheer?.audio?.name, 'twitch.mp3')
+  assert.equal(twitchCheer?.textBoxes?.[0]?.text, '{name}')
+
+  const kickCheer = resolveAlertLook(settings, { platform: 'Kick', kind: 'cheer' })
+  assert.equal(kickCheer?.image?.name, 'banner.png')
+  assert.equal(kickCheer?.audio?.name, 'cheer.mp3')
+  assert.equal(kickCheer?.textBoxes?.[0]?.text, '{name}')
+})
+
+test('a more specific look can clear an inherited graphic with null', () => {
+  const settings = parseAlertSettings({
+    looks: {
+      default: { image: ASSET, textBoxes: [{ text: '{name}', x: 0, y: 0 }] },
+      slots: { 'Twitch:follow': { image: null } },
+    },
+  })
+  const look = resolveAlertLook(settings, { platform: 'Twitch', kind: 'follow' })
+  assert.equal(look?.image, undefined)
+  assert.equal(look?.textBoxes?.[0]?.text, '{name}')
+  assert.equal(usesCustomAlertLook(look), true)
+})
+
+test('token replace collapses empty values and leaves unknown {tokens} as written', () => {
+  const values = { name: 'Ada', amount: '', message: '', kind: 'FOLLOW', platform: 'Twitch', months: '', viewers: '', plan: '', gifter: '' }
+  assert.equal(fillAlertTemplate('{name} {amount}', { ...values, amount: '100 Bits' }), 'Ada 100 Bits')
+  assert.equal(fillAlertTemplate('{name} {amount}', values), 'Ada')
+  assert.equal(fillAlertTemplate('{name}  {amount}', values), 'Ada')
+  assert.equal(fillAlertTemplate('hey {unknown}', values), 'hey {unknown}')
+  assert.equal(fillAlertTemplate('{NAME}', values), '{NAME}')
+  assert.equal(fillAlertTemplate('{name} {message}', { ...values, message: 'hi there' }), 'Ada hi there')
+  const follow = alertTemplateValues({ platform: 'Twitch', kind: 'follow', user: 'Ada' }, true)
+  assert.equal(follow.name, 'Ada')
+  assert.equal(follow.kind, 'FOLLOW')
+  assert.equal(follow.platform, 'Twitch')
+  const hidden = alertTemplateValues({ platform: 'YouTube', kind: 'subscription', user: 'Bea' }, false)
+  assert.equal(hidden.kind, 'FOLLOW')
+  assert.equal(hidden.platform, '')
+  const sub = alertTemplateValues({ platform: 'Twitch', kind: 'subscription', user: 'Ada', months: 4, tier: 'prime', giftedBy: 'Cal' }, true)
+  assert.equal(sub.plan, 'PRIME')
+  assert.equal(sub.months, '4')
+  assert.equal(sub.gifter, 'Cal')
+})
+
+test('custom look vs pill fallback', () => {
+  const follow = { id: 'a', platform: 'Twitch' as const, kind: 'follow' as const, user: 'Ada', time: '2026-01-01T12:00:00.000Z' }
+  const pillSettings = parseAlertSettings({ enabled: true })
+  assert.equal(usesCustomAlertLook(resolveAlertLook(pillSettings, follow)), false)
+
+  const audioOnly = parseAlertSettings({ enabled: true, looks: { default: { audio: SOUND } } })
+  assert.equal(usesCustomAlertLook(resolveAlertLook(audioOnly, follow)), false)
+
+  const custom = parseAlertSettings({
+    enabled: true,
+    looks: { default: { image: ASSET, textBoxes: [{ text: '{name} followed', x: 8, y: 40, width: 80, align: 'center' }] } },
+  })
+  const look = resolveAlertLook(custom, follow)
+  assert.equal(usesCustomAlertLook(look), true)
+  assert.ok(look)
+  const html = renderToStaticMarkup(createElement(AlertLookView, { event: follow, settings: custom, look }))
+  assert.match(html, /alert-look/)
+  assert.match(html, /Ada followed/)
+  assert.match(html, /\/alerts\/assets\/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/)
+  assert.doesNotMatch(html, /alert-pill/)
+})
+
+test('look parse drops unknown keys, bad assets, and a Power-up kind slot', () => {
+  const looks = parseAlertLooks({
+    default: { image: ASSET, css: 'evil', extra: 1 },
+    kinds: { powerup: { image: ASSET }, follow: { image: ASSET } },
+    slots: { 'Twitch:powerup': { image: ASSET }, 'Twitch:follow': { image: { id: '../secret', mime: 'image/png', name: 'x.png' } } },
+    platforms: { Discord: { image: ASSET } },
+  })
+  assert.equal(looks?.default?.image?.id, ASSET.id)
+  assert.equal(looks?.kinds?.follow?.image?.id, ASSET.id)
+  assert.equal(looks?.kinds?.powerup, undefined)
+  assert.equal(looks?.slots?.['Twitch:follow'], undefined)
+  assert.equal(looks?.slots?.['Twitch:powerup'], undefined)
+  assert.equal(looks?.platforms?.Twitch, undefined)
 })

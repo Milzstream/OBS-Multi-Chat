@@ -58,10 +58,19 @@ function clipUrl(group: AlertSoundGroup) {
   return url
 }
 
-export function playAlertSound(group: AlertSoundGroup) {
+function playUrl(url: string) {
   try {
-    const audio = new Audio(clipUrl(group))
+    const audio = new Audio(url)
     audio.volume = 1
     void audio.play().catch(() => undefined)
   } catch { /* audio is best effort */ }
+}
+
+export function playAlertSound(group: AlertSoundGroup) {
+  playUrl(clipUrl(group))
+}
+
+/** Custom look audio. Same `<audio>` path OBS routes when Control audio via OBS is on. */
+export function playAlertSoundUrl(url: string) {
+  playUrl(url)
 }

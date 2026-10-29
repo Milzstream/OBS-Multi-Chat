@@ -6,7 +6,7 @@
 |---|---|
 | `/` | `chat/App.tsx` |
 | `/activity` | `activity/ActivityApp.tsx` |
-| `/alerts` | `alerts/AlertsApp.tsx` |
+| `/alerts` | `alerts/AlertsApp.tsx` (pill, or a custom look from `server/logic/alert-looks.ts`) |
 | `/console` | `ConsoleApp.tsx` |
 | `/watch` | `WatchApp.tsx` |
 

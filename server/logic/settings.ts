@@ -3,6 +3,7 @@
  */
 
 import { type AlertSettings, type AppSettings, type AutoLiveCheck, type Platform } from '../types.js'
+import { parseAlertLooks } from './alert-looks.js'
 import { emptyStreamInfo, loadStreamInfo } from './stream-info.js'
 import { loadYouTubeQuota } from './youtube-quota.js'
 
@@ -82,12 +83,14 @@ export function parseAlertSettings(value: unknown): AlertSettings {
   const defaults = defaultAlertSettings()
   if (!value || typeof value !== 'object' || Array.isArray(value)) return defaults
   const parsed = value as Partial<AlertSettings>
+  const looks = parseAlertLooks((parsed as { looks?: unknown }).looks)
   return {
     enabled: parsed.enabled === true,
     sound: parsed.sound !== false,
     showPlatform: parsed.showPlatform !== false,
     displaySec: clampAlertSeconds(parsed.displaySec, defaults.displaySec),
     disabled: parseAlertDisabled(parsed.disabled),
+    ...(looks ? { looks } : {}),
   }
 }
 
