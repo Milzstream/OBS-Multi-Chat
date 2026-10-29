@@ -61,6 +61,8 @@ export type AlertTextBox = {
   color?: string
   fontSize?: number
   fontWeight?: number
+  /** Allowlisted overlay font id from `ALERT_FONTS`. Missing uses Outfit. */
+  fontFamily?: string
 }
 
 /**

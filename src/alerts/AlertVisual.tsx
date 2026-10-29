@@ -3,6 +3,7 @@ import { KindIcon, PlatformMark, kindColor, platformColor, type ActivityEvent } 
 import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, pillTextColor } from '../activity/format'
 import {
   alertAssetUrl,
+  alertFontCss,
   alertHoldSeconds,
   alertTemplateValues,
   fillAlertTemplate,
@@ -23,6 +24,7 @@ export function textBoxStyle(box: AlertTextBox): CSSProperties {
     color: box.color || '#fff',
     fontSize: `${box.fontSize && box.fontSize > 0 ? box.fontSize : 8}em`,
     fontWeight: box.fontWeight,
+    fontFamily: alertFontCss(box.fontFamily),
   }
 }
 

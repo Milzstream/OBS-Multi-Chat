@@ -236,7 +236,7 @@ test('custom look vs pill fallback', () => {
 
   const custom = parseAlertSettings({
     enabled: true,
-    looks: { default: { image: ASSET, textBoxes: [{ text: '{name} followed', x: 8, y: 40, width: 80, align: 'center' }] } },
+    looks: { default: { image: ASSET, textBoxes: [{ text: '{name} followed', x: 8, y: 40, width: 80, align: 'center', fontFamily: 'impact' }] } },
   })
   const look = resolveAlertLook(custom, follow)
   assert.equal(usesCustomAlertLook(look), true)
@@ -247,6 +247,21 @@ test('custom look vs pill fallback', () => {
   assert.match(html, /\/alerts\/assets\/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/)
   assert.doesNotMatch(html, /alert-pill/)
   assert.match(html, /font-size:8em/)
+  assert.match(html, /font-family:Impact/)
+})
+
+test('text boxes keep an allowlisted font and drop unknown families', () => {
+  const looks = parseAlertLooks({
+    default: {
+      textBoxes: [
+        { text: '{name}', x: 8, y: 40, fontFamily: 'Impact', fontSize: 10, fontWeight: 700 },
+        { text: 'nope', x: 8, y: 50, fontFamily: 'url("https://evil.example")' },
+      ],
+    },
+  })
+  assert.equal(looks?.default?.textBoxes?.[0]?.fontFamily, 'impact')
+  assert.equal(looks?.default?.textBoxes?.[0]?.fontSize, 10)
+  assert.equal(looks?.default?.textBoxes?.[1]?.fontFamily, undefined)
 })
 
 test('look parse drops unknown keys, bad assets, and a Power-up kind slot', () => {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ArrowLeft, Bell, Play, Plus, Trash2, Twitch, Upload, Youtube } from 'lucide-react'
-import { ALERT_TOKENS } from '../../server/logic/alert-looks'
+import { ALERT_FONTS, ALERT_TOKENS } from '../../server/logic/alert-looks'
 import type { AlertAssetRef, AlertLooks, AlertPlatform, AlertSettings, AlertTextAlign, AlertTextBox } from '../../server/types'
 import {
   ALERT_PLATFORMS,
@@ -423,6 +423,12 @@ export function AlertDesigner({
                   <option value="left">Left</option>
                   <option value="center">Center</option>
                   <option value="right">Right</option>
+                </select>
+              </label>
+              <label>
+                Font
+                <select value={selectedBox.fontFamily || 'outfit'} onChange={(event) => patchBox(selected, { fontFamily: event.target.value }, true)}>
+                  {ALERT_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
                 </select>
               </label>
               <label>

@@ -11,6 +11,42 @@ export const ALERT_LOOK_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'rai
 export const ALERT_TOKENS = ['name', 'amount', 'message', 'kind', 'platform', 'months', 'viewers', 'plan', 'gifter'] as const
 export type AlertToken = (typeof ALERT_TOKENS)[number]
 
+/**
+ * Overlay text fonts. Ids are what settings.json stores. CSS stacks use
+ * Windows/macOS system faces plus Outfit (already loaded for the docks).
+ * Unknown ids are dropped on parse so a look cannot inject CSS.
+ */
+export const ALERT_FONTS = [
+  { id: 'outfit', label: 'Outfit', css: 'Outfit, sans-serif' },
+  { id: 'impact', label: 'Impact', css: 'Impact, Haettenschweiler, "Arial Black", sans-serif' },
+  { id: 'arial', label: 'Arial', css: 'Arial, Helvetica, sans-serif' },
+  { id: 'arial-black', label: 'Arial Black', css: '"Arial Black", Arial, sans-serif' },
+  { id: 'georgia', label: 'Georgia', css: 'Georgia, serif' },
+  { id: 'times', label: 'Times', css: '"Times New Roman", Times, serif' },
+  { id: 'verdana', label: 'Verdana', css: 'Verdana, Geneva, sans-serif' },
+  { id: 'tahoma', label: 'Tahoma', css: 'Tahoma, Geneva, sans-serif' },
+  { id: 'trebuchet', label: 'Trebuchet', css: '"Trebuchet MS", sans-serif' },
+  { id: 'comic', label: 'Comic Sans', css: '"Comic Sans MS", "Comic Sans", cursive' },
+  { id: 'courier', label: 'Courier', css: '"Courier New", Courier, monospace' },
+  { id: 'segoe', label: 'Segoe UI', css: '"Segoe UI", Tahoma, sans-serif' },
+] as const
+
+export type AlertFontId = (typeof ALERT_FONTS)[number]['id']
+
+const ALERT_FONT_BY_ID: Record<string, (typeof ALERT_FONTS)[number]> = Object.fromEntries(
+  ALERT_FONTS.map((font) => [font.id, font]),
+)
+
+export function parseAlertFontFamily(value: unknown): AlertFontId | undefined {
+  if (typeof value !== 'string') return
+  const font = ALERT_FONT_BY_ID[value.trim().toLowerCase()]
+  return font?.id
+}
+
+export function alertFontCss(id?: string): string | undefined {
+  return id ? ALERT_FONT_BY_ID[id]?.css : undefined
+}
+
 /** UUID on disk. User-supplied paths never reach here. */
 export const ALERT_ASSET_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -125,6 +161,8 @@ export function parseAlertTextBox(value: unknown): AlertTextBox | undefined {
   if (fontSize != null && fontSize > 0) box.fontSize = fontSize
   const fontWeight = parseFontWeight(raw.fontWeight)
   if (fontWeight) box.fontWeight = fontWeight
+  const fontFamily = parseAlertFontFamily(raw.fontFamily)
+  if (fontFamily) box.fontFamily = fontFamily
   return box
 }
 

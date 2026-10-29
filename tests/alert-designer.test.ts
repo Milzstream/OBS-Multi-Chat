@@ -201,6 +201,22 @@ describe('companion designer markup', () => {
     assert.match(html, /alert-pill/)
     assert.doesNotMatch(html, /power-?up/i)
   })
+
+  it('offers an allowlisted Font picker on a selected text box', () => {
+    const html = renderToStaticMarkup(createElement(AlertDesigner, {
+      settings: parseAlertSettings({
+        enabled: true,
+        looks: { default: { textBoxes: [{ text: '{name}', x: 8, y: 40, fontFamily: 'impact' }] } },
+      }),
+      onLooksChange: () => undefined,
+      onBack: () => undefined,
+    }))
+    assert.match(html, />Font</)
+    assert.match(html, /<option[^>]*value="impact"[^>]*selected/)
+    assert.match(html, />Outfit</)
+    assert.match(html, />Comic Sans</)
+    assert.doesNotMatch(html, /url\(/)
+  })
 })
 
 describe('overlay route stays output-only', () => {
