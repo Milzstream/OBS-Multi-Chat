@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { ArrowLeft, Bell, Play, Plus, Trash2, Twitch, Upload, Youtube } from 'lucide-react'
+import { ArrowLeft, Bell, Play, Plus, RotateCcw, Save, Trash2, Twitch, Upload, Youtube } from 'lucide-react'
 import { ALERT_FONTS, ALERT_TOKENS, alertFontCss, alertFontSelectOptions, parseAlertFontFamily } from '../../server/logic/alert-looks'
 import type { AlertAssetRef, AlertLooks, AlertPlatform, AlertSettings, AlertTextAlign, AlertTextBox } from '../../server/types'
 import {
@@ -13,10 +13,12 @@ import { AlertLookView, AlertPill } from './AlertVisual'
 import {
   ALERT_PREVIEW_HEIGHT,
   ALERT_PREVIEW_WIDTH,
+  clearLookLayer,
   defaultTextBox,
   designerKindsFor,
   inheritSources,
   insertToken,
+  lookLayerHasContent,
   ownOrCopiedTextBoxes,
   readLookLayer,
   resolveAlertLookForTarget,
@@ -71,7 +73,7 @@ export function AlertDesigner({
   onBack,
 }: {
   settings: AlertSettings
-  onLooksChange: (looks: AlertLooks | undefined) => void
+  onLooksChange: (looks: AlertLooks | undefined) => void | Promise<boolean>
   onBack: () => void
 }) {
   const [target, setTarget] = useState<LookTarget>({})
@@ -81,6 +83,7 @@ export function AlertDesigner({
   const [busy, setBusy] = useState<'graphic' | 'sound' | ''>('')
   const [timeDraft, setTimeDraft] = useState<string | null>(null)
   const [fonts, setFonts] = useState<string[]>(() => [...ALERT_FONTS])
+  const [saveState, setSaveState] = useState<'unsaved' | 'saving' | 'saved' | 'error' | ''>('')
   const dirtyRef = useRef(false)
   const draftRef = useRef(draft)
   const dragRef = useRef<{ index: number; dx: number; dy: number } | null>(null)
@@ -127,20 +130,36 @@ export function AlertDesigner({
 
   useEffect(() => () => {
     window.clearTimeout(saveTimer.current)
-    if (dirtyRef.current) onLooksChangeRef.current(draftRef.current)
+    if (dirtyRef.current) void onLooksChangeRef.current(draftRef.current)
   }, [])
+
+  const persist = async (looks: AlertLooks | undefined) => {
+    setSaveState('saving')
+    try {
+      const ok = await Promise.resolve(onLooksChange(looks))
+      if (ok === false) {
+        setSaveState('error')
+        return false
+      }
+      dirtyRef.current = false
+      setSaveState('saved')
+      return true
+    } catch {
+      setSaveState('error')
+      return false
+    }
+  }
 
   const commit = (looks: AlertLooks | undefined, immediate = false) => {
     dirtyRef.current = true
     draftRef.current = looks
     setDraft(looks)
     window.clearTimeout(saveTimer.current)
-    const save = () => {
-      onLooksChange(looks)
-      dirtyRef.current = false
+    if (immediate) void persist(looks)
+    else {
+      setSaveState('unsaved')
+      saveTimer.current = window.setTimeout(() => { void persist(looks) }, 400)
     }
-    if (immediate) save()
-    else saveTimer.current = window.setTimeout(save, 400)
   }
 
   const event = sampleAlertEvent(target)
@@ -150,6 +169,7 @@ export function AlertDesigner({
   const boxes = look?.textBoxes || []
   const graphic = resolvedGraphic(look)
   const own = readLookLayer(draft, target)
+  const canReset = lookLayerHasContent(own)
   const kinds = designerKindsFor(target.platform)
   const hold = alertHoldSeconds(settings, look)
   const selectedBox = boxes[selected]
@@ -289,6 +309,22 @@ export function AlertDesigner({
     })
   }
 
+  const saveNow = () => {
+    window.clearTimeout(saveTimer.current)
+    dirtyRef.current = true
+    void persist(draftRef.current)
+  }
+
+  const resetLook = () => {
+    commit(clearLookLayer(draft, target), true)
+  }
+
+  const goBack = () => {
+    window.clearTimeout(saveTimer.current)
+    if (dirtyRef.current) void persist(draftRef.current)
+    onBack()
+  }
+
   const commitTime = () => {
     if (timeDraft == null) return
     const raw = timeDraft.trim()
@@ -305,11 +341,26 @@ export function AlertDesigner({
   return (
     <div className="alert-designer">
       <div className="alert-designer-bar">
-        <button type="button" className="alert-designer-back" onClick={() => { window.clearTimeout(saveTimer.current); if (dirtyRef.current) { onLooksChange(draftRef.current); dirtyRef.current = false } onBack() }}>
+        <button type="button" className="alert-designer-action" onClick={goBack}>
           <ArrowLeft size={14} strokeWidth={2.5} /> Back
         </button>
         <strong>Customize alerts</strong>
-        <span>Sample preview · 1000×250</span>
+        <button
+          type="button"
+          className="alert-designer-action"
+          disabled={!canReset || saveState === 'saving'}
+          title={target.platform || target.kind ? 'Remove this look so it uses Default again' : 'Remove this look and use the built-in pill'}
+          onClick={resetLook}
+        >
+          <RotateCcw size={12} strokeWidth={2.5} /> Reset to default
+        </button>
+        <button type="button" className="alert-designer-action" disabled={saveState === 'saving'} onClick={saveNow}>
+          <Save size={12} strokeWidth={2.5} /> {saveState === 'saving' ? 'Saving…' : 'Save'}
+        </button>
+        {saveState === 'saved' ? <span className="alert-designer-status">Saved</span> : null}
+        {saveState === 'unsaved' ? <span className="alert-designer-status">Unsaved</span> : null}
+        {saveState === 'error' ? <span className="alert-designer-status error">Could not save</span> : null}
+        <span className="alert-designer-hint">Sample preview · 1000×250</span>
       </div>
       <div className="alert-designer-frame" ref={frameRef}>
         <div

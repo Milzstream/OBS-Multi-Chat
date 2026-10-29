@@ -217,10 +217,13 @@ a.activity-row { color: inherit; text-decoration: none; }
 .console-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 320px; }
 .console-log { min-height: 0; overflow: auto; padding: 12px 16px 18px; background: #0c0c0c; font: 13px/1.35 'Cascadia Mono', 'DM Mono', Consolas, monospace; scrollbar-color: #333 transparent; scrollbar-width: thin; }
 .alert-designer { min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 14px; background: #0c0c0c; }
-.alert-designer-bar { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.alert-designer-bar { display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 .alert-designer-bar strong { font-size: 13px; }
-.alert-designer-bar span { color: #8b969a; font: 10px 'DM Mono', monospace; margin-left: auto; }
-.alert-designer-back { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; background: #1c2f2c; color: var(--teal); font: 11px 'DM Mono', monospace; }
+.alert-designer-action { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 4px; background: #1c2f2c; color: var(--teal); font: 11px 'DM Mono', monospace; }
+.alert-designer-action:disabled { opacity: .35; cursor: not-allowed; }
+.alert-designer-status { color: #8b969a; font: 10px 'DM Mono', monospace; }
+.alert-designer-status.error { color: #ff8b7a; }
+.alert-designer-hint { color: #8b969a; font: 10px 'DM Mono', monospace; margin-left: auto; }
 .alert-designer-frame { position: relative; flex-shrink: 0; width: 100%; aspect-ratio: 4 / 1; overflow: hidden; border: 1px solid #2b3237; border-radius: 4px; background-color: #161616; background-image: linear-gradient(45deg, #1d1d1d 25%, transparent 25%), linear-gradient(-45deg, #1d1d1d 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1d1d1d 75%), linear-gradient(-45deg, transparent 75%, #1d1d1d 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0; }
 .alert-designer-stage { position: absolute; top: 0; left: 0; transform-origin: 0 0; container-type: size; }
 .alert-designer-stage .alerts-stage { min-height: 0; height: 100%; padding: min(2.4cqw, 2.4cqh); font-size: min(5cqw, 28cqh); }

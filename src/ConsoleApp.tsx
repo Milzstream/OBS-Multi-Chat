@@ -161,6 +161,7 @@ export default function ConsoleApp() {
   const [alertSecDraft, setAlertSecDraft] = useState<string | null>(null)
   const [customize, setCustomize] = useState(false)
   const alertsBusy = useRef(0)
+  const alertsPatchSeq = useRef(0)
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const settingsRef = useRef(settings)
@@ -336,6 +337,7 @@ export default function ConsoleApp() {
 
   const patchAlerts = async (patch: Omit<Partial<AlertSettings>, 'looks'> & { looks?: AlertLooks | null }) => {
     const previous = alerts
+    const seq = ++alertsPatchSeq.current
     const next = { ...alerts, ...patch } as AlertSettings
     if (patch.looks === null) delete next.looks
     setAlerts(next)
@@ -344,10 +346,13 @@ export default function ConsoleApp() {
       const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alerts: patch }) })
       const data = await response.json() as { alerts?: unknown }
       if (!response.ok) throw new Error('save')
+      if (seq !== alertsPatchSeq.current) return true
       if (data.alerts) setAlerts(parseAlertSettings(data.alerts))
       return true
     } catch {
+      if (seq !== alertsPatchSeq.current) return false
       setAlerts(previous)
+      setSettingsError('Could not save alerts')
       return false
     } finally {
       alertsBusy.current -= 1
@@ -436,7 +441,7 @@ export default function ConsoleApp() {
         {customize ? (
           <AlertDesigner
             settings={alerts}
-            onLooksChange={(looks) => void patchAlerts({ looks: looks ?? null })}
+            onLooksChange={(looks) => patchAlerts({ looks: looks ?? null })}
             onBack={() => setCustomize(false)}
           />
         ) : (

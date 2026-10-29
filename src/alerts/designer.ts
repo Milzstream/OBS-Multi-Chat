@@ -192,6 +192,15 @@ export function writeLookLayer(looks: AlertLooks | undefined, target: LookTarget
   return looksHasContent(next) ? next : undefined
 }
 
+/** Drop this target's layer so Default (or the built-in pill) shows again. */
+export function clearLookLayer(looks: AlertLooks | undefined, target: LookTarget): AlertLooks | undefined {
+  return writeLookLayer(looks, target, undefined)
+}
+
+export function lookLayerHasContent(look: AlertLook | undefined) {
+  return Boolean(look && lookHasKeys(look))
+}
+
 export function setLookField<K extends AlertLookField>(
   looks: AlertLooks | undefined,
   target: LookTarget,

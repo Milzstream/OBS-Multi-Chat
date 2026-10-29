@@ -20,6 +20,8 @@ import {
   setLookField,
   setLookGraphic,
   setLookTextBoxes,
+  clearLookLayer,
+  lookLayerHasContent,
 } from '../src/alerts/designer.ts'
 import { collectLookAssetIds, parseAlertSettings, resolveAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
@@ -116,6 +118,21 @@ describe('set look fields', () => {
     assert.equal(looks?.default?.image, undefined)
   })
 
+  it('resets a layer so Default or the pill shows again', () => {
+    let looks = setLookGraphic(undefined, {}, IMAGE)
+    looks = setLookGraphic(looks, { platform: 'Twitch' }, TWITCH)
+    looks = setLookTextBoxes(looks, { platform: 'Twitch', kind: 'follow' }, [{ text: '{name}', x: 8, y: 40 }])
+    assert.equal(lookLayerHasContent(readLookLayer(looks, { platform: 'Twitch' })), true)
+    looks = clearLookLayer(looks, { platform: 'Twitch', kind: 'follow' })
+    assert.equal(looks?.slots, undefined)
+    looks = clearLookLayer(looks, { platform: 'Twitch' })
+    assert.equal(looks?.platforms, undefined)
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(looks, { platform: 'Twitch' }))?.id, IMAGE.id)
+    looks = clearLookLayer(looks, {})
+    assert.equal(looks, undefined)
+    assert.equal(lookLayerHasContent(undefined), false)
+  })
+
   it('clears an overlay graphic with null so inherited art does not show', () => {
     let looks = setLookGraphic(undefined, {}, IMAGE)
     looks = setLookGraphic(looks, { platform: 'Twitch' }, null)
@@ -192,7 +209,10 @@ describe('companion designer markup', () => {
       onBack: () => undefined,
     }))
     assert.match(html, /Customize alerts/)
-    assert.match(html, /alert-designer-back/)
+    assert.match(html, /alert-designer-action/)
+    assert.match(html, /Save<\/button>/)
+    assert.match(html, /Reset to default/)
+    assert.match(html, /<button[^>]*disabled[^>]*title="Remove this look and use the built-in pill"/)
     assert.match(html, />Default</)
     assert.match(html, />Follow</)
     assert.match(html, />Membership</)
@@ -200,6 +220,21 @@ describe('companion designer markup', () => {
     assert.match(html, /\{gifter\}/)
     assert.match(html, /alert-pill/)
     assert.doesNotMatch(html, /power-?up/i)
+  })
+
+  it('enables Reset to default when this look has a custom graphic', () => {
+    const html = renderToStaticMarkup(createElement(AlertDesigner, {
+      settings: parseAlertSettings({
+        enabled: true,
+        looks: { default: { image: IMAGE } },
+      }),
+      onLooksChange: () => undefined,
+      onBack: () => undefined,
+    }))
+    assert.match(html, /Reset to default/)
+    assert.match(html, /Save<\/button>/)
+    const reset = html.split('Reset to default')[0].split('<button').pop() || ''
+    assert.doesNotMatch(reset, /disabled/)
   })
 
   it('offers a Font picker with Outfit, common faces, and the selected family', () => {
