@@ -8,6 +8,7 @@ export default defineConfig({
       '/api': 'http://localhost:4173',
       '/events': 'http://localhost:4173',
       '/oauth': 'http://localhost:4173',
+      '/alerts/assets': 'http://localhost:4173',
     },
   },
 })

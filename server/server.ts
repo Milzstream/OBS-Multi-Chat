@@ -11,6 +11,7 @@ import { createServer } from 'node:http'
 import { ACTIVITY_MAX_AGE_MS, createActivityStore, type ActivityEvent } from './activity.js'
 import { resolveEnvFilePath, resolveEnvTemplatePath, STREAMELEMENTS_JWT_KEYS, syncEnvFile, writeTextAtomic } from './env-file.js'
 
+import { ALERT_ASSET_JSON_LIMIT, isAlertAssetJsonPath } from './alert-assets.js'
 import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } from './persist.js'
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore } from './oauth-state.js'
@@ -1015,7 +1016,10 @@ async function updateStreamInfo(platform: StreamPlatform, info: StreamDetails) {
 }
 
 app.use(cors({ origin: corsOriginDelegate(localApi) }))
-app.use(express.json())
+app.use((request, response, next) => {
+  const json = isAlertAssetJsonPath(request.path) ? express.json({ limit: ALERT_ASSET_JSON_LIMIT }) : express.json()
+  return json(request, response, next)
+})
 app.use(createControlGuard(localApi))
 registerHttpRoutes(app, {
   state,

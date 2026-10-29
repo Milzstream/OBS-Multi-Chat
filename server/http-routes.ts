@@ -11,6 +11,7 @@ import {
   missingStreamElementsMessage,
   normalizeTags,
   parseAlertDisabled,
+  parseAlertLooks,
   parseMentionKeywords,
   parseYouTubeQuotaInput,
   sseNamedEvent,
@@ -20,6 +21,7 @@ import {
   type YoutubePrivacyWatch,
 } from './logic.js'
 import { createOpenHandler, isTrustedOrigin, openInDefaultBrowser, watchLogLine, watchOffLogLine } from './local-api.js'
+import { registerAlertAssetRoutes } from './alert-assets.js'
 import { fetchMedia } from './media-proxy.js'
 import { OAUTH_STATE_TTL_MS, type createOAuthStateStore } from './oauth-state.js'
 import { moderationLogLine } from './operator-log.js'
@@ -181,6 +183,8 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     exchangeCode,
     oauthStates,
   } = d
+
+  registerAlertAssetRoutes(app, dataDir)
 
   app.get('/api/state', (_request, response) => {
     state.activity = activityStore.list()
@@ -447,6 +451,11 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       if (typeof patch.showPlatform === 'boolean') next.showPlatform = patch.showPlatform
       if (patch.displaySec !== undefined) next.displaySec = clampAlertSeconds(patch.displaySec, next.displaySec)
       if (Array.isArray(patch.disabled)) next.disabled = parseAlertDisabled(patch.disabled)
+      if (patch.looks !== undefined) {
+        const looks = parseAlertLooks(patch.looks)
+        if (looks) next.looks = looks
+        else delete next.looks
+      }
       if (JSON.stringify(next) !== JSON.stringify(settings.alerts)) {
         settings.alerts = next
         state.alerts = { ...next, disabled: [...next.disabled] }

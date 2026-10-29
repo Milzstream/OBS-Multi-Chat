@@ -17,5 +17,5 @@
     "noEmit": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "server/types.ts"]
+  "include": ["src", "server/types.ts", "server/logic/alert-looks.ts"]
 }
