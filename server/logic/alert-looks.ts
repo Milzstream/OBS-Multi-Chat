@@ -12,39 +12,91 @@ export const ALERT_TOKENS = ['name', 'amount', 'message', 'kind', 'platform', 'm
 export type AlertToken = (typeof ALERT_TOKENS)[number]
 
 /**
- * Overlay text fonts. Ids are what settings.json stores. CSS stacks use
- * Windows/macOS system faces plus Outfit (already loaded for the docks).
- * Unknown ids are dropped on parse so a look cannot inject CSS.
+ * Outfit is loaded for the docks. The rest are common Windows faces used
+ * until this PC's installed list arrives, or when enumeration fails.
  */
 export const ALERT_FONTS = [
-  { id: 'outfit', label: 'Outfit', css: 'Outfit, sans-serif' },
-  { id: 'impact', label: 'Impact', css: 'Impact, Haettenschweiler, "Arial Black", sans-serif' },
-  { id: 'arial', label: 'Arial', css: 'Arial, Helvetica, sans-serif' },
-  { id: 'arial-black', label: 'Arial Black', css: '"Arial Black", Arial, sans-serif' },
-  { id: 'georgia', label: 'Georgia', css: 'Georgia, serif' },
-  { id: 'times', label: 'Times', css: '"Times New Roman", Times, serif' },
-  { id: 'verdana', label: 'Verdana', css: 'Verdana, Geneva, sans-serif' },
-  { id: 'tahoma', label: 'Tahoma', css: 'Tahoma, Geneva, sans-serif' },
-  { id: 'trebuchet', label: 'Trebuchet', css: '"Trebuchet MS", sans-serif' },
-  { id: 'comic', label: 'Comic Sans', css: '"Comic Sans MS", "Comic Sans", cursive' },
-  { id: 'courier', label: 'Courier', css: '"Courier New", Courier, monospace' },
-  { id: 'segoe', label: 'Segoe UI', css: '"Segoe UI", Tahoma, sans-serif' },
+  'Outfit',
+  'Arial',
+  'Arial Black',
+  'Comic Sans MS',
+  'Courier New',
+  'Georgia',
+  'Impact',
+  'Segoe UI',
+  'Tahoma',
+  'Times New Roman',
+  'Trebuchet MS',
+  'Verdana',
 ] as const
 
-export type AlertFontId = (typeof ALERT_FONTS)[number]['id']
-
-const ALERT_FONT_BY_ID: Record<string, (typeof ALERT_FONTS)[number]> = Object.fromEntries(
-  ALERT_FONTS.map((font) => [font.id, font]),
-)
-
-export function parseAlertFontFamily(value: unknown): AlertFontId | undefined {
-  if (typeof value !== 'string') return
-  const font = ALERT_FONT_BY_ID[value.trim().toLowerCase()]
-  return font?.id
+/** Ids from the first Font picker. Stored looks keep working after the switch to family names. */
+const ALERT_FONT_LEGACY: Record<string, string> = {
+  outfit: 'Outfit',
+  impact: 'Impact',
+  arial: 'Arial',
+  'arial-black': 'Arial Black',
+  georgia: 'Georgia',
+  times: 'Times New Roman',
+  verdana: 'Verdana',
+  tahoma: 'Tahoma',
+  trebuchet: 'Trebuchet MS',
+  comic: 'Comic Sans MS',
+  courier: 'Courier New',
+  segoe: 'Segoe UI',
 }
 
-export function alertFontCss(id?: string): string | undefined {
-  return id ? ALERT_FONT_BY_ID[id]?.css : undefined
+const ALERT_FONT_MAX = 80
+const ALERT_FONT_LIST_MAX = 2000
+const ALERT_FONT_UNSAFE = /[\u0000-\u001f\u007f\\"<>{};,]|url\s*\(/i
+
+/**
+ * Persist a CSS family name, not a stylesheet. Quotes, braces, and `url(`
+ * are dropped so a look cannot inject CSS. Legacy picker ids map to names.
+ */
+export function parseAlertFontFamily(value: unknown): string | undefined {
+  if (typeof value !== 'string') return
+  const trimmed = value.trim()
+  if (!trimmed) return
+  const legacy = ALERT_FONT_LEGACY[trimmed.toLowerCase()]
+  if (legacy) return legacy
+  if (trimmed.length > ALERT_FONT_MAX) return
+  if (ALERT_FONT_UNSAFE.test(trimmed)) return
+  if (!/\p{L}/u.test(trimmed)) return
+  return trimmed
+}
+
+/** Overlay stack. Missing / unsafe names inherit Outfit from the page. */
+export function alertFontCss(family?: string): string | undefined {
+  const name = parseAlertFontFamily(family)
+  if (!name) return
+  if (name.toLowerCase() === 'outfit') return 'Outfit, sans-serif'
+  return `"${name}", Outfit, sans-serif`
+}
+
+/** Outfit first, then unique safe names in A–Z order. */
+export function mergeAlertFontList(installed: readonly string[]): string[] {
+  const seen = new Set<string>(['outfit'])
+  const rest: string[] = []
+  for (const raw of installed) {
+    const name = parseAlertFontFamily(raw)
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    rest.push(name)
+    if (rest.length >= ALERT_FONT_LIST_MAX) break
+  }
+  rest.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return ['Outfit', ...rest]
+}
+
+/** Keep a saved family visible even when this PC no longer lists it. */
+export function alertFontSelectOptions(list: readonly string[], selected?: string): string[] {
+  const fonts = mergeAlertFontList(list)
+  const current = parseAlertFontFamily(selected)
+  if (!current || fonts.some((name) => name.toLowerCase() === current.toLowerCase())) return fonts
+  return [fonts[0], current, ...fonts.slice(1)]
 }
 
 /** UUID on disk. User-supplied paths never reach here. */

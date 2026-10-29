@@ -202,7 +202,7 @@ describe('companion designer markup', () => {
     assert.doesNotMatch(html, /power-?up/i)
   })
 
-  it('offers an allowlisted Font picker on a selected text box', () => {
+  it('offers a Font picker with Outfit, common faces, and the selected family', () => {
     const html = renderToStaticMarkup(createElement(AlertDesigner, {
       settings: parseAlertSettings({
         enabled: true,
@@ -212,9 +212,9 @@ describe('companion designer markup', () => {
       onBack: () => undefined,
     }))
     assert.match(html, />Font</)
-    assert.match(html, /<option[^>]*value="impact"[^>]*selected/)
+    assert.match(html, /<option[^>]*value="Impact"/)
     assert.match(html, />Outfit</)
-    assert.match(html, />Comic Sans</)
+    assert.match(html, />Comic Sans MS</)
     assert.doesNotMatch(html, /url\(/)
   })
 })

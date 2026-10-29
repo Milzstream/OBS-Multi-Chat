@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { ArrowLeft, Bell, Play, Plus, Trash2, Twitch, Upload, Youtube } from 'lucide-react'
-import { ALERT_FONTS, ALERT_TOKENS } from '../../server/logic/alert-looks'
+import { ALERT_FONTS, ALERT_TOKENS, alertFontCss, alertFontSelectOptions, parseAlertFontFamily } from '../../server/logic/alert-looks'
 import type { AlertAssetRef, AlertLooks, AlertPlatform, AlertSettings, AlertTextAlign, AlertTextBox } from '../../server/types'
 import {
   ALERT_PLATFORMS,
@@ -80,6 +80,7 @@ export function AlertDesigner({
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<'graphic' | 'sound' | ''>('')
   const [timeDraft, setTimeDraft] = useState<string | null>(null)
+  const [fonts, setFonts] = useState<string[]>(() => [...ALERT_FONTS])
   const dirtyRef = useRef(false)
   const draftRef = useRef(draft)
   const dragRef = useRef<{ index: number; dx: number; dy: number } | null>(null)
@@ -97,6 +98,19 @@ export function AlertDesigner({
     if (dirtyRef.current) return
     setDraft(settings.looks)
   }, [settings.looks])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/alerts/fonts')
+      .then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((body: { fonts?: unknown }) => {
+        if (cancelled || !Array.isArray(body?.fonts)) return
+        const next = alertFontSelectOptions(body.fonts.filter((name): name is string => typeof name === 'string'))
+        if (next.length) setFonts(next)
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     const node = frameRef.current
@@ -139,6 +153,8 @@ export function AlertDesigner({
   const kinds = designerKindsFor(target.platform)
   const hold = alertHoldSeconds(settings, look)
   const selectedBox = boxes[selected]
+  const selectedFont = parseAlertFontFamily(selectedBox?.fontFamily) || 'Outfit'
+  const fontOptions = alertFontSelectOptions(fonts, selectedFont)
   const previewSettings = { ...settings, displaySec: hold, enabled: true }
 
   const selectPlatform = (platform: AlertPlatform | undefined) => {
@@ -427,8 +443,15 @@ export function AlertDesigner({
               </label>
               <label>
                 Font
-                <select value={selectedBox.fontFamily || 'outfit'} onChange={(event) => patchBox(selected, { fontFamily: event.target.value }, true)}>
-                  {ALERT_FONTS.map((font) => <option key={font.id} value={font.id}>{font.label}</option>)}
+                <select
+                  className="alert-designer-font"
+                  value={selectedFont}
+                  style={{ fontFamily: alertFontCss(selectedFont) }}
+                  onChange={(event) => patchBox(selected, { fontFamily: event.target.value }, true)}
+                >
+                  {fontOptions.map((font) => (
+                    <option key={font} value={font} style={{ fontFamily: alertFontCss(font) }}>{font}</option>
+                  ))}
                 </select>
               </label>
               <label>

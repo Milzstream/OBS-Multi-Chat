@@ -23,6 +23,7 @@ import {
 } from './logic.js'
 import { createOpenHandler, isTrustedOrigin, openInDefaultBrowser, watchLogLine, watchOffLogLine } from './local-api.js'
 import { pruneAlertAssets, registerAlertAssetRoutes } from './alert-assets.js'
+import { registerAlertFontRoutes } from './alert-fonts.js'
 import { fetchMedia } from './media-proxy.js'
 import { OAUTH_STATE_TTL_MS, type createOAuthStateStore } from './oauth-state.js'
 import { moderationLogLine } from './operator-log.js'
@@ -186,6 +187,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
   } = d
 
   registerAlertAssetRoutes(app, dataDir)
+  registerAlertFontRoutes(app)
 
   app.get('/api/state', (_request, response) => {
     state.activity = activityStore.list()

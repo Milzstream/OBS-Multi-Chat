@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { AlertLookView } from '../src/alerts/AlertsApp.tsx'
 import { alertSoundGroup, alertTemplateValues, createAlertPresenter, createAlertTracker, enqueueAlerts, fillAlertTemplate, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, resolveAlertLook, usesCustomAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
-import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAlertLooks, parseAppSettings } from '../server/logic.js'
+import { alertFontCss, alertFontSelectOptions, clampAlertSeconds, defaultAppSettings, mergeAlertFontList, parseAlertDisabled, parseAlertFontFamily, parseAlertLooks, parseAppSettings } from '../server/logic.js'
 
 const ASSET = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', mime: 'image/png', name: 'banner.png' }
 const SOUND = { id: 'ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbbb', mime: 'audio/mpeg', name: 'cheer.mp3' }
@@ -247,21 +247,37 @@ test('custom look vs pill fallback', () => {
   assert.match(html, /\/alerts\/assets\/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/)
   assert.doesNotMatch(html, /alert-pill/)
   assert.match(html, /font-size:8em/)
-  assert.match(html, /font-family:Impact/)
+  assert.match(html, /font-family:[^>]*Impact/)
 })
 
-test('text boxes keep an allowlisted font and drop unknown families', () => {
+test('text boxes keep a safe family name, map legacy ids, and drop CSS injection', () => {
   const looks = parseAlertLooks({
     default: {
       textBoxes: [
         { text: '{name}', x: 8, y: 40, fontFamily: 'Impact', fontSize: 10, fontWeight: 700 },
         { text: 'nope', x: 8, y: 50, fontFamily: 'url("https://evil.example")' },
+        { text: 'legacy', x: 8, y: 60, fontFamily: 'comic' },
+        { text: 'custom', x: 8, y: 70, fontFamily: 'Bebas Neue' },
+        { text: 'inject', x: 8, y: 80, fontFamily: 'Arial; color: red' },
       ],
     },
   })
-  assert.equal(looks?.default?.textBoxes?.[0]?.fontFamily, 'impact')
+  assert.equal(looks?.default?.textBoxes?.[0]?.fontFamily, 'Impact')
   assert.equal(looks?.default?.textBoxes?.[0]?.fontSize, 10)
   assert.equal(looks?.default?.textBoxes?.[1]?.fontFamily, undefined)
+  assert.equal(looks?.default?.textBoxes?.[2]?.fontFamily, 'Comic Sans MS')
+  assert.equal(looks?.default?.textBoxes?.[3]?.fontFamily, 'Bebas Neue')
+  assert.equal(looks?.default?.textBoxes?.[4]?.fontFamily, undefined)
+  assert.equal(parseAlertFontFamily('outfit'), 'Outfit')
+  assert.equal(parseAlertFontFamily('Public Pixel'), 'Public Pixel')
+  assert.equal(parseAlertFontFamily('foo <bar>'), undefined)
+  assert.equal(alertFontCss('outfit'), 'Outfit, sans-serif')
+  assert.equal(alertFontCss('Impact'), '"Impact", Outfit, sans-serif')
+  assert.equal(alertFontCss('Bebas Neue'), '"Bebas Neue", Outfit, sans-serif')
+  assert.equal(alertFontCss('url(https://evil.example)'), undefined)
+  assert.deepEqual(mergeAlertFontList(['Bebas Neue', 'arial', 'url(x)', 'Outfit', 'Bebas Neue']), ['Outfit', 'Arial', 'Bebas Neue'])
+  assert.deepEqual(alertFontSelectOptions(['Arial'], 'Airborne Pilot')[0], 'Outfit')
+  assert.ok(alertFontSelectOptions(['Arial'], 'Airborne Pilot').includes('Airborne Pilot'))
 })
 
 test('look parse drops unknown keys, bad assets, and a Power-up kind slot', () => {

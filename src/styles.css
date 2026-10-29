@@ -253,6 +253,7 @@ a.activity-row { color: inherit; text-decoration: none; }
 .alert-designer-box-tools input, .alert-designer-box-tools select { width: 58px; padding: 2px 4px; border: 1px solid #40504e; border-radius: 4px; background: #151a1c; color: #e8efec; font: 11px 'DM Mono', monospace; }
 .alert-designer-box-tools input[type='color'] { width: 28px; height: 22px; padding: 1px; }
 .alert-designer-box-tools select { width: auto; }
+.alert-designer-font { min-width: 112px; max-width: 180px; }
 .console-line { display: flex; gap: 12px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #cccccc; }
 .console-line time { flex: 0 0 8ch; color: #6a6a6a; }
 .console-line.warn { color: #f3af61; }
