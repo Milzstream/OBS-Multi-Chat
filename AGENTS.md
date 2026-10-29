@@ -17,8 +17,8 @@ Canonical types live in `server/types.ts`. The Vite app imports that file too. A
 - `server/kick-chat.ts`, `youtube-chat.ts`, `streamelements.ts` — platform readers
 - `src/chat/` — chat dock (`/`)
 - `src/activity/` — activity dock (`/activity`)
-- `src/alerts/` — OBS alert source (`/alerts`)
-- `src/ConsoleApp.tsx` — companion window (`/console`)
+- `src/alerts/` — OBS alert source (`/alerts`) plus companion Customize (`AlertDesigner.tsx`)
+- `src/ConsoleApp.tsx` — companion window (`/console`); Customize replaces the log pane
 - `src/WatchApp.tsx` — readonly LAN (`/watch`)
 - `electron/` — window shell; loads `/console` after `relayReady`
 
@@ -26,7 +26,7 @@ Canonical types live in `server/types.ts`. The Vite app imports that file too. A
 
 - Unified send: POST `/api/messages` creates one row with a local UUID and `platforms[]`. Platform echoes fold into that row via `mergeIncomingChat`; they do not append a second line.
 - Kick incoming: realtime WebSocket (Pusher is retired). Send still uses Kick public `/chat`.
-- Packaged data/logs: `%LOCALAPPDATA%\Relay Chat Dock` via `operatorFilesDir`. Alert media is `data/alerts/<uuid>` (GET `/alerts/assets/:id`).
+- Packaged data/logs: `%LOCALAPPDATA%\Relay Chat Dock` via `operatorFilesDir`. Alert media is `data/alerts/<uuid>` (GET `/alerts/assets/:id`). Saving looks prunes unreferenced files.
 - Client secrets stay in `production.env`. Never `VITE_*`.
 - Merge to `main` publishes a release. Open a PR; do not merge unless asked.
 - Do not bump `package.json` version unless the user is shipping a release.

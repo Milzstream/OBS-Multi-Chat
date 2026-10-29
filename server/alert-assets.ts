@@ -146,6 +146,43 @@ export function saveAlertAsset(dataDir: string, input: SaveAlertAssetInput, newI
   }
 }
 
+/** UUID files in `data/alerts/` plus optional `.meta` sidecars. */
+export function listAlertAssetIds(dataDir: string): string[] {
+  const root = path.resolve(dataDir, 'alerts')
+  const ids = new Set<string>()
+  try {
+    if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) return []
+    for (const name of fs.readdirSync(root)) {
+      const base = name.endsWith('.meta') ? name.slice(0, -5) : name
+      if (isAlertAssetId(base)) ids.add(base.toLowerCase())
+    }
+  } catch {
+    return []
+  }
+  return [...ids]
+}
+
+/**
+ * Delete UUID files (and `.meta`) that no look still references. Other names
+ * in the folder are left alone.
+ */
+export function pruneAlertAssets(dataDir: string, keep: Iterable<string>): { removed: string[] } {
+  const keepSet = new Set<string>()
+  for (const id of keep) {
+    if (typeof id === 'string' && isAlertAssetId(id)) keepSet.add(id.trim().toLowerCase())
+  }
+  const removed: string[] = []
+  for (const id of listAlertAssetIds(dataDir)) {
+    if (keepSet.has(id)) continue
+    const file = resolveAlertAssetPath(dataDir, id)
+    if (!file) continue
+    try { fs.unlinkSync(file) } catch { /* gone or locked */ }
+    try { fs.unlinkSync(`${file}.meta`) } catch { /* sidecar is optional */ }
+    removed.push(id)
+  }
+  return { removed }
+}
+
 export function registerAlertAssetRoutes(app: Express, dataDir: string) {
   app.get('/alerts/assets/:id', (request: Request, response: Response) => {
     const id = String(request.params.id || '')

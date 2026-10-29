@@ -246,6 +246,7 @@ test('custom look vs pill fallback', () => {
   assert.match(html, /Ada followed/)
   assert.match(html, /\/alerts\/assets\/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/)
   assert.doesNotMatch(html, /alert-pill/)
+  assert.match(html, /font-size:8em/)
 })
 
 test('look parse drops unknown keys, bad assets, and a Power-up kind slot', () => {

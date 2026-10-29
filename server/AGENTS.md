@@ -13,6 +13,6 @@
 | Stream title / tags | `logic/stream-info.ts`, stream-info routes |
 | OAuth / tokens | `oauth.ts`, `oauth-state.ts` |
 | SSE fan-out | `logic/sse.ts` plus `broadcast` in `server.ts` |
-| Alert looks / assets | `logic/alert-looks.ts` (parse, cascade, tokens), `alert-assets.ts` (`data/alerts/<uuid>`, GET `/alerts/assets/:id`) |
+| Alert looks / assets | `logic/alert-looks.ts` (parse, cascade, tokens, `collectLookAssetIds`), `alert-assets.ts` (`data/alerts/<uuid>`, GET `/alerts/assets/:id`, prune on looks save) |
 
 `logic.ts` is a re-export barrel. Prefer importing from it in tests (`../server/logic.js`) so moves inside `logic/` stay local.

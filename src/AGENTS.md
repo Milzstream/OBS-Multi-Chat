@@ -6,8 +6,8 @@
 |---|---|
 | `/` | `chat/App.tsx` |
 | `/activity` | `activity/ActivityApp.tsx` |
-| `/alerts` | `alerts/AlertsApp.tsx` (pill, or a custom look from `server/logic/alert-looks.ts`) |
-| `/console` | `ConsoleApp.tsx` |
+| `/alerts` | `alerts/AlertsApp.tsx` (pill, or a custom look from `server/logic/alert-looks.ts`). Overlay only; no designer. |
+| `/console` | `ConsoleApp.tsx` (Customize replaces the log with `alerts/AlertDesigner.tsx`) |
 | `/watch` | `WatchApp.tsx` |
 
 Chat, activity, and watch subscribe through `sse.ts`. Local filter/compact prefs are `dock-prefs.ts`. Shared `ChatMessage` / `Platform` / `Account` types come from `server/types.ts` (type-only on the client).

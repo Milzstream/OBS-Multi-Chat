@@ -179,6 +179,7 @@ export {
   alertAssetKind,
   alertAssetUrl,
   canonicalAlertMime,
+  collectLookAssetIds,
   fillAlertTemplate,
   isAlertAssetId,
   mergeAlertLook,

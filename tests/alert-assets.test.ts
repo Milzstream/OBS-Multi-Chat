@@ -13,6 +13,7 @@ import {
   readAlertAsset,
   registerAlertAssetRoutes,
   resolveAlertAssetPath,
+  pruneAlertAssets,
   saveAlertAsset,
   sniffAlertMime,
 } from '../server/alert-assets.js'
@@ -114,6 +115,28 @@ describe('alert asset paths and caps', () => {
       assert.deepEqual(read?.body, PNG_1X1)
       assert.equal(readAlertAsset(dir, 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'), undefined)
       assert.equal(readAlertAsset(dir, '../settings.json'), undefined)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('prunes unreferenced UUID files and leaves kept ones plus non-UUID names', () => {
+    const dir = tempData()
+    try {
+      const kept = saveAlertAsset(dir, { name: 'keep.png', mime: 'image/png', data: PNG_1X1.toString('base64') }, () => ASSET_ID)
+      const dropId = 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+      saveAlertAsset(dir, { name: 'drop.png', mime: 'image/png', data: PNG_1X1.toString('base64') }, () => dropId)
+      const extra = path.join(dir, 'alerts', 'readme.txt')
+      fs.writeFileSync(extra, 'leave me')
+      assert.equal(kept.ok, true)
+      const pruned = pruneAlertAssets(dir, [ASSET_ID])
+      assert.deepEqual(pruned.removed, [dropId])
+      assert.equal(fs.existsSync(path.join(dir, 'alerts', ASSET_ID)), true)
+      assert.equal(fs.existsSync(path.join(dir, 'alerts', `${ASSET_ID}.meta`)), true)
+      assert.equal(fs.existsSync(path.join(dir, 'alerts', dropId)), false)
+      assert.equal(fs.existsSync(path.join(dir, 'alerts', `${dropId}.meta`)), false)
+      assert.equal(fs.readFileSync(extra, 'utf8'), 'leave me')
+      assert.deepEqual(pruneAlertAssets(dir, [ASSET_ID]).removed, [])
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }

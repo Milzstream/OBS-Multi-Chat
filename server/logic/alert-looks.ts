@@ -262,6 +262,27 @@ export function usesCustomAlertLook(look: AlertLook | undefined) {
   return Boolean(look.textBoxes && look.textBoxes.length)
 }
 
+function takeLookAssetId(ids: Set<string>, ref: AlertAssetRef | null | undefined) {
+  if (ref && isAlertAssetId(ref.id)) ids.add(ref.id.toLowerCase())
+}
+
+/** Every image / video / audio UUID still referenced by a looks tree. */
+export function collectLookAssetIds(looks: AlertLooks | undefined | null): string[] {
+  const ids = new Set<string>()
+  if (!looks) return []
+  const take = (look?: AlertLook | null) => {
+    if (!look) return
+    takeLookAssetId(ids, look.image)
+    takeLookAssetId(ids, look.video)
+    takeLookAssetId(ids, look.audio)
+  }
+  take(looks.default)
+  if (looks.platforms) for (const look of Object.values(looks.platforms)) take(look)
+  if (looks.kinds) for (const look of Object.values(looks.kinds)) take(look)
+  if (looks.slots) for (const look of Object.values(looks.slots)) take(look)
+  return [...ids]
+}
+
 /**
  * Replace `{name}`-style tokens (case-sensitive). Known empty values collapse
  * leftover whitespace. Unknown `{tokens}` stay as written.

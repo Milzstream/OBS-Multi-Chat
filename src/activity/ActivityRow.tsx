@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import React, { useEffect, useState, type MouseEvent } from 'react'
 import { Bell, DollarSign, Gift, Heart, ShoppingBag, Swords, Twitch, UserPlus, X, Youtube, Zap } from 'lucide-react'
 import { chatProfileUrl, openDockUrl, profileLinkTitle } from '../chat-helpers'
 import { activityKindLabel, activityPlanColor, activityPlanLabel, activitySubtitle, pillTextColor } from './format'
