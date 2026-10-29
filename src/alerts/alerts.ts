@@ -3,10 +3,13 @@
  * which sound group an event plays, and the one-at-a-time arrival queue.
  */
 
+import { activityListRows, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
+
 export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
 export type AlertSettings = { enabled: boolean; sound: boolean; showPlatform: boolean; displaySec: number; disabled: string[] }
 export type AlertEvent = { id: string; platform: string; kind: string; time: string }
+export type AlertPresentEvent = AlertEvent & { user?: string; handle?: string; amount?: string; tier?: string; giftedBy?: string; powerUp?: string }
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] }
 
@@ -77,7 +80,8 @@ export function alertKey(platform: string, kind: string) {
   return `${platform}:${kind}`
 }
 
-export function isAlertAllowed(event: { platform: string; kind: string }, disabled: readonly string[]) {
+export function isAlertAllowed(event: { platform: string; kind: string; powerUp?: string }, disabled: readonly string[]) {
+  if (event.powerUp) return false
   return !disabled.includes(alertKey(event.platform, event.kind))
 }
 
@@ -133,6 +137,94 @@ export function createAlertTracker(now: () => number = Date.now) {
         fresh.push(event)
       }
       return fresh.sort((a, b) => (Date.parse(a.time) || 0) - (Date.parse(b.time) || 0))
+    },
+  }
+}
+
+function eventTime(event: { time: string }) {
+  return Date.parse(event.time) || 0
+}
+
+function isGiftedSub(event: { kind: string; giftedBy?: string }) {
+  return event.kind === 'subscription' && Boolean(event.giftedBy)
+}
+
+function giftParent<T extends { id: string }>(rows: ActivityListRow<T>[], childId: string) {
+  let parent: ActivityListRow<T> | undefined
+  for (const row of rows) {
+    if (!row.nested) {
+      parent = row
+      continue
+    }
+    if (row.event.id === childId) return parent
+  }
+}
+
+function childIds<T extends { id: string }>(rows: ActivityListRow<T>[], parentId: string) {
+  const ids: string[] = []
+  let take = false
+  for (const row of rows) {
+    if (!row.nested) {
+      take = row.event.id === parentId
+      continue
+    }
+    if (take) ids.push(row.event.id)
+  }
+  return ids
+}
+
+/**
+ * On-stream feed: same prime/dedupe as the tracker, then gift bombs collapse
+ * to one alert using the activity dock's grouping window.
+ */
+export function createAlertPresenter(now: () => number = Date.now) {
+  const tracker = createAlertTracker(now)
+  let recent: AlertPresentEvent[] = []
+  const presented = new Set<string>()
+
+  function groupedRows(events: readonly AlertPresentEvent[]) {
+    const newestFirst = events
+      .map((event) => ({ ...event, user: event.user || '' }))
+      .sort((left, right) => eventTime(right) - eventTime(left))
+    return activityListRows(newestFirst, true)
+  }
+
+  function collapse<T extends AlertPresentEvent>(event: T): T | undefined {
+    if (event.kind !== 'gift' && !isGiftedSub(event)) return event
+    const asOf = eventTime(event) || now()
+    recent = [...recent.filter((item) => Math.abs(asOf - eventTime(item)) <= GIFT_GROUP_MS), event]
+    const rows = groupedRows(recent)
+    if (isGiftedSub(event)) {
+      const parent = giftParent(rows, event.id)
+      if (!parent || presented.has(parent.event.id) || !parent.synthetic) return
+      presented.add(parent.event.id)
+      return parent.event as T
+    }
+    if (presented.has(event.id)) return
+    if (childIds(rows, event.id).some((id) => presented.has(`gift-group-${id}`))) {
+      presented.add(event.id)
+      return
+    }
+    presented.add(event.id)
+    return event
+  }
+
+  return {
+    primed: () => tracker.primed(),
+    ingest<T extends AlertPresentEvent>(events: readonly T[], prime = false): T[] {
+      const seeding = prime && !tracker.primed()
+      const fresh = tracker.ingest(events, prime)
+      if (seeding) {
+        const asOf = now()
+        recent = events.filter((event) => event.kind === 'gift' && Math.abs(asOf - eventTime(event)) <= GIFT_GROUP_MS)
+        return []
+      }
+      const out: T[] = []
+      for (const event of fresh) {
+        const item = collapse(event)
+        if (item) out.push(item)
+      }
+      return out
     },
   }
 }

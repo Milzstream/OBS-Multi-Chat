@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { alertSoundGroup, neutralAlertColor, neutralAlertLabel, neutralAlertText, createAlertTracker, enqueueAlerts, isAlertAllowed, parseAlertSettings } from '../src/alerts/alerts.ts'
+import { alertSoundGroup, createAlertPresenter, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
 import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAppSettings } from '../server/logic.js'
 
 const NOW = Date.parse('2026-01-01T12:00:00Z')
-const event = (id: string, secondsAgo = 1, extra: Record<string, string> = {}) => ({ id, platform: 'Twitch', kind: 'follow', time: new Date(NOW - secondsAgo * 1000).toISOString(), ...extra })
+const event = (id: string, secondsAgo = 1, extra: Record<string, string> = {}) => ({ id, platform: 'Twitch', kind: 'follow', user: 'Ada', time: new Date(NOW - secondsAgo * 1000).toISOString(), ...extra })
 
 test('alert tracker ignores history present at connect', () => {
   const tracker = createAlertTracker(() => NOW)
@@ -43,6 +43,10 @@ test('type filters and sound groups', () => {
   assert.equal(alertSoundGroup('merch'), 'donation')
   assert.equal(alertSoundGroup('raid'), 'raid')
   assert.equal(alertSoundGroup('superchat'), 'superchat')
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer' }, ['Twitch:cheer']), false)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer' }, []), true)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }, []), false)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'celebration' }, []), false)
 })
 
 test('client alert settings default to off with sound on', () => {
@@ -73,4 +77,69 @@ test('platform-neutral labels, colors and text', () => {
 test('/alerts mounts the alert page', () => {
   assert.equal(dockView('/alerts'), 'alerts')
   assert.equal(dockView('/alerts/'), 'alerts')
+})
+
+test('gift bomb plays as one alert', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const gift = event('g', 2, { kind: 'gift', user: 'Ada', amount: '5 gifts' })
+  const subs = [1, 2, 3, 4, 5].map((n) => event(`s${n}`, 1, { kind: 'subscription', user: `u${n}`, giftedBy: 'Ada' }))
+  assert.deepEqual(feed.ingest([gift, ...subs]).map((item) => item.id), ['g'])
+})
+
+test('lone gifted sub plays as one synthetic gift', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const first = feed.ingest([event('s1', 1, { kind: 'subscription', user: 'Bob', giftedBy: 'Ada' })])
+  assert.equal(first.length, 1)
+  assert.equal(first[0].kind, 'gift')
+  assert.equal(first[0].user, 'Ada')
+  assert.equal(first[0].id, 'gift-group-s1')
+  assert.deepEqual(feed.ingest([event('s2', 1, { kind: 'subscription', user: 'Cal', giftedBy: 'Ada' })]).map((item) => item.id), [])
+})
+
+test('two gifts play as two alerts', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const g1 = event('g1', 2, { kind: 'gift', user: 'Ada', amount: '3 gifts' })
+  const g2 = event('g2', 1, { kind: 'gift', user: 'Ada', amount: '2 gifts' })
+  assert.deepEqual(feed.ingest([g1, g2]).map((item) => item.id), ['g1', 'g2'])
+})
+
+test('gifted subs after a primed gift do not play', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([event('g', 2, { kind: 'gift', user: 'Ada', amount: '5 gifts' })], true)
+  assert.deepEqual(feed.ingest([event('s1', 1, { kind: 'subscription', user: 'Bob', giftedBy: 'Ada' })]).map((item) => item.id), [])
+})
+
+test('real gift after a synthetic gift does not play again', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  assert.equal(feed.ingest([event('s1', 2, { kind: 'subscription', user: 'Bob', giftedBy: 'Ada' })])[0].id, 'gift-group-s1')
+  assert.deepEqual(feed.ingest([event('g', 1, { kind: 'gift', user: 'Ada', amount: '5 gifts' })]).map((item) => item.id), [])
+})
+
+test('follows still play beside a gift bomb', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const gift = event('g', 2, { kind: 'gift', user: 'Ada', amount: '1 gift' })
+  const sub = event('s1', 1, { kind: 'subscription', user: 'Bob', giftedBy: 'Ada' })
+  const follow = event('f', 1, { kind: 'follow', user: 'Zoe' })
+  assert.deepEqual(feed.ingest([gift, sub, follow]).map((item) => item.id), ['g', 'f'])
+})
+
+test('an ungifted sub still plays', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  assert.deepEqual(feed.ingest([event('own', 1, { kind: 'subscription', user: 'Pat' })]).map((item) => item.id), ['own'])
+})
+
+test('Power-ups stay out of the on-stream overlay', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const row = event('p', 1, { kind: 'cheer', powerUp: 'gigantify' })
+  const out = feed.ingest([row])
+  assert.equal(out.length, 1)
+  assert.equal(isAlertAllowed(out[0], []), false)
+  assert.equal(isAlertAllowed(event('c', 1, { kind: 'cheer' }), []), true)
 })
