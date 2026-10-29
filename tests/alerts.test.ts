@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { ALERT_KIND_SCHEMA, ALERT_TYPES, alertKindKey, alertSoundGroup, createAlertPresenter, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings } from '../src/alerts/alerts.ts'
+import { alertSoundGroup, createAlertPresenter, createAlertTracker, enqueueAlerts, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
 import { clampAlertSeconds, defaultAppSettings, parseAlertDisabled, parseAppSettings } from '../server/logic.js'
 
@@ -43,30 +43,24 @@ test('type filters and sound groups', () => {
   assert.equal(alertSoundGroup('merch'), 'donation')
   assert.equal(alertSoundGroup('raid'), 'raid')
   assert.equal(alertSoundGroup('superchat'), 'superchat')
-  assert.equal(alertSoundGroup('powerup'), 'cheer')
-  assert.equal(alertKindKey({ kind: 'cheer', powerUp: 'gigantify' }), 'powerup')
-  assert.equal(alertKindKey({ kind: 'cheer' }), 'cheer')
-  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }, ['Twitch:cheer']), true)
   assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer' }, ['Twitch:cheer']), false)
-  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }, ['Twitch:powerup']), false)
-  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer' }, ['Twitch:powerup']), true)
-  assert.equal(ALERT_TYPES.Twitch.some((item) => item.kind === 'powerup'), true)
-  assert.equal(ALERT_TYPES.Kick.some((item) => item.kind === 'powerup'), false)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer' }, []), true)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }, []), false)
+  assert.equal(isAlertAllowed({ platform: 'Twitch', kind: 'cheer', powerUp: 'celebration' }, []), false)
 })
 
 test('client alert settings default to off with sound on', () => {
-  assert.deepEqual(parseAlertSettings(undefined), { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [], kindSchema: ALERT_KIND_SCHEMA })
+  assert.deepEqual(parseAlertSettings(undefined), { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] })
 })
 
 test('server alert settings are validated and persisted shape', () => {
-  assert.deepEqual(defaultAppSettings().alerts, { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [], kindSchema: ALERT_KIND_SCHEMA })
+  assert.deepEqual(defaultAppSettings().alerts, { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] })
   assert.equal(clampAlertSeconds(0), 1)
   assert.equal(clampAlertSeconds(999), 30)
   assert.equal(clampAlertSeconds('abc', 7), 7)
   assert.deepEqual(parseAlertDisabled(['Twitch:follow', 'Twitch:follow', 'Bogus:follow', 'Twitch:nope', 'Twitch:follow:x', 4]), ['Twitch:follow'])
-  assert.deepEqual(parseAlertDisabled(['Twitch:powerup']), ['Twitch:powerup'])
   const parsed = parseAppSettings({ alerts: { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'] } })
-  assert.deepEqual(parsed.alerts, { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'], kindSchema: ALERT_KIND_SCHEMA })
+  assert.deepEqual(parsed.alerts, { enabled: true, sound: false, showPlatform: false, displaySec: 8, disabled: ['Kick:cheer'] })
 })
 
 test('platform-neutral labels, colors and text', () => {
@@ -76,13 +70,6 @@ test('platform-neutral labels, colors and text', () => {
   assert.equal(neutralAlertLabel({ platform: 'YouTube', kind: 'membership' }), 'SUBSCRIBER')
   assert.equal(neutralAlertLabel({ platform: 'YouTube', kind: 'superchat' }), 'CHEER')
   assert.equal(neutralAlertLabel({ platform: 'Kick', kind: 'cheer' }), 'CHEER')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }), 'GIGANTIFY')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer', powerUp: 'message-effect' }), 'MESSAGE EFFECT')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer', powerUp: 'celebration' }), 'CELEBRATION')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer', powerUp: 'custom' }), 'POWER-UP')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer', powerUp: 'other' }), 'POWER-UP')
-  assert.equal(neutralAlertLabel({ platform: 'Twitch', kind: 'cheer' }), 'CHEER')
-  assert.equal(neutralAlertColor({ platform: 'Twitch', kind: 'cheer', powerUp: 'gigantify' }), '#00d4ff')
   assert.equal(neutralAlertColor({ platform: 'YouTube', kind: 'subscription' }), neutralAlertColor({ platform: 'Twitch', kind: 'follow' }))
   assert.equal(neutralAlertText('100 Kicks · hi'), '100 Bits · hi')
 })
@@ -90,14 +77,6 @@ test('platform-neutral labels, colors and text', () => {
 test('/alerts mounts the alert page', () => {
   assert.equal(dockView('/alerts'), 'alerts')
   assert.equal(dockView('/alerts/'), 'alerts')
-})
-
-test('old Cheer-off settings also disable Power-up once', () => {
-  assert.deepEqual(parseAppSettings({ alerts: { disabled: ['Twitch:cheer'] } }).alerts.disabled, ['Twitch:cheer', 'Twitch:powerup'])
-  assert.equal(parseAppSettings({ alerts: { disabled: ['Twitch:cheer'] } }).alerts.kindSchema, ALERT_KIND_SCHEMA)
-  assert.deepEqual(parseAppSettings({ alerts: { disabled: ['Twitch:cheer'], kindSchema: ALERT_KIND_SCHEMA } }).alerts.disabled, ['Twitch:cheer'])
-  assert.deepEqual(parseAlertSettings({ disabled: ['Twitch:cheer'] }).disabled, ['Twitch:cheer', 'Twitch:powerup'])
-  assert.deepEqual(parseAlertSettings({ disabled: ['Twitch:cheer'], kindSchema: ALERT_KIND_SCHEMA }).disabled, ['Twitch:cheer'])
 })
 
 test('gift bomb plays as one alert', () => {
@@ -153,4 +132,14 @@ test('an ungifted sub still plays', () => {
   const feed = createAlertPresenter(() => NOW)
   feed.ingest([], true)
   assert.deepEqual(feed.ingest([event('own', 1, { kind: 'subscription', user: 'Pat' })]).map((item) => item.id), ['own'])
+})
+
+test('Power-ups stay out of the on-stream overlay', () => {
+  const feed = createAlertPresenter(() => NOW)
+  feed.ingest([], true)
+  const row = event('p', 1, { kind: 'cheer', powerUp: 'gigantify' })
+  const out = feed.ingest([row])
+  assert.equal(out.length, 1)
+  assert.equal(isAlertAllowed(out[0], []), false)
+  assert.equal(isAlertAllowed(event('c', 1, { kind: 'cheer' }), []), true)
 })

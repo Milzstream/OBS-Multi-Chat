@@ -3,23 +3,18 @@
  * which sound group an event plays, and the one-at-a-time arrival queue.
  */
 
-import { activityKindLabel, activityListRows, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
+import { activityListRows, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
 
 export type AlertPlatform = 'Twitch' | 'Kick' | 'YouTube' | 'StreamElements'
 export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
-export type AlertSettings = { enabled: boolean; sound: boolean; showPlatform: boolean; displaySec: number; disabled: string[]; kindSchema: number }
+export type AlertSettings = { enabled: boolean; sound: boolean; showPlatform: boolean; displaySec: number; disabled: string[] }
 export type AlertEvent = { id: string; platform: string; kind: string; time: string }
 export type AlertPresentEvent = AlertEvent & { user?: string; handle?: string; amount?: string; tier?: string; giftedBy?: string; powerUp?: string }
 
-/** Power-up is its own disabled key. Older files inherit from Cheer once. Keep in sync with `server/logic/settings.ts`. */
-export const ALERT_KIND_SCHEMA = 2
-export const ALERT_POWERUP_KIND = 'powerup'
-
-export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [], kindSchema: ALERT_KIND_SCHEMA }
+export const DEFAULT_ALERT_SETTINGS: AlertSettings = { enabled: false, sound: true, showPlatform: true, displaySec: 5, disabled: [] }
 
 /** Platform-neutral wording and colors, so a pill never reveals which service the alert came from. */
-export function neutralAlertLabel(event: { platform: string; kind: string; powerUp?: string }) {
-  if (event.kind === 'cheer' && event.powerUp) return activityKindLabel(event)
+export function neutralAlertLabel(event: { platform: string; kind: string }) {
   if (event.kind === 'follow') return 'FOLLOW'
   if (event.platform === 'YouTube' && event.kind === 'subscription') return 'FOLLOW'
   if (event.kind === 'subscription' || event.kind === 'membership') return 'SUBSCRIBER'
@@ -35,16 +30,12 @@ const NEUTRAL_COLORS: Record<string, string> = {
   SUBSCRIBER: '#ff4d57',
   GIFT: '#ff4d57',
   CHEER: '#00d4ff',
-  GIGANTIFY: '#00d4ff',
-  'MESSAGE EFFECT': '#00d4ff',
-  CELEBRATION: '#00d4ff',
-  'POWER-UP': '#00d4ff',
   RAID: '#f3af61',
   MERCH: '#f3af61',
   DONATION: '#f3af61',
 }
 
-export function neutralAlertColor(event: { platform: string; kind: string; powerUp?: string }) {
+export function neutralAlertColor(event: { platform: string; kind: string }) {
   return NEUTRAL_COLORS[neutralAlertLabel(event)]
 }
 
@@ -62,7 +53,6 @@ export const ALERT_TYPES: Record<AlertPlatform, readonly { kind: string; label: 
     { kind: 'subscription', label: 'Subscription' },
     { kind: 'gift', label: 'Gift subs' },
     { kind: 'cheer', label: 'Cheer' },
-    { kind: ALERT_POWERUP_KIND, label: 'Power-up' },
     { kind: 'raid', label: 'Raid' },
   ],
   Kick: [
@@ -90,30 +80,18 @@ export function alertKey(platform: string, kind: string) {
   return `${platform}:${kind}`
 }
 
-/** Cheer rows with `powerUp` use the Power-up slot, not Cheer. */
-export function alertKindKey(event: { kind: string; powerUp?: string }) {
-  return event.powerUp ? ALERT_POWERUP_KIND : event.kind
-}
-
 export function isAlertAllowed(event: { platform: string; kind: string; powerUp?: string }, disabled: readonly string[]) {
-  return !disabled.includes(alertKey(event.platform, alertKindKey(event)))
+  if (event.powerUp) return false
+  return !disabled.includes(alertKey(event.platform, event.kind))
 }
 
 export function alertSoundGroup(kind: string): AlertSoundGroup {
   if (kind === 'follow') return 'follow'
   if (kind === 'subscription' || kind === 'membership' || kind === 'gift') return 'sub'
-  if (kind === 'cheer' || kind === ALERT_POWERUP_KIND) return 'cheer'
+  if (kind === 'cheer') return 'cheer'
   if (kind === 'donation' || kind === 'merch') return 'donation'
   if (kind === 'superchat') return 'superchat'
   return 'raid'
-}
-
-/** Old denylists only had Cheer. Copy that off-state onto Power-up so a quiet Cheer stays quiet. */
-export function migrateAlertDisabled(disabled: readonly string[], kindSchema?: number) {
-  if (kindSchema === ALERT_KIND_SCHEMA) return [...disabled]
-  const keys = new Set(disabled)
-  if (keys.has('Twitch:cheer')) keys.add(alertKey('Twitch', ALERT_POWERUP_KIND))
-  return [...keys]
 }
 
 export function parseAlertSettings(value: unknown): AlertSettings {
@@ -125,8 +103,7 @@ export function parseAlertSettings(value: unknown): AlertSettings {
     sound: raw.sound !== false,
     showPlatform: raw.showPlatform !== false,
     displaySec: Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_ALERT_SETTINGS.displaySec,
-    disabled: migrateAlertDisabled(Array.isArray(raw.disabled) ? raw.disabled.filter((item): item is string => typeof item === 'string') : [], raw.kindSchema),
-    kindSchema: ALERT_KIND_SCHEMA,
+    disabled: Array.isArray(raw.disabled) ? raw.disabled.filter((item): item is string => typeof item === 'string') : [],
   }
 }
 

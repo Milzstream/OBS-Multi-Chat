@@ -46,8 +46,6 @@ export type AlertSettings = {
   showPlatform: boolean
   displaySec: number
   disabled: string[]
-  /** 2 = Power-up is its own key. Missing on disk means inherit from Cheer once. */
-  kindSchema: number
 }
 
 export type AppSettings = {
