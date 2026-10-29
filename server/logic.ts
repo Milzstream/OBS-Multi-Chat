@@ -24,7 +24,7 @@ export type {
 } from './types.js'
 
 export { parseActivityMax, parseChatMax } from './logic/limits.js'
-export { activityAppendedEvent, activitySseFields, sseBroadcastEvent, sseChangedKeys, sseNamedEvent } from './logic/sse.js'
+export { activityAppendedEvent, activitySseFields, snapshotActivityEvents, sseBroadcastEvent, sseChangedKeys, sseNamedEvent } from './logic/sse.js'
 export { looksLikePlaceholder, kickBadges, kickCategorySkipped, kickChannelPatch, kickChannelPollFailure, kickEmoteUrl, kickStreamDetails, parseKickParts, shouldWarnKickChatDown } from './logic/kick.js'
 export { normalizeAvatar, shareInFlight, summarizeApiError } from './logic/http.js'
 export {

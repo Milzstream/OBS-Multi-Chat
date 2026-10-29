@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   activityAppendedEvent,
   activitySseFields,
+  snapshotActivityEvents,
   parseActivityMax,
   parseChatMax,
   parseTranslatedText,
@@ -84,6 +85,16 @@ describe('activity history cap and SSE deltas', () => {
     assert.deepEqual(activitySseFields([a, b], [c, a], []), { activityEvent: c, activityWarnings: [], activityTruncated: true })
     assert.deepEqual(activitySseFields([a], [a], ['w']), { activityWarnings: ['w'] })
     assert.deepEqual(activitySseFields([a], [c, b], []), { activity: [c, b], activityWarnings: [] })
+  })
+
+  it('replaces the list when the same ids gain a plan or gifter', () => {
+    const previous = [{ id: 'a', user: 'ada' }]
+    const next = [{ id: 'a', user: 'ada', tier: 'prime' }]
+    assert.deepEqual(activitySseFields(previous, next, []), { activity: next, activityWarnings: [] })
+    const live: Array<{ id: string; user: string; giftedBy?: string }> = [{ id: 'a', user: 'ada' }]
+    const snap = snapshotActivityEvents(live)
+    live[0].giftedBy = 'gin'
+    assert.deepEqual(activitySseFields(snap, live, ['w']), { activity: live, activityWarnings: ['w'] })
   })
 })
 

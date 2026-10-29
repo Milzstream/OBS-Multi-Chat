@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 import { applyThirdPartyEmotes, bttvEmotes, ffzEmotes, mergeEmoteMaps, sevenTvEmotes } from '../server/logic.js'
 import { isSafeMediaUrl } from '../server/local-api.js'
 import { createThirdPartyEmotes, EMOTE_REFRESH_MS, EMOTE_RETRY_MS } from '../server/third-party-emotes.js'
 import { dockAvatarSrc } from '../src/chat-helpers.ts'
 
-const fixture = (name: string) => JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'fixtures', 'emotes', `${name}.json`), 'utf8'))
+const fixture = (name: string) => JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'emotes', `${name}.json`), 'utf8'))
 
 describe('third-party emote sets', () => {
   it('reads 7TV global sets and user connections', () => {

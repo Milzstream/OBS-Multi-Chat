@@ -47,6 +47,7 @@ import {
   parseActivityMax,
   parseChatMax,
   activitySseFields,
+  snapshotActivityEvents,
   parseTranslatedText,
   pruneYouTubeSeenIds,
   resolveTranslateConfig,
@@ -689,7 +690,7 @@ function pushSse(chunk: string) {
 function broadcast() {
   state.activity = activityStore.list()
   const activityFields = activitySseFields(lastActivityEvents, state.activity, state.activityWarnings)
-  lastActivityEvents = state.activity
+  lastActivityEvents = snapshotActivityEvents(state.activity)
   const next = {
     chat: JSON.stringify(state.messages),
     activity: JSON.stringify({ activity: state.activity, activityWarnings: state.activityWarnings }),
