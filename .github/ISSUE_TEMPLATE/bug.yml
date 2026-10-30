@@ -1,0 +1,38 @@
+name: Bug report
+description: Something in Relay Chat Dock is broken
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      multiple: true
+      options:
+        - Chat dock
+        - Activity dock
+        - Stream controls
+        - On-stream alerts
+        - Installer or the app window
+        - Twitch
+        - Kick
+        - YouTube
+        - StreamElements
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: "1.1.0"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A screenshot or the app log helps.

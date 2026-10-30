@@ -1,0 +1,14 @@
+name: Question
+description: Ask how to use Relay Chat Dock
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you already tried
