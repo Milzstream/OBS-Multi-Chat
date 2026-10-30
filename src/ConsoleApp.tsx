@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Twitch, Youtube } from 'lucide-react'
 import { ConnectionSettings } from './ConnectionSettings'
-import type { Account as Connection, AutoLiveCheck, Platform } from '../server/types'
+import type { Account as Connection, AlertLooks, AutoLiveCheck, Platform } from '../server/types'
 import { postYoutubePrivacy, type YoutubePrivacyNotice } from './chat-helpers'
 import { YoutubePrivacyBanner } from './YoutubePrivacyBanner'
 import { ALERT_PLATFORMS, ALERT_TYPES, DEFAULT_ALERT_SETTINGS, alertKey, parseAlertSettings, type AlertPlatform, type AlertSettings } from './alerts/alerts'
+import { AlertDesigner } from './alerts/AlertDesigner'
 
 type LogLine = { id: number; time: string; level: 'log' | 'info' | 'warn' | 'error'; text: string }
 type ConsoleInfo = { version: string; envPath: string; dataDir?: string; chatUrl: string; activityUrl: string; alertsUrl?: string; watchUrl?: string | null; lanEnabled?: boolean }
@@ -158,7 +159,10 @@ export default function ConsoleApp() {
   const [alerts, setAlerts] = useState<AlertSettings>(DEFAULT_ALERT_SETTINGS)
   const [alertPlatform, setAlertPlatform] = useState<AlertPlatform | null>(null)
   const [alertSecDraft, setAlertSecDraft] = useState<string | null>(null)
+  const [customize, setCustomize] = useState(false)
   const alertsBusy = useRef(0)
+  const alertsPatchSeq = useRef(0)
+  const alertsRef = useRef(alerts)
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const settingsRef = useRef(settings)
@@ -195,7 +199,11 @@ export default function ConsoleApp() {
       void fetch('/api/state').then((response) => response.ok ? response.json() : null).then((data) => {
         if (cancelled || epoch !== settingsEpoch.current || !data || typeof data !== 'object') return
         const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[]; alerts?: unknown }
-        if (remote.alerts && alertsBusy.current === 0) setAlerts(parseAlertSettings(remote.alerts))
+        if (remote.alerts && alertsBusy.current === 0) {
+          const next = parseAlertSettings(remote.alerts)
+          alertsRef.current = next
+          setAlerts(next)
+        }
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
         setSettings((current) => mergePolledSettings(current, remote, inFlightRef.current))
         if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
@@ -332,18 +340,30 @@ export default function ConsoleApp() {
     } catch { /* button stays as it was */ }
   }
 
-  const patchAlerts = async (patch: Partial<AlertSettings>) => {
-    const previous = alerts
-    setAlerts({ ...alerts, ...patch })
+  const patchAlerts = async (patch: Omit<Partial<AlertSettings>, 'looks'> & { looks?: AlertLooks | null }): Promise<true | false | 'stale'> => {
+    const previous = alertsRef.current
+    const seq = ++alertsPatchSeq.current
+    const next = { ...alertsRef.current, ...patch } as AlertSettings
+    if (patch.looks === null) delete next.looks
+    alertsRef.current = next
+    setAlerts(next)
     alertsBusy.current += 1
     try {
       const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alerts: patch }) })
       const data = await response.json() as { alerts?: unknown }
       if (!response.ok) throw new Error('save')
-      if (data.alerts) setAlerts(parseAlertSettings(data.alerts))
+      if (seq !== alertsPatchSeq.current) return 'stale'
+      if (data.alerts) {
+        const parsed = parseAlertSettings(data.alerts)
+        alertsRef.current = parsed
+        setAlerts(parsed)
+      }
       return true
     } catch {
+      if (seq !== alertsPatchSeq.current) return 'stale'
+      alertsRef.current = previous
       setAlerts(previous)
+      setSettingsError('Could not save alerts')
       return false
     } finally {
       alertsBusy.current -= 1
@@ -353,7 +373,7 @@ export default function ConsoleApp() {
   const toggleAlerts = async () => {
     const enabled = !alerts.enabled
     const saved = await patchAlerts({ enabled })
-    if (saved && enabled && info?.alertsUrl) await copy('alerts', info.alertsUrl)
+    if (saved === true && enabled && info?.alertsUrl) await copy('alerts', info.alertsUrl)
   }
 
   const commitAlertSeconds = () => {
@@ -429,18 +449,26 @@ export default function ConsoleApp() {
         <YoutubePrivacyBanner key={item.videoId} notice={item} className="console-privacy" status={privacyStatus} onPublic={() => { void postYoutubePrivacy([item.videoId]).then(() => setPrivacyStatus('Set to public')).catch((error) => setPrivacyStatus(error instanceof Error ? error.message : 'Could not make the video public')) }} onDismiss={() => { void postYoutubePrivacy([item.videoId], 'dismiss').catch(() => setPrivacyStatus('Could not dismiss')) }} />
       ))}
       <div className="console-body">
-        <div
-          className="console-log"
-          ref={logRef}
-          onScroll={(event) => {
-            const node = event.currentTarget
-            stickRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48
-          }}
-        >
-          {lines.some((line) => line.text.trim()) ? lines.filter((line) => line.text.trim()).map((line) => (
-            <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}><time>{clock(line.time)}</time><span>{line.text}</span></p>
-          )) : <p className="console-line">Waiting for output…</p>}
-        </div>
+        {customize ? (
+          <AlertDesigner
+            settings={alerts}
+            onLooksChange={(looks) => patchAlerts({ looks: looks ?? null })}
+            onBack={() => setCustomize(false)}
+          />
+        ) : (
+          <div
+            className="console-log"
+            ref={logRef}
+            onScroll={(event) => {
+              const node = event.currentTarget
+              stickRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48
+            }}
+          >
+            {lines.some((line) => line.text.trim()) ? lines.filter((line) => line.text.trim()).map((line) => (
+              <p key={line.id} className={line.level === 'log' || line.level === 'info' ? 'console-line' : `console-line ${line.level}`}><time>{clock(line.time)}</time><span>{line.text}</span></p>
+            )) : <p className="console-line">Waiting for output…</p>}
+          </div>
+        )}
         <aside className="console-settings">
           <ConnectionSettings
             embedded
@@ -537,6 +565,7 @@ export default function ConsoleApp() {
           <p className="settings-note">
             {alerts.enabled ? 'Tip: set the OBS browser source to 1000 x 250 and enable Control audio via OBS for sound. Copy the URL from the Alerts button at the top.' : 'Use the Alerts button at the top to turn on the on-stream alert page.'}
           </p>
+          <button type="button" className="console-link" onClick={() => setCustomize((open) => !open)}>{customize ? 'Back to log' : 'Customize'}</button>
           <label className="settings-toggle">
             <span>Play alert sounds</span>
             <input type="checkbox" checked={alerts.sound} onChange={() => void patchAlerts({ sound: !alerts.sound })} />

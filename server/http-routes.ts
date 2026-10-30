@@ -12,6 +12,7 @@ import {
   normalizeTags,
   parseAlertDisabled,
   parseAlertLooks,
+  collectLookAssetIds,
   parseMentionKeywords,
   parseYouTubeQuotaInput,
   sseNamedEvent,
@@ -21,7 +22,8 @@ import {
   type YoutubePrivacyWatch,
 } from './logic.js'
 import { createOpenHandler, isTrustedOrigin, openInDefaultBrowser, watchLogLine, watchOffLogLine } from './local-api.js'
-import { registerAlertAssetRoutes } from './alert-assets.js'
+import { pruneAlertAssets, registerAlertAssetRoutes } from './alert-assets.js'
+import { registerAlertFontRoutes } from './alert-fonts.js'
 import { fetchMedia } from './media-proxy.js'
 import { OAUTH_STATE_TTL_MS, type createOAuthStateStore } from './oauth-state.js'
 import { moderationLogLine } from './operator-log.js'
@@ -185,6 +187,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
   } = d
 
   registerAlertAssetRoutes(app, dataDir)
+  registerAlertFontRoutes(app)
 
   app.get('/api/state', (_request, response) => {
     state.activity = activityStore.list()
@@ -451,7 +454,9 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       if (typeof patch.showPlatform === 'boolean') next.showPlatform = patch.showPlatform
       if (patch.displaySec !== undefined) next.displaySec = clampAlertSeconds(patch.displaySec, next.displaySec)
       if (Array.isArray(patch.disabled)) next.disabled = parseAlertDisabled(patch.disabled)
-      if (patch.looks !== undefined) {
+      const looksPatched = patch.looks !== undefined
+      const looksBefore = JSON.stringify(settings.alerts.looks || null)
+      if (looksPatched) {
         const looks = parseAlertLooks(patch.looks)
         if (looks) next.looks = looks
         else delete next.looks
@@ -460,6 +465,9 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
         settings.alerts = next
         state.alerts = { ...next, disabled: [...next.disabled] }
         changed = true
+        if (looksPatched && JSON.stringify(next.looks || null) !== looksBefore) {
+          pruneAlertAssets(dataDir, collectLookAssetIds(next.looks))
+        }
       }
     }
     if (changed || watchChanged) saveSettings()

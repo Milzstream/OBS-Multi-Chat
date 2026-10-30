@@ -11,6 +11,94 @@ export const ALERT_LOOK_KINDS = ['follow', 'subscription', 'gift', 'cheer', 'rai
 export const ALERT_TOKENS = ['name', 'amount', 'message', 'kind', 'platform', 'months', 'viewers', 'plan', 'gifter'] as const
 export type AlertToken = (typeof ALERT_TOKENS)[number]
 
+/**
+ * Outfit is loaded for the docks. The rest are common Windows faces used
+ * until this PC's installed list arrives, or when enumeration fails.
+ */
+export const ALERT_FONTS = [
+  'Outfit',
+  'Arial',
+  'Arial Black',
+  'Comic Sans MS',
+  'Courier New',
+  'Georgia',
+  'Impact',
+  'Segoe UI',
+  'Tahoma',
+  'Times New Roman',
+  'Trebuchet MS',
+  'Verdana',
+] as const
+
+/** Ids from the first Font picker. Stored looks keep working after the switch to family names. */
+const ALERT_FONT_LEGACY: Record<string, string> = {
+  outfit: 'Outfit',
+  impact: 'Impact',
+  arial: 'Arial',
+  'arial-black': 'Arial Black',
+  georgia: 'Georgia',
+  times: 'Times New Roman',
+  verdana: 'Verdana',
+  tahoma: 'Tahoma',
+  trebuchet: 'Trebuchet MS',
+  comic: 'Comic Sans MS',
+  courier: 'Courier New',
+  segoe: 'Segoe UI',
+}
+
+const ALERT_FONT_MAX = 80
+const ALERT_FONT_LIST_MAX = 2000
+const ALERT_FONT_UNSAFE = /[\u0000-\u001f\u007f\\"<>{};,]|url\s*\(/i
+
+/**
+ * Persist a CSS family name, not a stylesheet. Quotes, braces, and `url(`
+ * are dropped so a look cannot inject CSS. Legacy picker ids map to names.
+ */
+export function parseAlertFontFamily(value: unknown): string | undefined {
+  if (typeof value !== 'string') return
+  const trimmed = value.trim()
+  if (!trimmed) return
+  const legacy = ALERT_FONT_LEGACY[trimmed.toLowerCase()]
+  if (legacy) return legacy
+  if (trimmed.length > ALERT_FONT_MAX) return
+  if (ALERT_FONT_UNSAFE.test(trimmed)) return
+  if (!/\p{L}/u.test(trimmed)) return
+  return trimmed
+}
+
+/** Overlay stack. Missing / unsafe names inherit Outfit from the page. */
+export function alertFontCss(family?: string): string | undefined {
+  const name = parseAlertFontFamily(family)
+  if (!name) return
+  if (name.toLowerCase() === 'outfit') return 'Outfit, sans-serif'
+  return `"${name}", Outfit, sans-serif`
+}
+
+/** Outfit first, then unique safe names in A–Z order. */
+export function mergeAlertFontList(installed: readonly string[]): string[] {
+  const seen = new Set<string>(['outfit'])
+  const rest: string[] = []
+  for (const raw of installed) {
+    const name = parseAlertFontFamily(raw)
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    rest.push(name)
+    if (rest.length >= ALERT_FONT_LIST_MAX) break
+  }
+  rest.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  return ['Outfit', ...rest]
+}
+
+/** Keep a saved family visible even when this PC no longer lists it. */
+export function alertFontSelectOptions(list: readonly string[], selected?: string): string[] {
+  const fonts = mergeAlertFontList(list)
+  const current = parseAlertFontFamily(selected)
+  if (!current || fonts.some((name) => name.toLowerCase() === current.toLowerCase())) return fonts
+  return [fonts[0], current, ...fonts.slice(1)]
+}
+
 /** UUID on disk. User-supplied paths never reach here. */
 export const ALERT_ASSET_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -125,6 +213,8 @@ export function parseAlertTextBox(value: unknown): AlertTextBox | undefined {
   if (fontSize != null && fontSize > 0) box.fontSize = fontSize
   const fontWeight = parseFontWeight(raw.fontWeight)
   if (fontWeight) box.fontWeight = fontWeight
+  const fontFamily = parseAlertFontFamily(raw.fontFamily)
+  if (fontFamily) box.fontFamily = fontFamily
   return box
 }
 
@@ -235,16 +325,16 @@ export function mergeAlertLook(base: AlertLook, overlay: AlertLook): AlertLook {
 }
 
 /**
- * `platform+kind` → `kind` → `platform` → `default`. Missing looks (or an
- * empty merge) means the overlay should use the pill.
+ * `platform+kind` → `platform` → `kind` → `default`. A Twitch base covers a
+ * Follow-for-everyone look. Missing looks (or an empty merge) use the pill.
  */
 export function resolveAlertLook(settings: Pick<AlertSettings, 'looks'> | undefined, event: { platform: string; kind: string }): AlertLook | undefined {
   const looks = settings?.looks
   if (!looks) return
   const layers = [
     looks.default,
-    looks.platforms?.[event.platform as AlertPlatform],
     looks.kinds?.[event.kind],
+    looks.platforms?.[event.platform as AlertPlatform],
     looks.slots?.[`${event.platform}:${event.kind}`],
   ]
   let merged: AlertLook = {}
@@ -260,6 +350,27 @@ export function usesCustomAlertLook(look: AlertLook | undefined) {
   if (!look) return false
   if (look.image || look.video) return true
   return Boolean(look.textBoxes && look.textBoxes.length)
+}
+
+function takeLookAssetId(ids: Set<string>, ref: AlertAssetRef | null | undefined) {
+  if (ref && isAlertAssetId(ref.id)) ids.add(ref.id.toLowerCase())
+}
+
+/** Every image / video / audio UUID still referenced by a looks tree. */
+export function collectLookAssetIds(looks: AlertLooks | undefined | null): string[] {
+  const ids = new Set<string>()
+  if (!looks) return []
+  const take = (look?: AlertLook | null) => {
+    if (!look) return
+    takeLookAssetId(ids, look.image)
+    takeLookAssetId(ids, look.video)
+    takeLookAssetId(ids, look.audio)
+  }
+  take(looks.default)
+  if (looks.platforms) for (const look of Object.values(looks.platforms)) take(look)
+  if (looks.kinds) for (const look of Object.values(looks.kinds)) take(look)
+  if (looks.slots) for (const look of Object.values(looks.slots)) take(look)
+  return [...ids]
 }
 
 /**

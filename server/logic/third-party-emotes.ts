@@ -16,7 +16,7 @@ function list(value: unknown): any[] {
   return Array.isArray(value) ? value : []
 }
 
-/** 7TV emote set (`/v3/emote-sets/global`) or user connection (`/v3/users/{platform}/{id}`). */
+/** 7TV emote set (`/v3/emote-sets/global`) or user connection (`/v3/users/{twitch|kick}/{id}`). */
 export function sevenTvEmotes(json: any): Map<string, string> {
   const emotes = new Map<string, string>()
   for (const emote of list(json?.emotes ?? json?.emote_set?.emotes)) {

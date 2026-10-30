@@ -103,9 +103,26 @@ describe('third-party emote loader', () => {
     })
     await loader.ready('Kick', '668')
     await loader.ready('YouTube', 'UCabcdefghijklmnopqrstuv')
-    assert.deepEqual(calls.sort(), ['https://7tv.io/v3/emote-sets/global', 'https://7tv.io/v3/users/kick/668', 'https://7tv.io/v3/users/youtube/UCabcdefghijklmnopqrstuv'])
+    assert.deepEqual(calls.sort(), ['https://7tv.io/v3/emote-sets/global', 'https://7tv.io/v3/users/kick/668'])
     assert.deepEqual([...loader.emotesFor('Kick', '668').keys()], ['reckH', 'PETPET'])
+    assert.deepEqual([...loader.emotesFor('YouTube', 'UCabcdefghijklmnopqrstuv').keys()], ['reckH', 'PETPET'])
     assert.equal(loader.emotesFor('Kick', undefined).size, 0)
+  })
+
+  it('treats 7TV 400 invalid platform as no channel set', async () => {
+    const calls: string[] = []
+    const lines: string[] = []
+    const loader = createThirdPartyEmotes({
+      fetchImpl: async (url) => {
+        calls.push(url)
+        return url.includes('/users/') ? json({ status: 'Bad Request', error: 'invalid platform' }, 400) : json(responses[url])
+      },
+      log: (line) => lines.push(line),
+    })
+    await loader.ready('Kick', '668')
+    assert.deepEqual([...loader.emotesFor('Kick', '668').keys()], ['reckH', 'PETPET'])
+    assert.equal(lines.some((line) => line.includes('could not load')), false)
+    assert.ok(calls.includes('https://7tv.io/v3/users/kick/668'))
   })
 
   it('keeps the last good set when a refresh fails and retries sooner', async () => {

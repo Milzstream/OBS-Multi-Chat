@@ -61,6 +61,8 @@ export type AlertTextBox = {
   color?: string
   fontSize?: number
   fontWeight?: number
+  /** CSS family name (sanitized). Missing uses Outfit. */
+  fontFamily?: string
 }
 
 /**
@@ -75,7 +77,7 @@ export type AlertLook = {
   displaySec?: number | null
 }
 
-/** Cascade: `slots` (`Platform:kind`) → `kinds` → `platforms` → `default` → the pill. */
+/** Cascade: `slots` (`Platform:kind`) → `platforms` → `kinds` → `default` → the pill. */
 export type AlertLooks = {
   default?: AlertLook
   platforms?: Partial<Record<AlertPlatform, AlertLook>>

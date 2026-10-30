@@ -6,6 +6,8 @@
 import { activityKindLabel, activityListRows, activityPlanLabel, GIFT_GROUP_MS, type ActivityListRow } from '../activity/format'
 import {
   alertAssetUrl,
+  alertFontCss,
+  collectLookAssetIds,
   fillAlertTemplate,
   parseAlertLooks,
   resolveAlertLook,
@@ -14,7 +16,7 @@ import {
 import type { AlertLook, AlertPlatform, AlertSettings } from '../../server/types'
 
 export type { AlertAssetRef, AlertLook, AlertLooks, AlertPlatform, AlertSettings, AlertTextBox } from '../../server/types'
-export { alertAssetUrl, fillAlertTemplate, parseAlertLooks, resolveAlertLook, usesCustomAlertLook }
+export { alertAssetUrl, alertFontCss, collectLookAssetIds, fillAlertTemplate, parseAlertLooks, resolveAlertLook, usesCustomAlertLook }
 
 export type AlertSoundGroup = 'follow' | 'sub' | 'cheer' | 'donation' | 'superchat' | 'raid'
 export type AlertEvent = { id: string; platform: string; kind: string; time: string }
