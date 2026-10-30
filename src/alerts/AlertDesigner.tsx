@@ -28,7 +28,9 @@ import {
   setLookField,
   setLookGraphic,
   setLookTextBoxes,
+  settleLooksSave,
   type LookTarget,
+  type LooksSaveResult,
 } from './designer'
 import { playAlertSound, playAlertSoundUrl } from './sounds'
 
@@ -73,7 +75,7 @@ export function AlertDesigner({
   onBack,
 }: {
   settings: AlertSettings
-  onLooksChange: (looks: AlertLooks | undefined) => void | Promise<boolean>
+  onLooksChange: (looks: AlertLooks | undefined) => void | Promise<LooksSaveResult>
   onBack: () => void
 }) {
   const [target, setTarget] = useState<LookTarget>({})
@@ -88,7 +90,7 @@ export function AlertDesigner({
   const draftRef = useRef(draft)
   const dragRef = useRef<{ index: number; dx: number; dy: number } | null>(null)
   const saveTimer = useRef(0)
-  draftRef.current = draft
+  const saveTail = useRef(Promise.resolve())
   const frameRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(1)
   const graphicInput = useRef<HTMLInputElement>(null)
@@ -98,7 +100,9 @@ export function AlertDesigner({
   onLooksChangeRef.current = onLooksChange
 
   useEffect(() => {
-    if (dirtyRef.current) return
+    // The console poll replaces settings.looks every 2s. An unsaved draft, including a drag, stays put.
+    if (dirtyRef.current || dragRef.current) return
+    draftRef.current = settings.looks
     setDraft(settings.looks)
   }, [settings.looks])
 
@@ -128,37 +132,56 @@ export function AlertDesigner({
     return () => observer.disconnect()
   }, [])
 
+  const enqueue = <T,>(task: () => Promise<T>) => {
+    const run = saveTail.current.then(task, task)
+    saveTail.current = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  const flushOnce = async () => {
+    if (!dirtyRef.current && !dragRef.current) return
+    const snapshot = draftRef.current
+    setSaveState('saving')
+    let result: LooksSaveResult
+    try {
+      result = await Promise.resolve(onLooksChangeRef.current(snapshot))
+    } catch {
+      if (draftRef.current === snapshot && !dragRef.current) setSaveState('error')
+      return
+    }
+    const settlement = settleLooksSave(snapshot, draftRef.current, Boolean(dragRef.current), result)
+    if (settlement === 'error') {
+      setSaveState('error')
+      return
+    }
+    if (settlement === 'dirty') {
+      dirtyRef.current = true
+      setSaveState('unsaved')
+      return
+    }
+    dirtyRef.current = false
+    setSaveState('saved')
+  }
+
+  // Looks POSTs run one at a time. Each one sends the draft at the moment it starts, so an older body cannot land last and prune a newer file.
+  const persistLatest = () => enqueue(flushOnce)
+  const persistLatestRef = useRef(persistLatest)
+  persistLatestRef.current = persistLatest
+
   useEffect(() => () => {
     window.clearTimeout(saveTimer.current)
-    if (dirtyRef.current) void onLooksChangeRef.current(draftRef.current)
+    if (dirtyRef.current || dragRef.current) void persistLatestRef.current()
   }, [])
-
-  const persist = async (looks: AlertLooks | undefined) => {
-    setSaveState('saving')
-    try {
-      const ok = await Promise.resolve(onLooksChange(looks))
-      if (ok === false) {
-        setSaveState('error')
-        return false
-      }
-      dirtyRef.current = false
-      setSaveState('saved')
-      return true
-    } catch {
-      setSaveState('error')
-      return false
-    }
-  }
 
   const commit = (looks: AlertLooks | undefined, immediate = false) => {
     dirtyRef.current = true
     draftRef.current = looks
     setDraft(looks)
     window.clearTimeout(saveTimer.current)
-    if (immediate) void persist(looks)
+    if (immediate) void persistLatest()
     else {
       setSaveState('unsaved')
-      saveTimer.current = window.setTimeout(() => { void persist(looks) }, 400)
+      saveTimer.current = window.setTimeout(() => { void persistLatestRef.current() }, 400)
     }
   }
 
@@ -189,30 +212,41 @@ export function AlertDesigner({
   }
 
   const mutateBoxes = (nextBoxes: AlertTextBox[], immediate = false) => {
-    commit(setLookTextBoxes(draft, target, nextBoxes), immediate)
+    commit(setLookTextBoxes(draftRef.current, target, nextBoxes), immediate)
   }
   const editBoxes = (immediate = false) => {
-    const next = ownOrCopiedTextBoxes(draft, target)
-    if (!Array.isArray(own?.textBoxes)) commit(setLookTextBoxes(draft, target, next), immediate)
+    const base = draftRef.current
+    const next = ownOrCopiedTextBoxes(base, target)
+    if (!Array.isArray(readLookLayer(base, target)?.textBoxes)) commit(setLookTextBoxes(base, target, next), immediate)
     return next
   }
 
   const upload = async (file: File, slot: 'graphic' | 'sound') => {
+    const picked = target
     setError('')
     setBusy(slot)
+    window.clearTimeout(saveTimer.current)
     try {
-      const data = await readFileDataUrl(file)
-      const response = await fetch('/api/alerts/assets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name, mime: file.type, data }),
+      await enqueue(async () => {
+        const data = await readFileDataUrl(file)
+        const response = await fetch('/api/alerts/assets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: file.name, mime: file.type, data }),
+        })
+        const body = await response.json().catch(() => ({})) as AlertAssetRef & { error?: string }
+        if (!response.ok) throw new Error(body.error || 'Could not upload that file')
+        const next = slot === 'graphic'
+          ? setLookGraphic(draftRef.current, picked, body)
+          : setLookAudio(draftRef.current, picked, body)
+        dirtyRef.current = true
+        draftRef.current = next
+        setDraft(next)
+        await flushOnce()
       })
-      const body = await response.json().catch(() => ({})) as AlertAssetRef & { error?: string }
-      if (!response.ok) throw new Error(body.error || 'Could not upload that file')
-      if (slot === 'graphic') commit(setLookGraphic(draft, target, body), true)
-      else commit(setLookAudio(draft, target, body), true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not upload that file')
+      if (dirtyRef.current || dragRef.current) void persistLatest()
     } finally {
       setBusy('')
     }
@@ -233,6 +267,7 @@ export function AlertDesigner({
     const x = ((pointer.clientX - rect.left) / rect.width) * 100
     const y = ((pointer.clientY - rect.top) / rect.height) * 100
     dragRef.current = { index, dx: x - box.x, dy: y - box.y }
+    dirtyRef.current = true
     setSelected(index)
     editBoxes()
   }
@@ -248,6 +283,7 @@ export function AlertDesigner({
     if (!next[drag.index]) return
     next[drag.index] = { ...next[drag.index], x, y }
     const looks = setLookTextBoxes(draftRef.current, target, next)
+    dirtyRef.current = true
     draftRef.current = looks
     setDraft(looks)
   }
@@ -259,7 +295,7 @@ export function AlertDesigner({
   }
 
   const patchBox = (index: number, patch: Partial<AlertTextBox>, immediate = false) => {
-    const next = ownOrCopiedTextBoxes(draft, target)
+    const next = ownOrCopiedTextBoxes(draftRef.current, target)
     if (!next[index]) return
     next[index] = { ...next[index], ...patch }
     mutateBoxes(next, immediate)
@@ -267,7 +303,7 @@ export function AlertDesigner({
   }
 
   const addBox = () => {
-    const next = ownOrCopiedTextBoxes(draft, target)
+    const next = ownOrCopiedTextBoxes(draftRef.current, target)
     if (next.length >= 8) return
     next.push(defaultTextBox())
     mutateBoxes(next, true)
@@ -282,7 +318,7 @@ export function AlertDesigner({
   }
 
   const removeBox = (index: number) => {
-    const next = ownOrCopiedTextBoxes(draft, target).filter((_, i) => i !== index)
+    const next = ownOrCopiedTextBoxes(draftRef.current, target).filter((_, i) => i !== index)
     mutateBoxes(next, true)
     setSelected(Math.max(0, index - 1))
   }
@@ -290,7 +326,7 @@ export function AlertDesigner({
   const tokenClick = (token: string) => {
     const box = selectedBox
     if (!box) {
-      const next = [...ownOrCopiedTextBoxes(draft, target), { ...defaultTextBox(), text: `{${token}}` }]
+      const next = [...ownOrCopiedTextBoxes(draftRef.current, target), { ...defaultTextBox(), text: `{${token}}` }]
       mutateBoxes(next, true)
       setSelected(next.length - 1)
       return
@@ -312,16 +348,16 @@ export function AlertDesigner({
   const saveNow = () => {
     window.clearTimeout(saveTimer.current)
     dirtyRef.current = true
-    void persist(draftRef.current)
+    void persistLatest()
   }
 
   const resetLook = () => {
-    commit(clearLookLayer(draft, target), true)
+    commit(clearLookLayer(draftRef.current, target), true)
   }
 
   const goBack = () => {
     window.clearTimeout(saveTimer.current)
-    if (dirtyRef.current) void persist(draftRef.current)
+    if (dirtyRef.current || dragRef.current) void persistLatest()
     onBack()
   }
 
@@ -330,12 +366,12 @@ export function AlertDesigner({
     const raw = timeDraft.trim()
     setTimeDraft(null)
     if (!raw) {
-      commit(setLookField(draft, target, 'displaySec', undefined), true)
+      commit(setLookField(draftRef.current, target, 'displaySec', undefined), true)
       return
     }
     const seconds = Number(raw)
     if (!Number.isFinite(seconds) || seconds <= 0) return
-    commit(setLookField(draft, target, 'displaySec', seconds), true)
+    commit(setLookField(draftRef.current, target, 'displaySec', seconds), true)
   }
 
   return (
@@ -427,8 +463,8 @@ export function AlertDesigner({
           <button type="button" disabled={busy === 'graphic'} onClick={() => graphicInput.current?.click()}>
             <Upload size={12} /> {busy === 'graphic' ? '…' : 'Upload'}
           </button>
-          <button type="button" disabled={!graphic && !inherit.graphic.own} onClick={() => commit(setLookGraphic(draft, target, null), true)}>Clear</button>
-          {inherit.graphic.own ? <button type="button" onClick={() => { commit(setLookField(setLookField(draft, target, 'image', undefined), target, 'video', undefined), true) }}>Inherit</button> : null}
+          <button type="button" disabled={!graphic && !inherit.graphic.own} onClick={() => commit(setLookGraphic(draftRef.current, target, null), true)}>Clear</button>
+          {inherit.graphic.own ? <button type="button" onClick={() => { commit(setLookField(setLookField(draftRef.current, target, 'image', undefined), target, 'video', undefined), true) }}>Inherit</button> : null}
           <input ref={graphicInput} type="file" accept={GRAPHIC_ACCEPT} hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file, 'graphic') }} />
         </div>
         <div className="alert-designer-row">
@@ -437,8 +473,8 @@ export function AlertDesigner({
           <button type="button" disabled={busy === 'sound'} onClick={() => soundInput.current?.click()}>
             <Upload size={12} /> {busy === 'sound' ? '…' : 'Upload'}
           </button>
-          <button type="button" disabled={!look?.audio && !inherit.sound.own} onClick={() => commit(setLookAudio(draft, target, null), true)}>Clear</button>
-          {inherit.sound.own ? <button type="button" onClick={() => commit(setLookField(draft, target, 'audio', undefined), true)}>Inherit</button> : null}
+          <button type="button" disabled={!look?.audio && !inherit.sound.own} onClick={() => commit(setLookAudio(draftRef.current, target, null), true)}>Clear</button>
+          {inherit.sound.own ? <button type="button" onClick={() => commit(setLookField(draftRef.current, target, 'audio', undefined), true)}>Inherit</button> : null}
           <button type="button" onClick={playSound} title="Preview sound"><Play size={12} /></button>
           <input ref={soundInput} type="file" accept={AUDIO_ACCEPT} hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file, 'sound') }} />
         </div>
@@ -460,7 +496,7 @@ export function AlertDesigner({
         <div className="alert-designer-text-head">
           <span>Text</span>
           <span className="alert-designer-text-actions">
-            {Array.isArray(own?.textBoxes) ? <button type="button" onClick={() => commit(setLookField(draft, target, 'textBoxes', undefined), true)}>Inherit</button> : null}
+            {Array.isArray(own?.textBoxes) ? <button type="button" onClick={() => commit(setLookField(draftRef.current, target, 'textBoxes', undefined), true)}>Inherit</button> : null}
             <button type="button" disabled={boxes.length >= 8} onClick={addBox}><Plus size={12} /> Add</button>
           </span>
         </div>

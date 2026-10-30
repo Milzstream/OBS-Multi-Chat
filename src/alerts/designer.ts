@@ -201,6 +201,24 @@ export function lookLayerHasContent(look: AlertLook | undefined) {
   return Boolean(look && lookHasKeys(look))
 }
 
+export type LooksSaveResult = true | false | 'stale' | void
+
+/**
+ * A finished POST may clear dirty only when it wrote the draft still on screen.
+ * `stale` means a newer settings write owns the response. A drag is unsaved
+ * until pointer-up. A failed write of an older snapshot must not cover a newer edit.
+ */
+export function settleLooksSave(
+  saved: AlertLooks | undefined,
+  current: AlertLooks | undefined,
+  dragging: boolean,
+  result: LooksSaveResult,
+): 'saved' | 'dirty' | 'error' {
+  if (result === false && saved === current && !dragging) return 'error'
+  if (result === false || result === 'stale' || dragging || saved !== current) return 'dirty'
+  return 'saved'
+}
+
 export function setLookField<K extends AlertLookField>(
   looks: AlertLooks | undefined,
   target: LookTarget,

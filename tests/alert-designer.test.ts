@@ -22,6 +22,7 @@ import {
   setLookTextBoxes,
   clearLookLayer,
   lookLayerHasContent,
+  settleLooksSave,
 } from '../src/alerts/designer.ts'
 import { collectLookAssetIds, parseAlertSettings, resolveAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
@@ -185,6 +186,28 @@ describe('inherit labels', () => {
     const fallback = inheritSources(looks, {})
     assert.equal(fallback.graphic.label, 'Graphic from this look')
     assert.equal(fallback.sound.label, 'Sound from this look')
+  })
+})
+
+describe('looks save settlement', () => {
+  const looks = { default: { image: IMAGE } }
+  const newer = { default: { image: TWITCH } }
+
+  it('clears dirty only when the snapshot that finished is still the draft', () => {
+    assert.equal(settleLooksSave(looks, looks, false, true), 'saved')
+    assert.equal(settleLooksSave(looks, looks, false, undefined), 'saved')
+    assert.equal(settleLooksSave(looks, newer, false, true), 'dirty')
+    assert.equal(settleLooksSave(looks, looks, true, true), 'dirty')
+    assert.equal(settleLooksSave(looks, looks, false, 'stale'), 'dirty')
+    assert.equal(settleLooksSave(looks, looks, false, false), 'error')
+    assert.equal(settleLooksSave(looks, newer, false, false), 'dirty')
+  })
+
+  it('keeps an earlier asset when a second upload is applied to the latest draft', () => {
+    const withGraphic = setLookGraphic(undefined, {}, IMAGE)
+    const withBoth = setLookAudio(withGraphic, {}, SOUND)
+    assert.equal(withBoth?.default?.image?.id, IMAGE.id)
+    assert.equal(withBoth?.default?.audio?.id, SOUND.id)
   })
 })
 

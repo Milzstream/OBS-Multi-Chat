@@ -162,6 +162,7 @@ export default function ConsoleApp() {
   const [customize, setCustomize] = useState(false)
   const alertsBusy = useRef(0)
   const alertsPatchSeq = useRef(0)
+  const alertsRef = useRef(alerts)
   const logRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const settingsRef = useRef(settings)
@@ -198,7 +199,11 @@ export default function ConsoleApp() {
       void fetch('/api/state').then((response) => response.ok ? response.json() : null).then((data) => {
         if (cancelled || epoch !== settingsEpoch.current || !data || typeof data !== 'object') return
         const remote = data as Partial<Settings> & { accounts?: Connection[]; youtubePrivacy?: YoutubePrivacyNotice[]; alerts?: unknown }
-        if (remote.alerts && alertsBusy.current === 0) setAlerts(parseAlertSettings(remote.alerts))
+        if (remote.alerts && alertsBusy.current === 0) {
+          const next = parseAlertSettings(remote.alerts)
+          alertsRef.current = next
+          setAlerts(next)
+        }
         if (Array.isArray(remote.accounts) && remote.accounts.length) setConnections(remote.accounts)
         setSettings((current) => mergePolledSettings(current, remote, inFlightRef.current))
         if (Array.isArray(remote.youtubePrivacy)) setYoutubePrivacy(remote.youtubePrivacy)
@@ -335,22 +340,28 @@ export default function ConsoleApp() {
     } catch { /* button stays as it was */ }
   }
 
-  const patchAlerts = async (patch: Omit<Partial<AlertSettings>, 'looks'> & { looks?: AlertLooks | null }) => {
-    const previous = alerts
+  const patchAlerts = async (patch: Omit<Partial<AlertSettings>, 'looks'> & { looks?: AlertLooks | null }): Promise<true | false | 'stale'> => {
+    const previous = alertsRef.current
     const seq = ++alertsPatchSeq.current
-    const next = { ...alerts, ...patch } as AlertSettings
+    const next = { ...alertsRef.current, ...patch } as AlertSettings
     if (patch.looks === null) delete next.looks
+    alertsRef.current = next
     setAlerts(next)
     alertsBusy.current += 1
     try {
       const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ alerts: patch }) })
       const data = await response.json() as { alerts?: unknown }
       if (!response.ok) throw new Error('save')
-      if (seq !== alertsPatchSeq.current) return true
-      if (data.alerts) setAlerts(parseAlertSettings(data.alerts))
+      if (seq !== alertsPatchSeq.current) return 'stale'
+      if (data.alerts) {
+        const parsed = parseAlertSettings(data.alerts)
+        alertsRef.current = parsed
+        setAlerts(parsed)
+      }
       return true
     } catch {
-      if (seq !== alertsPatchSeq.current) return false
+      if (seq !== alertsPatchSeq.current) return 'stale'
+      alertsRef.current = previous
       setAlerts(previous)
       setSettingsError('Could not save alerts')
       return false
@@ -362,7 +373,7 @@ export default function ConsoleApp() {
   const toggleAlerts = async () => {
     const enabled = !alerts.enabled
     const saved = await patchAlerts({ enabled })
-    if (saved && enabled && info?.alertsUrl) await copy('alerts', info.alertsUrl)
+    if (saved === true && enabled && info?.alertsUrl) await copy('alerts', info.alertsUrl)
   }
 
   const commitAlertSeconds = () => {
