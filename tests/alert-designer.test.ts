@@ -292,7 +292,7 @@ describe('companion designer markup', () => {
     assert.doesNotMatch(reset, /disabled/)
   })
 
-  it('offers Copy from Default and Clear for owned text, with no Inherit button', () => {
+  it('deletes one text box from the row next to Weight, and Text has no Clear', () => {
     const html = renderToStaticMarkup(createElement(AlertDesigner, {
       settings: parseAlertSettings({
         enabled: true,
@@ -304,9 +304,9 @@ describe('companion designer markup', () => {
     assert.match(html, /Copy from…/)
     assert.match(html, /alert-designer-copy" disabled/)
     assert.doesNotMatch(html, />Inherit</)
+    assert.match(html, /title="Delete this text box"/)
     const actions = html.split('alert-designer-text-actions')[1]?.split('alert-designer-tokens')[0] || ''
-    assert.match(actions, />Clear<\/button>/)
-    assert.doesNotMatch(actions, /disabled/)
+    assert.doesNotMatch(actions, />Clear</)
     assert.match(actions, /Add<\/button>/)
   })
 

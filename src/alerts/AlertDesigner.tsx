@@ -561,12 +561,6 @@ export function AlertDesigner({
         <div className="alert-designer-text-head">
           <span>Text</span>
           <span className="alert-designer-text-actions">
-            <button
-              type="button"
-              disabled={own?.textBoxes === undefined}
-              title="Remove this text and use the text above"
-              onClick={() => commit(setLookField(draftRef.current, target, 'textBoxes', undefined), true)}
-            >Clear</button>
             <button type="button" disabled={boxes.length >= 8} onClick={addBox}><Plus size={12} /> Add</button>
           </span>
         </div>
@@ -617,7 +611,7 @@ export function AlertDesigner({
                   {FONT_WEIGHTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
                 </select>
               </label>
-              <button type="button" title="Remove text box" onClick={() => removeBox(selected)}><Trash2 size={12} /></button>
+              <button type="button" title="Delete this text box" onClick={() => removeBox(selected)}><Trash2 size={12} /></button>
             </div>
           </div>
         ) : (
