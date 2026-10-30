@@ -14,11 +14,16 @@ import {
   ALERT_PREVIEW_HEIGHT,
   ALERT_PREVIEW_WIDTH,
   clearLookLayer,
+  copyResolvedLook,
+  copySources,
   defaultTextBox,
+  designerKindLabel,
   designerKindsFor,
+  hasAlertLooks,
   inheritSources,
   insertToken,
   lookLayerHasContent,
+  lookTargetKind,
   ownOrCopiedTextBoxes,
   readLookLayer,
   resolveAlertLookForTarget,
@@ -57,6 +62,12 @@ function readFileDataUrl(file: File) {
     reader.onerror = () => reject(new Error('Could not read that file'))
     reader.readAsDataURL(file)
   })
+}
+
+function layerName(target: LookTarget) {
+  const kind = designerKindLabel(target.kind)
+  if (target.platform && kind) return `${target.platform} ${kind}`
+  return target.platform || kind || 'Default'
 }
 
 function hexColor(value: string | undefined) {
@@ -193,12 +204,15 @@ export function AlertDesigner({
   const graphic = resolvedGraphic(look)
   const own = readLookLayer(draft, target)
   const canReset = lookLayerHasContent(own)
+  const onDefault = lookTargetKind(target) === 'default'
+  const canResetAll = hasAlertLooks(draft)
+  const sources = copySources(draft, target)
   const kinds = designerKindsFor(target.platform)
   const hold = alertHoldSeconds(settings, look)
   const selectedBox = boxes[selected]
   const selectedFont = parseAlertFontFamily(selectedBox?.fontFamily) || 'Outfit'
   const fontOptions = alertFontSelectOptions(fonts, selectedFont)
-  const previewSettings = { ...settings, displaySec: hold, enabled: true }
+  const previewSettings = { ...settings, displaySec: hold, enabled: true, showPlatform: onDefault ? false : settings.showPlatform }
 
   const selectPlatform = (platform: AlertPlatform | undefined) => {
     setTarget(platform ? { platform } : {})
@@ -352,7 +366,22 @@ export function AlertDesigner({
   }
 
   const resetLook = () => {
+    const message = onDefault
+      ? 'Clear the shared look? This tab goes back to the plain pill. Platform looks stay.'
+      : `Clear ${layerName(target)}? It will use the look above it.`
+    if (!window.confirm(message)) return
     commit(clearLookLayer(draftRef.current, target), true)
+  }
+
+  const resetAll = () => {
+    if (!window.confirm('Remove every custom look? Alerts will use the built-in pills.')) return
+    commit(undefined, true)
+  }
+
+  const copyFrom = (id: string) => {
+    const source = sources.find((item) => item.id === id)
+    if (!source) return
+    commit(copyResolvedLook(draftRef.current, source.target, target), true)
   }
 
   const goBack = () => {
@@ -384,11 +413,11 @@ export function AlertDesigner({
         <button
           type="button"
           className="alert-designer-action"
-          disabled={!canReset || saveState === 'saving'}
-          title={target.platform || target.kind ? 'Remove this look so it uses Default again' : 'Remove this look and use the built-in pill'}
-          onClick={resetLook}
+          disabled={!canResetAll || saveState === 'saving'}
+          title="Remove every custom look and use the built-in pills"
+          onClick={resetAll}
         >
-          <RotateCcw size={12} strokeWidth={2.5} /> Reset to default
+          <RotateCcw size={12} strokeWidth={2.5} /> Reset all custom looks
         </button>
         <button type="button" className="alert-designer-action" disabled={saveState === 'saving'} onClick={saveNow}>
           <Save size={12} strokeWidth={2.5} /> {saveState === 'saving' ? 'Saving…' : 'Save'}
@@ -431,7 +460,12 @@ export function AlertDesigner({
         {inherit.graphic.label} · {inherit.sound.label} · {inherit.text.label} · {inherit.time.label}
       </p>
       <div className="alert-designer-tabs">
-        <button type="button" className={!target.platform ? 'active' : undefined} onClick={() => selectPlatform(undefined)}>Default</button>
+        <button
+          type="button"
+          className={!target.platform ? 'active' : undefined}
+          title="Shared look for every alert. A platform or a single alert overrides it. With nothing saved, this is the plain pill."
+          onClick={() => selectPlatform(undefined)}
+        >Default</button>
         {ALERT_PLATFORMS.map((platform) => (
           <button
             key={platform}
@@ -443,6 +477,15 @@ export function AlertDesigner({
             {platformMark(platform)}
           </button>
         ))}
+        <button
+          type="button"
+          className="alert-designer-action alert-designer-reset"
+          disabled={!canReset || saveState === 'saving'}
+          title={onDefault ? 'Clear the shared look and use the plain pill' : `Clear ${layerName(target)} and use the look above it`}
+          onClick={resetLook}
+        >
+          <RotateCcw size={12} strokeWidth={2.5} /> Reset
+        </button>
       </div>
       <div className="alert-designer-kinds">
         {kinds.map((item) => (
@@ -455,6 +498,20 @@ export function AlertDesigner({
             {item.label}
           </button>
         ))}
+        <select
+          className="alert-designer-copy"
+          value=""
+          disabled={sources.length === 0 || saveState === 'saving'}
+          title="Copy a whole look onto this alert. Later edits to the source stay on the source."
+          onChange={(event) => {
+            const id = event.target.value
+            event.target.value = ''
+            copyFrom(id)
+          }}
+        >
+          <option value="">Copy from…</option>
+          {sources.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+        </select>
       </div>
       <div className="alert-designer-fields">
         <div className="alert-designer-row">
@@ -463,8 +520,12 @@ export function AlertDesigner({
           <button type="button" disabled={busy === 'graphic'} onClick={() => graphicInput.current?.click()}>
             <Upload size={12} /> {busy === 'graphic' ? '…' : 'Upload'}
           </button>
-          <button type="button" disabled={!graphic && !inherit.graphic.own} onClick={() => commit(setLookGraphic(draftRef.current, target, null), true)}>Clear</button>
-          {inherit.graphic.own ? <button type="button" onClick={() => { commit(setLookField(setLookField(draftRef.current, target, 'image', undefined), target, 'video', undefined), true) }}>Inherit</button> : null}
+          <button
+            type="button"
+            disabled={!inherit.graphic.own}
+            title="Remove this graphic and use the one above"
+            onClick={() => commit(setLookField(setLookField(draftRef.current, target, 'image', undefined), target, 'video', undefined), true)}
+          >Clear</button>
           <input ref={graphicInput} type="file" accept={GRAPHIC_ACCEPT} hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file, 'graphic') }} />
         </div>
         <div className="alert-designer-row">
@@ -473,8 +534,12 @@ export function AlertDesigner({
           <button type="button" disabled={busy === 'sound'} onClick={() => soundInput.current?.click()}>
             <Upload size={12} /> {busy === 'sound' ? '…' : 'Upload'}
           </button>
-          <button type="button" disabled={!look?.audio && !inherit.sound.own} onClick={() => commit(setLookAudio(draftRef.current, target, null), true)}>Clear</button>
-          {inherit.sound.own ? <button type="button" onClick={() => commit(setLookField(draftRef.current, target, 'audio', undefined), true)}>Inherit</button> : null}
+          <button
+            type="button"
+            disabled={!inherit.sound.own}
+            title="Remove this sound and use the one above"
+            onClick={() => commit(setLookField(draftRef.current, target, 'audio', undefined), true)}
+          >Clear</button>
           <button type="button" onClick={playSound} title="Preview sound"><Play size={12} /></button>
           <input ref={soundInput} type="file" accept={AUDIO_ACCEPT} hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(file, 'sound') }} />
         </div>
@@ -496,7 +561,12 @@ export function AlertDesigner({
         <div className="alert-designer-text-head">
           <span>Text</span>
           <span className="alert-designer-text-actions">
-            {Array.isArray(own?.textBoxes) ? <button type="button" onClick={() => commit(setLookField(draftRef.current, target, 'textBoxes', undefined), true)}>Inherit</button> : null}
+            <button
+              type="button"
+              disabled={own?.textBoxes === undefined}
+              title="Remove this text and use the text above"
+              onClick={() => commit(setLookField(draftRef.current, target, 'textBoxes', undefined), true)}
+            >Clear</button>
             <button type="button" disabled={boxes.length >= 8} onClick={addBox}><Plus size={12} /> Add</button>
           </span>
         </div>

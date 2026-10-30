@@ -7,7 +7,7 @@
 import { alertAssetKind, mergeAlertLook } from '../../server/logic/alert-looks'
 import type { AlertAssetRef, AlertLook, AlertLooks, AlertPlatform, AlertTextBox } from '../../server/types'
 import type { ActivityEvent } from '../activity/ActivityRow'
-import { ALERT_TYPES } from './alerts'
+import { ALERT_PLATFORMS, ALERT_TYPES } from './alerts'
 
 export const ALERT_PREVIEW_WIDTH = 1000
 export const ALERT_PREVIEW_HEIGHT = 250
@@ -258,11 +258,11 @@ export function setLookAudio(looks: AlertLooks | undefined, target: LookTarget, 
 export function layersForTarget(looks: AlertLooks | undefined, target: LookTarget): LookLayer[] {
   const mode = lookTargetKind(target)
   const layers: LookLayer[] = [{ id: 'default', label: 'default', look: looks?.default }]
-  if (mode === 'platform' || mode === 'slot') {
-    layers.push({ id: 'platform', label: target.platform || 'platform', look: looks?.platforms?.[target.platform!] })
-  }
   if (mode === 'kind' || mode === 'slot') {
     layers.push({ id: 'kind', label: designerKindLabel(target.kind) || 'kind', look: looks?.kinds?.[target.kind!] })
+  }
+  if (mode === 'platform' || mode === 'slot') {
+    layers.push({ id: 'platform', label: target.platform || 'platform', look: looks?.platforms?.[target.platform!] })
   }
   if (mode === 'slot') {
     layers.push({
@@ -285,6 +285,49 @@ export function resolveAlertLookForTarget(looks: AlertLooks | undefined, target:
   }
   if (!Object.keys(merged).length) return
   return merged
+}
+
+export function hasAlertLooks(looks: AlertLooks | undefined) {
+  return Boolean(looks && looksHasContent(looks))
+}
+
+function sameLookTarget(a: LookTarget, b: LookTarget) {
+  return a.platform === b.platform && a.kind === b.kind
+}
+
+/** Saved looks the current row can snapshot. The current row is left out. */
+export function copySources(looks: AlertLooks | undefined, current: LookTarget): { id: string; label: string; target: LookTarget }[] {
+  const sources: { id: string; label: string; target: LookTarget }[] = []
+  const add = (id: string, label: string, target: LookTarget, look: AlertLook | undefined) => {
+    if (!lookLayerHasContent(look) || sameLookTarget(current, target)) return
+    sources.push({ id, label, target })
+  }
+  add('default', 'Default', {}, looks?.default)
+  for (const item of DESIGNER_KINDS) {
+    add(`kind:${item.kind}`, `${item.label} on every platform`, { kind: item.kind }, looks?.kinds?.[item.kind])
+  }
+  for (const platform of ALERT_PLATFORMS) {
+    add(`platform:${platform}`, platform, { platform }, looks?.platforms?.[platform])
+  }
+  for (const [key, look] of Object.entries(looks?.slots || {})) {
+    const [platform, kind] = key.split(':') as [AlertPlatform, string]
+    add(`slot:${key}`, `${platform} ${designerKindLabel(kind) || kind}`, { platform, kind }, look)
+  }
+  return sources
+}
+
+/** Snapshot of the look you see for `from`, stored on `to` so later source edits stay there. */
+export function copyResolvedLook(looks: AlertLooks | undefined, from: LookTarget, to: LookTarget): AlertLooks | undefined {
+  const resolved = resolveAlertLookForTarget(looks, from)
+  if (!resolved) return looks
+  const snapshot: AlertLook = {
+    image: resolved.image ? { ...resolved.image } : null,
+    video: resolved.video ? { ...resolved.video } : null,
+    audio: resolved.audio ? { ...resolved.audio } : null,
+    textBoxes: resolved.textBoxes ? resolved.textBoxes.map((box) => ({ ...box })) : null,
+    displaySec: resolved.displaySec ?? null,
+  }
+  return writeLookLayer(looks, to, snapshot)
 }
 
 function inheritFromLayers(

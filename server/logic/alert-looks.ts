@@ -325,16 +325,16 @@ export function mergeAlertLook(base: AlertLook, overlay: AlertLook): AlertLook {
 }
 
 /**
- * `platform+kind` → `kind` → `platform` → `default`. Missing looks (or an
- * empty merge) means the overlay should use the pill.
+ * `platform+kind` → `platform` → `kind` → `default`. A Twitch base covers a
+ * Follow-for-everyone look. Missing looks (or an empty merge) use the pill.
  */
 export function resolveAlertLook(settings: Pick<AlertSettings, 'looks'> | undefined, event: { platform: string; kind: string }): AlertLook | undefined {
   const looks = settings?.looks
   if (!looks) return
   const layers = [
     looks.default,
-    looks.platforms?.[event.platform as AlertPlatform],
     looks.kinds?.[event.kind],
+    looks.platforms?.[event.platform as AlertPlatform],
     looks.slots?.[`${event.platform}:${event.kind}`],
   ]
   let merged: AlertLook = {}

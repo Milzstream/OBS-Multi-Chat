@@ -23,6 +23,8 @@ import {
   clearLookLayer,
   lookLayerHasContent,
   settleLooksSave,
+  copyResolvedLook,
+  copySources,
 } from '../src/alerts/designer.ts'
 import { collectLookAssetIds, parseAlertSettings, resolveAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
@@ -100,6 +102,16 @@ describe('look targets and cascade up to the edited layer', () => {
     assert.equal(resolved?.audio?.name, 'twitch.mp3')
     assert.equal(resolved?.textBoxes?.[0]?.text, 'FOLLOW {name}')
     assert.equal(lookTargetKind({ platform: 'Twitch', kind: 'follow' }), 'slot')
+  })
+
+  it('a platform image beats Follow on every platform, and other platforms keep that Follow', () => {
+    const layered = {
+      kinds: { follow: { image: { ...IMAGE, name: 'follow-all.png' } } },
+      platforms: { Twitch: { image: { ...TWITCH, name: 'twitch.png' } } },
+    }
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(layered, { platform: 'Twitch', kind: 'follow' }))?.name, 'twitch.png')
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(layered, { platform: 'Kick', kind: 'follow' }))?.name, 'follow-all.png')
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(layered, { kind: 'follow' }))?.name, 'follow-all.png')
   })
 })
 
@@ -189,6 +201,21 @@ describe('inherit labels', () => {
   })
 })
 
+describe('copy a whole look', () => {
+  it('stores what you see on the current alert and does not follow later source edits', () => {
+    const looks = { default: { image: IMAGE, textBoxes: [{ text: '{name}', x: 1, y: 2 }] } }
+    const copied = copyResolvedLook(looks, {}, { platform: 'Twitch', kind: 'follow' })
+    assert.equal(readLookLayer(copied, { platform: 'Twitch', kind: 'follow' })?.image?.id, IMAGE.id)
+    assert.equal(readLookLayer(copied, { platform: 'Twitch', kind: 'follow' })?.textBoxes?.[0]?.text, '{name}')
+    const changed = setLookGraphic(copied, {}, TWITCH)
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(changed, { platform: 'Twitch', kind: 'follow' }))?.id, IMAGE.id)
+    assert.equal(resolvedGraphic(resolveAlertLookForTarget(changed, {}))?.id, TWITCH.id)
+    const choices = copySources(looks, { platform: 'Twitch', kind: 'follow' })
+    assert.deepEqual(choices.map((item) => item.label), ['Default'])
+    assert.equal(copySources(looks, {}).length, 0)
+  })
+})
+
 describe('looks save settlement', () => {
   const looks = { default: { image: IMAGE } }
   const newer = { default: { image: TWITCH } }
@@ -234,8 +261,11 @@ describe('companion designer markup', () => {
     assert.match(html, /Customize alerts/)
     assert.match(html, /alert-designer-action/)
     assert.match(html, /Save<\/button>/)
-    assert.match(html, /Reset to default/)
-    assert.match(html, /<button[^>]*disabled[^>]*title="Remove this look and use the built-in pill"/)
+    assert.match(html, /Reset all custom looks/)
+    assert.match(html, /Copy from/)
+    assert.doesNotMatch(html, />Inherit</)
+    assert.match(html, /title="Shared look for every alert/)
+    assert.match(html, /<button[^>]*disabled[^>]*title="Clear the shared look and use the plain pill"/)
     assert.match(html, />Default</)
     assert.match(html, />Follow</)
     assert.match(html, />Membership</)
@@ -254,10 +284,41 @@ describe('companion designer markup', () => {
       onLooksChange: () => undefined,
       onBack: () => undefined,
     }))
-    assert.match(html, /Reset to default/)
+    assert.match(html, /Reset<\/button>/)
     assert.match(html, /Save<\/button>/)
-    const reset = html.split('Reset to default')[0].split('<button').pop() || ''
+    const resetAll = html.split('Reset all custom looks')[0].split('<button').pop() || ''
+    assert.doesNotMatch(resetAll, /disabled/)
+    const reset = html.split('alert-designer-reset')[1]?.split('</button>')[0] || ''
     assert.doesNotMatch(reset, /disabled/)
+  })
+
+  it('offers Copy from Default and Clear for owned text, with no Inherit button', () => {
+    const html = renderToStaticMarkup(createElement(AlertDesigner, {
+      settings: parseAlertSettings({
+        enabled: true,
+        looks: { default: { textBoxes: [{ text: '{name}', x: 8, y: 40 }] } },
+      }),
+      onLooksChange: () => undefined,
+      onBack: () => undefined,
+    }))
+    assert.match(html, /Copy from…/)
+    assert.match(html, /alert-designer-copy" disabled/)
+    assert.doesNotMatch(html, />Inherit</)
+    const actions = html.split('alert-designer-text-actions')[1]?.split('alert-designer-tokens')[0] || ''
+    assert.match(actions, />Clear<\/button>/)
+    assert.doesNotMatch(actions, /disabled/)
+    assert.match(actions, /Add<\/button>/)
+  })
+
+  it('drops a platform text override so Default shows again', () => {
+    const looks = {
+      default: { textBoxes: [{ text: '{name}', x: 8, y: 40 }] },
+      platforms: { Twitch: { textBoxes: [{ text: 'only twitch', x: 1, y: 1 }] } },
+    }
+    assert.equal(resolveAlertLookForTarget(looks, { platform: 'Twitch' })?.textBoxes?.[0]?.text, 'only twitch')
+    const inherited = setLookField(looks, { platform: 'Twitch' }, 'textBoxes', undefined)
+    assert.equal(resolveAlertLookForTarget(inherited, { platform: 'Twitch' })?.textBoxes?.[0]?.text, '{name}')
+    assert.equal(readLookLayer(inherited, {})?.textBoxes?.[0]?.text, '{name}')
   })
 
   it('offers a Font picker with Outfit, common faces, and the selected family', () => {

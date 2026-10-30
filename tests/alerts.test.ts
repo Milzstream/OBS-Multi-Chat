@@ -160,7 +160,7 @@ test('old alert settings still parse without a looks object', () => {
   assert.equal(withLooks.alerts.looks?.default?.image?.id, ASSET.id)
 })
 
-test('look cascade is platform+kind, then kind, then platform, then default, field by field', () => {
+test('look cascade is platform+kind, then platform, then kind, then default, field by field', () => {
   const settings = parseAlertSettings({
     enabled: true,
     looks: {
@@ -190,6 +190,15 @@ test('look cascade is platform+kind, then kind, then platform, then default, fie
   assert.equal(kickCheer?.image?.name, 'banner.png')
   assert.equal(kickCheer?.audio?.name, 'cheer.mp3')
   assert.equal(kickCheer?.textBoxes?.[0]?.text, '{name}')
+
+  const platformBeatsKind = parseAlertSettings({
+    looks: {
+      kinds: { follow: { image: { ...ASSET, name: 'follow-all.png' } } },
+      platforms: { Twitch: { image: { ...ASSET, name: 'twitch.png' } } },
+    },
+  })
+  assert.equal(resolveAlertLook(platformBeatsKind, { platform: 'Twitch', kind: 'follow' })?.image?.name, 'twitch.png')
+  assert.equal(resolveAlertLook(platformBeatsKind, { platform: 'Kick', kind: 'follow' })?.image?.name, 'follow-all.png')
 })
 
 test('a more specific look can clear an inherited graphic with null', () => {
