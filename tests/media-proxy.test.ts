@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo, Socket } from 'node:net'
 import { describe, it } from 'node:test'
 import type { FetchLike } from '../server/fetch-timed.js'
-import { fetchMedia } from '../server/media-proxy.js'
+import { fetchMedia, mediaTypeIsGeneric, sniffImageType } from '../server/media-proxy.js'
 
 const SAFE = 'https://files.kick.com/images/user/1/a.webp'
 
@@ -219,5 +219,53 @@ describe('media proxy', () => {
     const result = await fetchMediaWith(async () => new Response('missing', { status: 404 }))
     assert.equal(result.ok, false)
     if (!result.ok) assert.equal(result.status, 404)
+  })
+})
+
+describe('media proxy content sniffing', () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+  const bytes = (text: string, pad = 16) => Uint8Array.from([...text].map((char) => char.charCodeAt(0)).concat(Array(pad).fill(0)))
+
+  it('recognizes the image formats the docks show by their first bytes', () => {
+    assert.equal(sniffImageType(png), 'image/png')
+    assert.equal(sniffImageType(bytes('GIF89a')), 'image/gif')
+    assert.equal(sniffImageType(bytes('GIF87a')), 'image/gif')
+    assert.equal(sniffImageType(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0])), 'image/jpeg')
+    assert.equal(sniffImageType(Uint8Array.from([...bytes('RIFF', 0), 1, 2, 3, 4, ...bytes('WEBPVP8 ', 0)])), 'image/webp')
+    assert.equal(sniffImageType(Uint8Array.from([0, 0, 0, 0x1c, ...bytes('ftypavif', 4)])), 'image/avif')
+    assert.equal(sniffImageType(bytes('<!doctype html>')), undefined)
+    assert.equal(sniffImageType(bytes('RIFF....WAVEfmt ')), undefined)
+    assert.equal(sniffImageType(new Uint8Array()), undefined)
+  })
+
+  it('treats missing and octet-stream types as generic, and nothing else', () => {
+    assert.equal(mediaTypeIsGeneric(null), true)
+    assert.equal(mediaTypeIsGeneric('binary/octet-stream'), true)
+    assert.equal(mediaTypeIsGeneric('application/octet-stream; charset=binary'), true)
+    assert.equal(mediaTypeIsGeneric('text/html'), false)
+    assert.equal(mediaTypeIsGeneric('image/png'), false)
+  })
+
+  it('serves a Kick emote labelled binary/octet-stream when the bytes are a PNG', async () => {
+    const result = await fetchMedia('https://files.kick.com/emotes/37226/fullsize', { fetchImpl: async () => new Response(png, { status: 200, headers: { 'Content-Type': 'binary/octet-stream' } }) })
+    assert.equal(result.ok, true)
+    if (result.ok) {
+      assert.equal(result.contentType, 'image/png')
+      assert.deepEqual([...result.body], [...png])
+    }
+  })
+
+  it('serves an untyped GIF, and refuses generic or mislabelled bytes that are not an image', async () => {
+    const gif = bytes('GIF89a')
+    const untyped = await fetchMedia(SAFE, { fetchImpl: async () => new Response(gif, { status: 200, headers: {} }) })
+    assert.equal(untyped.ok, true)
+    if (untyped.ok) assert.equal(untyped.contentType, 'image/gif')
+
+    const html = await fetchMedia(SAFE, { fetchImpl: async () => new Response(bytes('<html><script>'), { status: 200, headers: { 'Content-Type': 'application/octet-stream' } }) })
+    assert.deepEqual(html, { ok: false, status: 502 })
+
+    // An explicit non-image type is still refused, even when the bytes would pass as an image.
+    const labelledHtml = await fetchMedia(SAFE, { fetchImpl: async () => new Response(png, { status: 200, headers: { 'Content-Type': 'text/html' } }) })
+    assert.deepEqual(labelledHtml, { ok: false, status: 502 })
   })
 })
