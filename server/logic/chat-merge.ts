@@ -282,29 +282,36 @@ export function mergeIncomingChat(
   const incomingIngest = options?.ingest
   const targets = ctx.targets || []
 
+  const incomingIsYouTube = message.platform === 'YouTube'
+  const echoOf = tracked && incomingPlatforms.some((platform) => tracked.platforms.includes(platform)) ? tracked : undefined
+
   let mergeAt = -1
   let mergeDelta = Infinity
+  // A row merges only as a YouTube pair or as the echo of a tracked send, so most Twitch and Kick lines skip the scan.
+  // Text folding is by far the slowest check at full history, so it runs after the checks that reject most rows.
   // A dock insert uses the id we just remembered. Folding it into an older own row is what swallowed the second "lol".
-  if (!incomingIsThisSend) for (let index = 0; index < messages.length; index++) {
+  if (!incomingIsThisSend && (incomingIsYouTube || echoOf)) for (let index = 0; index < messages.length; index++) {
     const item = messages[index]
-    if (!chatTextMatches(item, message)) continue
-    const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
-    const itemIsOwn = isOwnChatMessage(item, ctx)
     const itemPlatforms = item.platforms || [item.platform]
-    const sameYouTubeChat = youtubeSameChatFor(item.sourceId, message.sourceId, targets)
-    const youtubePair = message.platform === 'YouTube'
+    const youtubePair = incomingIsYouTube
       && (item.platform === 'YouTube' || itemPlatforms.includes('YouTube'))
       && youtubeSameAuthor(item, message)
-    const ownYouTube = youtubePair && (incomingIsOwn || itemIsOwn)
-    let match = youtubePair && sameYouTubeChat && delta <= 2_000
-    if (!match && ownYouTube && !sameYouTubeChat && delta <= 20_000) match = true
+    if (!youtubePair && !echoOf) continue
+    const delta = Math.abs((Date.parse(item.time) || 0) - incomingTime)
+    if (delta > 90_000 || delta >= mergeDelta) continue
     // Echoes merge only into the optimistic row for that send. Any other own row with the same text is a separate line.
     // After Twitch/YouTube replace the dock UUID, Kick still has to fold into that same unified row.
-    if (!match && tracked && delta <= 20_000 && incomingPlatforms.some((platform) => tracked.platforms.includes(platform)) && rowMatchesOutgoing(item, tracked, optimisticIds)) match = true
-    else if (!match && incomingIsOwn && itemIsOwn && delta <= 90_000 && youtubePair && !sameYouTubeChat) {
-      match = true
-    }
-    if (!match || delta >= mergeDelta) continue
+    const isEcho = Boolean(echoOf && delta <= 20_000 && rowMatchesOutgoing(item, echoOf, optimisticIds))
+    if (!youtubePair && !isEcho) continue
+    if (!chatTextMatches(item, message)) continue
+    const itemIsOwn = isOwnChatMessage(item, ctx)
+    const sameYouTubeChat = youtubeSameChatFor(item.sourceId, message.sourceId, targets)
+    const ownYouTube = youtubePair && (incomingIsOwn || itemIsOwn)
+    const match = (youtubePair && sameYouTubeChat && delta <= 2_000)
+      || (ownYouTube && !sameYouTubeChat && delta <= 20_000)
+      || isEcho
+      || (incomingIsOwn && itemIsOwn && delta <= 90_000 && youtubePair && !sameYouTubeChat)
+    if (!match) continue
     mergeAt = index
     mergeDelta = delta
   }

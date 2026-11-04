@@ -18,6 +18,7 @@ import {
   youtubeSameChatFor,
   youtubeTitleIsShorts,
 } from '../server/logic.js'
+import type { ChatMessage, Platform } from '../server/types.js'
 import { chat, own } from './helpers.js'
 
 describe('YouTube shorts labels', () => {
@@ -179,6 +180,67 @@ describe('YouTube message ingest', () => {
     assert.equal(echoed.messages.length, 2)
     assert.equal(echoed.messages[0].id, 'local-1')
     assert.equal(echoed.messages[1].id, 'helix-2')
+  })
+
+  it('merges YouTube duplicates up to the edge of each window and no further', () => {
+    const start = Date.parse('2026-09-02T12:00:00.000Z')
+    const at = (ms: number) => new Date(start + ms).toISOString()
+    const merges = (row: Partial<ChatMessage>, incoming: Partial<ChatMessage>, ms: number) => {
+      const first = chat({ id: 'row', user: 'Ada', text: 'hello', ...row })
+      const next = chat({ id: 'next', user: 'Ada', text: 'hello', time: at(ms), ...incoming })
+      return mergeIncomingChat([first], next, undefined, { ownHandles: own('Host'), recentOutgoing: [] }).messages.length === 1
+    }
+    // Same chat, any author.
+    assert.equal(merges({}, {}, 2_000), true)
+    assert.equal(merges({}, {}, 2_001), false)
+    assert.equal(merges({}, {}, -2_000), true)
+    assert.equal(merges({}, { text: 'something else' }, 1_000), false)
+    // Different chats, only one side known to be own (same channel id, renamed).
+    const liveHost = { user: 'Host', userId: 'UC1', sourceId: 'CHAT_LIVE' }
+    const shortsRenamed = { user: 'Renamed', userId: 'UC1', sourceId: 'CHAT_SHORTS' }
+    assert.equal(merges(liveHost, shortsRenamed, 20_000), true)
+    assert.equal(merges(liveHost, shortsRenamed, 20_001), false)
+    // Different chats, both sides own.
+    const shortsHost = { user: 'Host', userId: 'UC1', sourceId: 'CHAT_SHORTS' }
+    assert.equal(merges(liveHost, shortsHost, 90_000), true)
+    assert.equal(merges(liveHost, shortsHost, 90_001), false)
+    // Different chats, not own.
+    assert.equal(merges({ sourceId: 'CHAT_LIVE' }, { sourceId: 'CHAT_SHORTS' }, 1_000), false)
+  })
+
+  it('merges into the closest row in time, and the earlier row on a tie', () => {
+    const row = (id: string, time: string) => chat({ id, user: 'Ada', text: 'hello', time })
+    const ctx = { ownHandles: own('Host'), recentOutgoing: [] }
+    const incoming = row('next', '2026-09-02T12:00:10.000Z')
+    const newestIsFarther = mergeIncomingChat([row('near', '2026-09-02T12:00:09.000Z'), row('far', '2026-09-02T12:00:12.000Z')], incoming, undefined, ctx)
+    assert.deepEqual(newestIsFarther.seenIds, ['near', 'next'])
+    const tie = mergeIncomingChat([row('before', '2026-09-02T12:00:09.000Z'), row('after', '2026-09-02T12:00:11.000Z')], incoming, undefined, ctx)
+    assert.deepEqual(tie.seenIds, ['before', 'next'])
+  })
+
+  it('keeps identical Twitch and Kick lines apart unless they echo a tracked send', () => {
+    const row = chat({ id: 'row', platform: 'Twitch', user: 'Host', text: 'lol' })
+    for (const platform of ['Twitch', 'Kick'] as const) {
+      const next = chat({ id: 'next', platform, user: 'Host', text: 'lol', time: '2026-09-02T12:00:01.000Z' })
+      const result = mergeIncomingChat([row], next, undefined, { ownHandles: own('Host'), recentOutgoing: [] })
+      assert.equal(result.messages.length, 2)
+    }
+  })
+
+  it('folds a tracked echo into its send up to 20 seconds, and only when the text matches', () => {
+    const start = Date.parse('2026-09-02T12:00:00.000Z')
+    const send = chat({ id: 'local', platform: 'Twitch', platforms: ['Twitch', 'Kick'], user: 'Host', text: 'lol', time: new Date(start).toISOString() })
+    const recentOutgoing = [{ id: 'local', text: 'lol', platforms: ['Twitch', 'Kick'] as Platform[], at: start }]
+    const echo = (text: string, ms: number) => mergeIncomingChat([send], chat({ id: 'kick-1', platform: 'Kick', user: 'Host', text, time: new Date(start + ms).toISOString() }), undefined, { ownHandles: own('Host'), recentOutgoing }).messages.length
+    assert.equal(echo('lol', 19_999), 1)
+    assert.equal(echo('lol', 20_001), 2)
+    assert.equal(echo('nope', 1_000), 2)
+    // The newest row in the window with other text is not this send, even though the echo matches a tracked send.
+    const other = chat({ id: 'other', platform: 'Twitch', platforms: ['Twitch', 'Kick'], user: 'Ada', text: 'different', time: new Date(start + 500).toISOString() })
+    const folded = mergeIncomingChat([send, other], chat({ id: 'kick-1', platform: 'Kick', user: 'Host', text: 'lol', time: new Date(start + 600).toISOString() }), undefined, { ownHandles: own('Host'), recentOutgoing })
+    assert.equal(folded.messages.length, 2)
+    assert.equal(folded.messages[1].text, 'different')
+    assert.ok(folded.messages[0].copies?.some((copy) => copy.id === 'kick-1') || folded.messages[0].id === 'kick-1')
   })
 
   it('merges a Kick echo into the unified send after Twitch already replaced the dock id', () => {
