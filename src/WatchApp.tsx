@@ -115,10 +115,10 @@ export default function WatchApp() {
 
   const visibleMessages = visibleChatMessages(messages, chatFilter)
   const visibleActivity = useMemo(() => visibleActivityEvents(events, activityFilter, ACTIVITY_KIND_GROUP_IDS), [events, activityFilter])
-  const { paused: chatPaused, onScroll: onChatPin, resume: resumeChat } = useAutoScroll(chatRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
-  const chatWindow = useVirtualWindow(chatRef, visibleMessages.length, CHAT_ROW_ESTIMATE_COMPACT, 'bottom', !chatPaused, onChatPin)
-  const { paused: activityPaused, onScroll: onActivityPin, resume: resumeActivity } = useAutoScroll(activityRef, 'top', visibleActivity[0]?.id)
-  const activityWindow = useVirtualWindow(activityRef, visibleActivity.length, ACTIVITY_ROW_ESTIMATE, 'top', !activityPaused, onActivityPin)
+  const { paused: chatPaused, onScroll: onChatPin, resume: resumeChat } = useAutoScroll(chatRef, 'bottom')
+  const chatWindow = useVirtualWindow(chatRef, visibleMessages.map((message) => message.id), CHAT_ROW_ESTIMATE_COMPACT, 'bottom', !chatPaused, onChatPin)
+  const { paused: activityPaused, onScroll: onActivityPin, resume: resumeActivity } = useAutoScroll(activityRef, 'top')
+  const activityWindow = useVirtualWindow(activityRef, visibleActivity.map((event) => event.id), ACTIVITY_ROW_ESTIMATE, 'top', !activityPaused, onActivityPin)
   const viewers = connections.filter((item) => item.connected && item.live).reduce((total, item) => total + item.viewers, 0)
   const live = connections.some((item) => item.connected && item.live)
   const notices = [

@@ -67,8 +67,8 @@ function App() {
   const chatListRef = useRef<HTMLDivElement>(null)
   // Auto-scroll: keeps the feed pinned to the bottom while the user is not
   // scrolling up, snapping again whenever a new tail message arrives
-  const { paused: chatPaused, onScroll: onChatPinScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
-  const { start: chatStart, end: chatEnd, padTop: chatPadTop, padBottom: chatPadBottom, onScroll: onChatScroll } = useVirtualWindow(chatListRef, visibleMessages.length, compactMode ? CHAT_ROW_ESTIMATE_COMPACT : CHAT_ROW_ESTIMATE, 'bottom', !chatPaused, onChatPinScroll)
+  const { paused: chatPaused, onScroll: onChatPinScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom')
+  const { start: chatStart, end: chatEnd, padTop: chatPadTop, padBottom: chatPadBottom, onScroll: onChatScroll } = useVirtualWindow(chatListRef, visibleMessages.map((message) => message.id), compactMode ? CHAT_ROW_ESTIMATE_COMPACT : CHAT_ROW_ESTIMATE, 'bottom', !chatPaused, onChatPinScroll)
   useEffect(() => {
     writeLocalPref(CHAT_FILTER_KEY, activeFilter)
   }, [activeFilter])

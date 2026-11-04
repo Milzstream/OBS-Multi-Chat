@@ -144,6 +144,7 @@ img.emote.emote-big { display: block; width: 112px; height: 112px; margin: 4px 0
 .activity-kind-popover .settings-toggle { margin-top: 0; }
 .activity-kind-popover .settings-toggle:first-child { border-top: 0; padding-top: 6px; }
 .virtual-spacer { flex-shrink: 0; pointer-events: none; }
+.chat-list, .activity-list { overflow-anchor: none; }
 .chat-list .message, .activity-list .activity-row { animation: none; }
 .activity-test-menu { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); background: #1a2023; }
 .activity-test-menu p { margin: 0 0 6px; color: #879392; font-size: 10px; line-height: 1.4; }
