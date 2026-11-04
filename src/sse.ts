@@ -20,6 +20,43 @@ export function sseSeqIsGap(lastSeq: number | null, incoming: number, type: stri
   return incoming !== lastSeq + 1
 }
 
+/** `/api/state` at seq N already holds frames up to N, so one still in the pipe is not a gap. */
+export function sseFrameIsCovered(lastSeq: number | null, incoming: number, type: string) {
+  if (type === 'snapshot' || type === 'ping') return false
+  return lastSeq != null && incoming <= lastSeq
+}
+
+/**
+ * Turn the dock's rows plus one `chat` frame into the next rows. The server's
+ * list can move ahead of its last frame, so `/api/state` may already hold what
+ * a delta carries: an added or updated row that is present replaces in place.
+ * `inSync` is false when the result cannot match the server's and needs a resync.
+ */
+export function applyChatFrame<T extends { id: string }>(previous: T[], frame: Record<string, unknown>): { messages: T[]; inSync: boolean } {
+  if (Array.isArray(frame.messages)) return { messages: frame.messages as T[], inSync: true }
+  if (!Array.isArray(frame.added) || !Array.isArray(frame.updated) || !Array.isArray(frame.removed)) return { messages: previous, inSync: false }
+  const added = frame.added as T[]
+  const updated = frame.updated as { id: string; row: T }[]
+  const removed = new Set(frame.removed as string[])
+  const replacements = new Map<string, T>()
+  for (const row of added) replacements.set(row.id, row)
+  for (const { id, row } of updated) {
+    replacements.set(id, row)
+    replacements.set(row.id, row)
+  }
+  const placed = new Set<T>()
+  const messages: T[] = []
+  for (const row of previous) {
+    if (removed.has(row.id)) continue
+    const replacement = replacements.get(row.id)
+    if (replacement) placed.add(replacement)
+    messages.push(replacement || row)
+  }
+  for (const row of added) if (!placed.has(row)) messages.push(row)
+  const inSync = messages.length === frame.total && updated.every(({ row }) => placed.has(row))
+  return { messages, inSync }
+}
+
 function mixStamp(hash: number, value: string) {
   let next = hash
   for (let i = 0; i < value.length; i++) next = (Math.imul(next, 33) + value.charCodeAt(i)) >>> 0
@@ -27,8 +64,9 @@ function mixStamp(hash: number, value: string) {
 }
 
 /**
- * Cheap fingerprint of a chat slice so the dock can skip `setMessages` on a
- * true no-op. Must include every in-place field the row renders: Twitch and
+ * Cheap fingerprint of a chat list so the dock can skip `setMessages` when a
+ * snapshot changes nothing. Chat frames only arrive on a real change and do not
+ * need it. Must include every in-place field the row renders: Twitch and
  * Kick backfill `avatar` onto the same id about 400ms later, and hashing only
  * id/deleted/text left letter fallbacks until an OBS refresh (#152).
  */
@@ -159,9 +197,13 @@ function withWatchToken(url: string, token: string) {
   return `${url}${join}token=${encodeURIComponent(token)}`
 }
 
+/** Frames kept while `/api/state` is in flight. Losing older ones just means one more resync. */
+const SSE_HELD_FRAMES_MAX = 1_000
+
 export function subscribeDockSse(handlers: {
   onSnapshot: (data: Record<string, unknown>) => void
-  onChat?: (data: Record<string, unknown>) => void
+  /** Receives `messages`, the whole list. Chat deltas are applied here so a drift can resync. */
+  onChat?: (data: { seq: number; messages: { id: string }[] }) => void
   onActivity?: (data: Record<string, unknown>) => void
   onPresence?: (data: Record<string, unknown>) => void
   onSettings?: (data: Record<string, unknown>) => void
@@ -179,6 +221,34 @@ export function subscribeDockSse(handlers: {
   let connecting = false
   let frameGen = 0
   let resyncGen = 0
+  let chatRows: { id: string }[] = []
+  // A gap freezes `lastSeq`, so frames that follow are held instead of each one
+  // restarting the fetch. In a raid a fresh `/api/state` would never finish.
+  let catchingUp = false
+  let catchUpStartedAt = 0
+  let heldFrames: { type: SseFrameType; data: Record<string, unknown> }[] = []
+
+  const applySnapshot = (data: Record<string, unknown>) => {
+    if (handlers.onChat && Array.isArray(data.messages)) chatRows = data.messages as { id: string }[]
+    handlers.onSnapshot(data)
+  }
+
+  const catchUp = (type: SseFrameType, data: Record<string, unknown>) => {
+    heldFrames.push({ type, data })
+    if (heldFrames.length > SSE_HELD_FRAMES_MAX) heldFrames.shift()
+    // Frames keep the stall watchdog quiet, so a hung fetch has to be retried from here.
+    if (catchingUp && Date.now() - catchUpStartedAt < SSE_STALL_MS) return
+    catchingUp = true
+    catchUpStartedAt = Date.now()
+    void resync()
+  }
+
+  const releaseHeldFrames = () => {
+    catchingUp = false
+    const frames = heldFrames
+    heldFrames = []
+    for (const frame of frames) routeFrame(frame.type, frame.data)
+  }
 
   const applyFrame = (type: SseFrameType, data: Record<string, unknown>) => {
     lastEventAt = Date.now()
@@ -188,17 +258,34 @@ export function subscribeDockSse(handlers: {
       failures = 0
       return
     }
+    routeFrame(type, data)
+  }
+
+  const routeFrame = (type: SseFrameType, data: Record<string, unknown>) => {
     const seq = Number(data.seq)
     if (!Number.isFinite(seq)) return
-    if (sseSeqIsGap(lastSeq, seq, type)) {
-      void resync()
+    if (sseFrameIsCovered(lastSeq, seq, type)) return
+    if (type !== 'snapshot' && (catchingUp || sseSeqIsGap(lastSeq, seq, type))) {
+      catchUp(type, data)
       return
+    }
+    let messages: { id: string }[] | undefined
+    if (type === 'chat' && handlers.onChat) {
+      const applied = applyChatFrame(chatRows, data)
+      if (!applied.inSync) {
+        catchUp(type, data)
+        return
+      }
+      messages = applied.messages
+      chatRows = messages
     }
     lastSeq = seq
     failures = 0
     handlers.onStatus(true)
-    if (type === 'snapshot') handlers.onSnapshot(data)
-    else if (type === 'chat') handlers.onChat?.(data)
+    if (type === 'snapshot') {
+      applySnapshot(data)
+      if (catchingUp) releaseHeldFrames()
+    } else if (messages) handlers.onChat?.({ seq, messages })
     else if (type === 'activity') handlers.onActivity?.(data)
     else if (type === 'presence') handlers.onPresence?.(data)
     else if (type === 'settings') handlers.onSettings?.(data)
@@ -214,15 +301,23 @@ export function subscribeDockSse(handlers: {
       if (gen !== resyncGen) return
       const incomingSeq = Number(remote.seq)
       // A slower /api/state must not replace chat or activity that a newer SSE frame already showed.
-      if (sseStateIsStale(lastSeq, incomingSeq)) return
+      if (sseStateIsStale(lastSeq, incomingSeq)) {
+        if (catchingUp) releaseHeldFrames()
+        return
+      }
       lastSeq = sseSeqFromState(lastSeq, incomingSeq)
       lastEventAt = Date.now()
       frameGen += 1
-      handlers.onSnapshot(remote)
+      applySnapshot(remote)
       handlers.onStatus(true)
       failures = 0
+      if (catchingUp) releaseHeldFrames()
     } catch {
-      if (gen === resyncGen) handlers.onStatus(false)
+      if (gen !== resyncGen) return
+      handlers.onStatus(false)
+      // The next frame is still a gap and starts another attempt.
+      catchingUp = false
+      heldFrames = []
     }
   }
 
@@ -230,9 +325,9 @@ export function subscribeDockSse(handlers: {
     if (closed || connecting) return
     connecting = true
     source?.close()
-    const next = new EventSource(withWatchToken('/events', token))
+    const next = new EventSource(withWatchToken('/events?chat=delta', token))
     source = next
-    // Event taxonomy: snapshot = full state; chat/activity = incremental feeds;
+    // Event taxonomy: snapshot = full state, on connect and every 60s; chat/activity = incremental feeds;
     // presence/settings = mirrors of backend settings; ping = keepalive
     const types: SseFrameType[] = ['snapshot', 'chat', 'activity', 'presence', 'settings', 'ping']
     for (const type of types) {

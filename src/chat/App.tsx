@@ -88,8 +88,9 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    // Subscribe to Relay's SSE stream. chatSliceStamp skips true no-ops and
-    // still applies avatar/badge/emote backfills on the same message id.
+    // Subscribe to Relay's SSE stream. chatSliceStamp skips snapshots that change
+    // nothing and still applies avatar/badge/emote backfills on the same message
+    // id. A chat frame only arrives on a real change, so it applies directly.
     const applySnapshot = (remote: BackendState) => {
       const fields = chatDockFields(remote as unknown as Record<string, unknown>)
       if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)
@@ -135,10 +136,7 @@ function App() {
     const asState = (data: Record<string, unknown>) => data as unknown as BackendState
     return subscribeDockSse({
       onSnapshot: (data) => applySnapshot(asState(data)),
-      onChat: (data) => {
-        const messages = data.messages as ChatMessage[] | undefined
-        if (Array.isArray(messages)) setMessages((prev) => chatSliceStamp(prev) === chatSliceStamp(messages) ? prev : messages)
-      },
+      onChat: (data) => setMessages(data.messages as ChatMessage[]),
       onPresence: (data) => applySnapshot(asState(data)),
       onSettings: (data) => applySnapshot(asState(data)),
       onStatus: setBackendOnline,

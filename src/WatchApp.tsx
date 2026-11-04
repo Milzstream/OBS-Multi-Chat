@@ -102,10 +102,7 @@ export default function WatchApp() {
     return subscribeDockSse({
       token,
       onSnapshot: apply,
-      onChat: (data) => {
-        const next = data.messages
-        if (Array.isArray(next)) setMessages(next as ChatMessage[])
-      },
+      onChat: (data) => setMessages(data.messages as ChatMessage[]),
       onActivity: apply,
       onPresence: apply,
       onSettings: apply,
