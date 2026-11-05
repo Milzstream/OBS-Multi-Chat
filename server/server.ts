@@ -54,6 +54,7 @@ import {
   resolveTranslateConfig,
   sseChangedKeys,
   sseNamedEvent,
+  chatSseFields,
   shouldKeepTokenRefreshBanner,
   shouldWarnKickChatDown,
   translateFailureMessage,
@@ -197,6 +198,8 @@ httpServer.requestTimeout = 0
 httpServer.headersTimeout = 0
 httpServer.timeout = 0
 const clients = new Set<express.Response>()
+/** Pages loaded before chat deltas existed. An OBS dock keeps its old bundle across an app update and would freeze on deltas. */
+const fullChatClients = new WeakSet<express.Response>()
 const dataDir = resolveDataDir({ packaged: isPackaged, execPath: process.execPath, cwd: process.cwd(), env: process.env })
 const tokenFile = path.join(dataDir, 'tokens.json')
 const settingsFile = path.join(dataDir, 'settings.json')
@@ -324,7 +327,8 @@ function applyChatModerationToState(change: ChatModeration) {
 
 const recentOutgoing: { id: string; text: string; platforms: Platform[]; at: number }[] = []
 let sseSeq = 0
-let lastSseSlices = { chat: '', activity: '', presence: '', settings: '' }
+let lastSseSlices = { activity: '', presence: '', settings: '' }
+let lastChatRows = state.messages
 let lastActivityEvents: ActivityEvent[] = []
 
 function currentWatchUrl() {
@@ -687,29 +691,42 @@ function pushSse(chunk: string) {
   for (const client of [...clients]) writeSse(client, chunk)
 }
 
+function pushChat(seq: number, fields: NonNullable<ReturnType<typeof chatSseFields<ChatMessage>>>) {
+  const chunk = sseNamedEvent('chat', { seq, ...fields })
+  let wholeList: string | undefined
+  for (const client of [...clients]) {
+    if (!fullChatClients.has(client)) writeSse(client, chunk)
+    else writeSse(client, wholeList ??= sseNamedEvent('chat', { seq, messages: state.messages }))
+  }
+}
+
 // Slice the sub-slices so each dock only receives and re-broadcasts what it renders
 function broadcast() {
   state.activity = activityStore.list()
   const activityFields = activitySseFields(lastActivityEvents, state.activity, state.activityWarnings)
   lastActivityEvents = snapshotActivityEvents(state.activity)
+  const chatFields = chatSseFields(lastChatRows, state.messages)
+  lastChatRows = state.messages
   const next = {
-    chat: JSON.stringify(state.messages),
     activity: JSON.stringify({ activity: state.activity, activityWarnings: state.activityWarnings }),
     presence: JSON.stringify(ssePresence()),
     settings: JSON.stringify(sseSettings()),
   }
   const changed = sseChangedKeys(lastSseSlices, next)
-  if (!changed.length) return
+  if (!chatFields && !changed.length) return
   lastSseSlices = next
-  if (changed.length >= 4) {
+  if (chatFields && changed.length >= 3) {
     sseSeq += 1
     pushSse(sseNamedEvent('snapshot', { seq: sseSeq, ...state }))
     return
   }
+  if (chatFields) {
+    sseSeq += 1
+    pushChat(sseSeq, chatFields)
+  }
   for (const key of changed) {
     sseSeq += 1
-    if (key === 'chat') pushSse(sseNamedEvent('chat', { seq: sseSeq, messages: state.messages }))
-    else if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, ...activityFields }))
+    if (key === 'activity') pushSse(sseNamedEvent('activity', { seq: sseSeq, ...activityFields }))
     else if (key === 'presence') pushSse(sseNamedEvent('presence', { seq: sseSeq, ...ssePresence() }))
     else pushSse(sseNamedEvent('settings', { seq: sseSeq, ...sseSettings() }))
   }
@@ -1039,6 +1056,7 @@ registerHttpRoutes(app, {
   applyManualYouTubeQuota: (line) => youtube.applyManualYouTubeQuota(line),
   writeSse,
   clients,
+  fullChatClients,
   sendMessage,
   rememberOutgoing,
   addMessage,

@@ -82,6 +82,7 @@ export type HttpRouteDeps = {
   applyManualYouTubeQuota: (line: string) => void
   writeSse: (client: Response, chunk: string) => void
   clients: Set<Response>
+  fullChatClients: WeakSet<Response>
   sendMessage: (platform: Platform, text: string) => Promise<any>
   rememberOutgoing: (entry: { id: string; text: string; platforms: Platform[]; at: number }) => void
   addMessage: (message: ChatMessage, options?: { preload?: boolean; ingest?: 'official' | 'innertube'; source?: string }) => void
@@ -251,6 +252,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     response.writeHead(200, headers)
     state.activity = activityStore.list()
     writeSse(response, sseNamedEvent('snapshot', { seq: d.sseSeq, ...state }))
+    if (request.query.chat !== 'delta') d.fullChatClients.add(response)
     clients.add(response)
     request.on('close', () => {
       clients.delete(response)

@@ -67,8 +67,8 @@ function App() {
   const chatListRef = useRef<HTMLDivElement>(null)
   // Auto-scroll: keeps the feed pinned to the bottom while the user is not
   // scrolling up, snapping again whenever a new tail message arrives
-  const { paused: chatPaused, onScroll: onChatPinScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom', visibleMessages[visibleMessages.length - 1]?.id)
-  const { start: chatStart, end: chatEnd, padTop: chatPadTop, padBottom: chatPadBottom, onScroll: onChatScroll } = useVirtualWindow(chatListRef, visibleMessages.length, compactMode ? CHAT_ROW_ESTIMATE_COMPACT : CHAT_ROW_ESTIMATE, 'bottom', !chatPaused, onChatPinScroll)
+  const { paused: chatPaused, onScroll: onChatPinScroll, resume: resumeChatScroll } = useAutoScroll(chatListRef, 'bottom')
+  const { start: chatStart, end: chatEnd, padTop: chatPadTop, padBottom: chatPadBottom, onScroll: onChatScroll } = useVirtualWindow(chatListRef, visibleMessages.map((message) => message.id), compactMode ? CHAT_ROW_ESTIMATE_COMPACT : CHAT_ROW_ESTIMATE, 'bottom', !chatPaused, onChatPinScroll)
   useEffect(() => {
     writeLocalPref(CHAT_FILTER_KEY, activeFilter)
   }, [activeFilter])
@@ -88,8 +88,9 @@ function App() {
   }, [connections])
 
   useEffect(() => {
-    // Subscribe to Relay's SSE stream. chatSliceStamp skips true no-ops and
-    // still applies avatar/badge/emote backfills on the same message id.
+    // Subscribe to Relay's SSE stream. chatSliceStamp skips snapshots that change
+    // nothing and still applies avatar/badge/emote backfills on the same message
+    // id. A chat frame only arrives on a real change, so it applies directly.
     const applySnapshot = (remote: BackendState) => {
       const fields = chatDockFields(remote as unknown as Record<string, unknown>)
       if (fields.accounts) setConnections((prev) => JSON.stringify(prev) !== JSON.stringify(fields.accounts) ? fields.accounts as Connection[] : prev)
@@ -135,10 +136,7 @@ function App() {
     const asState = (data: Record<string, unknown>) => data as unknown as BackendState
     return subscribeDockSse({
       onSnapshot: (data) => applySnapshot(asState(data)),
-      onChat: (data) => {
-        const messages = data.messages as ChatMessage[] | undefined
-        if (Array.isArray(messages)) setMessages((prev) => chatSliceStamp(prev) === chatSliceStamp(messages) ? prev : messages)
-      },
+      onChat: (data) => setMessages(data.messages as ChatMessage[]),
       onPresence: (data) => applySnapshot(asState(data)),
       onSettings: (data) => applySnapshot(asState(data)),
       onStatus: setBackendOnline,

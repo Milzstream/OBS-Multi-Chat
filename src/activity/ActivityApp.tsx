@@ -183,8 +183,8 @@ export default function ActivityApp() {
   }, [])
 
   const visible = useMemo(() => activityListRows(visibleActivityEvents(events, filter, kindFilter), groupGifts), [events, filter, kindFilter, groupGifts])
-  const { paused, onScroll: onPinScroll, resume } = useAutoScroll(listRef, 'top', visible[0]?.event.id)
-  const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.length, ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
+  const { paused, onScroll: onPinScroll, resume } = useAutoScroll(listRef, 'top')
+  const { start, end, padTop, padBottom, onScroll } = useVirtualWindow(listRef, visible.map((row) => row.event.id), ACTIVITY_ROW_ESTIMATE, 'top', !paused, onPinScroll)
   const kindsRestricted = kindFilter.length !== ACTIVITY_KIND_GROUP_IDS.length
   const warningMessages = [...new Set(activityWarnings)]
   const warningState = { warnings: warningMessages, missingJwts, seConnected, seConnecting, seReady, ignoreMissingJwt }

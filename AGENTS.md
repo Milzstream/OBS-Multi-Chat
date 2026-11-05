@@ -25,6 +25,7 @@ Canonical types live in `server/types.ts`. The Vite app imports that file too. A
 ## Invariants
 
 - Unified send: POST `/api/messages` creates one row with a local UUID and `platforms[]`. Platform echoes fold into that row via `mergeIncomingChat`; they do not append a second line.
+- Chat rows in `state.messages` are replaced, never mutated in place. `chatSseFields` finds changes by reference, so an in-place edit would never reach the docks.
 - Kick incoming: realtime WebSocket (Pusher is retired). Send still uses Kick public `/chat`.
 - Packaged data/logs: `%LOCALAPPDATA%\Relay Chat Dock` via `operatorFilesDir`. Alert media is `data/alerts/<uuid>` (GET `/alerts/assets/:id`). Saving looks prunes unreferenced files.
 - Client secrets stay in `production.env`. Never `VITE_*`.

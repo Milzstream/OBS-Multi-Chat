@@ -25,4 +25,6 @@ Chat, activity, and watch subscribe through `sse.ts`. Local filter/compact prefs
 
 Dock-only helpers (avatar proxy URLs, category combobox, mod menu labels) stay in `chat-helpers.ts`.
 
-`sse.ts` `chatSliceStamp` is the cheap skip for chat frames. It must hash avatar, color, badges, parts, and other in-place fields the row renders. Leave avatar out of the stamp and letter fallbacks stick until an OBS refresh (#152).
+`sse.ts` `applyChatFrame` turns each incremental `chat` frame into the full list that `onChat` receives. A frame that does not fit the dock's rows resyncs through `/api/state`.
+
+`sse.ts` `chatSliceStamp` is the cheap skip for snapshots. It must hash avatar, color, badges, parts, and other in-place fields the row renders. Leave avatar out of the stamp and a snapshot's letter fallbacks stick until an OBS refresh (#152).
