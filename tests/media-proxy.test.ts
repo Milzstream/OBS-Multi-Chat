@@ -2,7 +2,9 @@ import assert from 'node:assert/strict'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import { describe, it } from 'node:test'
+import express from 'express'
 import type { FetchLike } from '../server/fetch-timed.js'
+import { registerHttpRoutes, type HttpRouteDeps } from '../server/http-routes.js'
 import { fetchMedia, mediaTypeIsGeneric, sniffImageType } from '../server/media-proxy.js'
 
 const SAFE = 'https://files.kick.com/images/user/1/a.webp'
@@ -267,5 +269,28 @@ describe('media proxy content sniffing', () => {
     // An explicit non-image type is still refused, even when the bytes would pass as an image.
     const labelledHtml = await fetchMedia(SAFE, { fetchImpl: async () => new Response(png, { status: 200, headers: { 'Content-Type': 'text/html' } }) })
     assert.deepEqual(labelledHtml, { ok: false, status: 502 })
+  })
+})
+
+describe('media route', () => {
+  it('serves an allowlisted image with nosniff', async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(png, { status: 200, headers: { 'Content-Type': 'image/png' } })) as typeof fetch
+    const app = express()
+    registerHttpRoutes(app, { dataDir: 'data' } as HttpRouteDeps)
+    const server = createServer(app)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    try {
+      const response = await realFetch(`http://127.0.0.1:${port}/api/media?u=${encodeURIComponent('https://files.kick.com/emotes/37226/fullsize')}`)
+      assert.equal(response.status, 200)
+      assert.equal(response.headers.get('content-type'), 'image/png')
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+      assert.equal(response.headers.get('cache-control'), 'public, max-age=86400')
+    } finally {
+      globalThis.fetch = realFetch
+      if (server.listening) await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    }
   })
 })

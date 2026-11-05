@@ -239,6 +239,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       const result = await fetchMedia(String(request.query.u || ''))
       if (!result.ok) return response.status(result.status).end()
       response.setHeader('Content-Type', result.contentType)
+      response.setHeader('X-Content-Type-Options', 'nosniff')
       response.setHeader('Cache-Control', 'public, max-age=86400')
       response.end(result.body)
     } catch {
