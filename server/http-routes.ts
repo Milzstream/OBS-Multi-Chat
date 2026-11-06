@@ -283,7 +283,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       try {
         const result = await moderate(body.platform, { action: body.action, messageId: body.messageId, userId: body.userId, sourceId: body.sourceId, duration: body.duration, reason: body.reason })
       if (result.ok && (body.action === 'delete' || body.action === 'timeout' || body.action === 'ban' || body.action === 'unban')) {
-        const target = state.messages.find((item) => item.id === body.messageId)
+        const target = state.messages.find((item) => item.id === body.messageId || item.copies?.some((copy) => copy.id === body.messageId))
         const applied = applyChatModerationToState({
           action: body.action,
           platform: body.platform,

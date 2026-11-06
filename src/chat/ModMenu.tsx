@@ -12,7 +12,9 @@ export function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onM
     if (prompting && !confirmOnly) inputRef.current?.focus()
   }, [prompting, confirmOnly, prompt?.action, prompt?.duration])
   const width = prompting ? 228 : 168
-  const height = confirmOnly ? 112 : prompting ? 168 : menu.message.deleted ? 90 : 190
+  const messageDeleted = menu.message.removed === 'message'
+  const userHidden = Boolean(menu.message.deleted && !messageDeleted)
+  const height = confirmOnly ? 112 : prompting ? 168 : userHidden ? 90 : 190
   const platformLabel = moderationPlatformLabel(menu.message)
   return (
     <div className={prompting ? 'mod-menu mod-menu-prompt' : 'mod-menu'} style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - width)), top: Math.max(6, Math.min(menu.y, window.innerHeight - height)) }} onClick={(event) => event.stopPropagation()}>
@@ -34,8 +36,8 @@ export function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onM
             <button type="button" onClick={onClose}>Cancel</button>
           </div>
         </form>
-      ) : menu.message.deleted ? <button type="button" onClick={() => onModerate('unban')}>Unban / untimeout</button> : <>
-        <button type="button" onClick={() => onModerate('delete')}>Delete message</button>
+      ) : userHidden ? <button type="button" onClick={() => onModerate('unban')}>Unban / untimeout</button> : <>
+        {messageDeleted ? null : <button type="button" onClick={() => onModerate('delete')}>Delete message</button>}
         <button type="button" onClick={() => onModerate('timeout', 60)}>Timeout 1m</button>
         <button type="button" onClick={() => onModerate('timeout', 600)}>Timeout 10m</button>
         <button type="button" onClick={() => onModerate('timeout', 3600)}>Timeout 1h</button>
