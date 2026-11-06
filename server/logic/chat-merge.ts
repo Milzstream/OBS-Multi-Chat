@@ -345,6 +345,7 @@ export function mergeIncomingChat(
       messages: messages.map((item, index) => index === mergeAt ? {
         ...item,
         ...(takeIncomingId ? { id: message.id } : {}),
+        ...(echoReplacesOptimisticId ? { localId: current.localId || current.id } : {}),
         text,
         platform: platforms[0],
         platforms,
@@ -396,27 +397,53 @@ function sendResultCopies(row: ChatMessage, sent: OutgoingSendResult[]): ChatMes
 
 /**
  * Apply a dock send after the platform calls return.
- * Failure deletes only `localId` — never an older own row that happens to have the same text.
- * Success writes the platform message ids so Delete does not call Helix/Kick/YouTube with the local UUID.
- * If the echo already replaced `localId`, this is a no-op; that merge stored the platform id.
+ * Failure deletes the optimistic row, including after an echo stored its id on `localId`.
+ * Success writes platform message ids and drops failed platforms without discarding echo ids.
+ * The optimistic id stays on `localId` so a translation queued before the platform ids arrive can still find the row.
  */
 export function applyOutgoingSendResult(messages: ChatMessage[], localId: string, results: OutgoingSendResult[]) {
-  const index = messages.findIndex((item) => item.id === localId)
+  const index = messages.findIndex((item) => item.id === localId || item.localId === localId || Boolean(item.copies?.some((copy) => copy.id === localId)))
   if (index < 0) return { messages, changed: false }
   const sent = results.filter((result) => result.ok)
-  if (!sent.length) return { messages: messages.filter((item) => item.id !== localId), changed: true }
+  if (!sent.length) return { messages: messages.filter((_, itemIndex) => itemIndex !== index), changed: true }
   const row = messages[index]
   const sentPlatforms = [...new Set(sent.map((result) => result.platform))]
-  const idCopies = sendResultCopies(row, sent)
-  const next: ChatMessage = { ...row, platform: sentPlatforms[0] || row.platform, platforms: sentPlatforms.length ? sentPlatforms : row.platforms }
+  const fromResults = sendResultCopies(row, sent)
+  const replaced = new Set(fromResults.map((copy) => chatCopyKey(copy)))
+  const echoed = (row.copies?.length
+    ? row.copies
+    : row.id && row.id !== localId
+      ? [{ platform: row.platform, id: row.id, sourceId: row.sourceId, userId: row.userId }]
+      : []
+  ).filter((copy) => sentPlatforms.includes(copy.platform) && !replaced.has(chatCopyKey(copy)) && copy.id !== localId)
+  const idCopies = [...fromResults, ...echoed]
+  const next: ChatMessage = { ...row, localId: row.localId || localId, platform: sentPlatforms[0] || row.platform, platforms: sentPlatforms.length ? sentPlatforms : row.platforms }
   if (idCopies.length === 1) {
     next.id = idCopies[0].id
     next.sourceId = idCopies[0].sourceId || row.sourceId
     next.copies = undefined
   } else if (idCopies.length > 1) {
     next.copies = idCopies
+    if (!idCopies.some((copy) => copy.id === next.id)) {
+      next.id = idCopies[0].id
+      next.sourceId = idCopies[0].sourceId || row.sourceId
+    }
+  } else {
+    next.copies = undefined
   }
   return { messages: messages.map((item, itemIndex) => itemIndex === index ? next : item), changed: true }
+}
+
+export function applyTranslatedChat(messages: ChatMessage[], sourceId: string, sourceText: string, next: { text: string; parts?: ChatMessage['parts'] }) {
+  const index = messages.findIndex((item) => item.id === sourceId || item.localId === sourceId || Boolean(item.copies?.some((copy) => copy.id === sourceId)))
+  if (index < 0) return { messages, changed: false }
+  const current = messages[index]
+  if (current.text !== sourceText) return { messages, changed: false }
+  const incomingHasEmote = Boolean(next.parts?.some((part) => part.type === 'emote'))
+  const currentHasEmote = Boolean(current.parts?.some((part) => part.type === 'emote'))
+  const parts = currentHasEmote && !incomingHasEmote ? current.parts : (next.parts ?? current.parts)
+  const updated: ChatMessage = { ...current, text: next.text, parts, originalText: current.originalText || current.text }
+  return { messages: messages.map((item, itemIndex) => itemIndex === index ? updated : item), changed: true }
 }
 
 /** Map a Twitch badge set name to a short dock label (`broadcaster`→`HOST`, `moderator`→`MOD`, etc.). */

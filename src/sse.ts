@@ -73,6 +73,7 @@ function mixStamp(hash: number, value: string) {
 export type ChatSliceRow = {
   id: string
   deleted?: boolean
+  removed?: string
   text?: string
   avatar?: string
   color?: string
@@ -89,6 +90,7 @@ export function chatSliceStamp(messages: ChatSliceRow[]) {
   for (const message of messages) {
     hash = mixStamp(hash, message.id)
     hash = mixStamp(hash, message.deleted ? '1' : '0')
+    hash = mixStamp(hash, message.removed || '')
     hash = mixStamp(hash, message.text || '')
     hash = mixStamp(hash, message.avatar || '')
     hash = mixStamp(hash, message.color || '')

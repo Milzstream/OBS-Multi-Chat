@@ -3,7 +3,7 @@ import test from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AlertLookView } from '../src/alerts/AlertsApp.tsx'
-import { alertSoundGroup, alertTemplateValues, createAlertPresenter, createAlertTracker, enqueueAlerts, fillAlertTemplate, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, resolveAlertLook, usesCustomAlertLook } from '../src/alerts/alerts.ts'
+import { alertPlayback, alertSoundGroup, alertTemplateValues, createAlertPresenter, createAlertTracker, enqueueAlerts, fillAlertTemplate, isAlertAllowed, neutralAlertColor, neutralAlertLabel, neutralAlertText, parseAlertSettings, resolveAlertLook, usesCustomAlertLook } from '../src/alerts/alerts.ts'
 import { dockView } from '../src/dock-view.ts'
 import { alertFontCss, alertFontSelectOptions, clampAlertSeconds, defaultAppSettings, mergeAlertFontList, parseAlertDisabled, parseAlertFontFamily, parseAlertLooks, parseAppSettings } from '../server/logic.js'
 
@@ -12,6 +12,13 @@ const SOUND = { id: 'ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbbb', mime: 'audio/mpeg', 
 
 const NOW = Date.parse('2026-01-01T12:00:00Z')
 const event = (id: string, secondsAgo = 1, extra: Record<string, string> = {}) => ({ id, platform: 'Twitch', kind: 'follow', user: 'Ada', time: new Date(NOW - secondsAgo * 1000).toISOString(), ...extra })
+
+test('alert playback is silent, custom, video, or the builtin clip', () => {
+  assert.equal(alertPlayback(undefined, false), 'silent')
+  assert.equal(alertPlayback({ audio: 'a', video: 'v' }, true), 'custom')
+  assert.equal(alertPlayback({ video: 'v' }, true), 'video')
+  assert.equal(alertPlayback(undefined, true), 'builtin')
+})
 
 test('alert tracker ignores history present at connect', () => {
   const tracker = createAlertTracker(() => NOW)

@@ -7,7 +7,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { activityIsDuplicate, createActivityStore, normalizeSubTier, parseActivityTime, profileUrl } from '../server/activity.js'
 import { missingStreamElementsMessage, twitchEventToActivity } from '../server/logic.js'
-import { activityFromStreamElements, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, STREAMELEMENTS_REPAIR_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
+import { activityFromStreamElements, fetchRecentActivities, postStreamElementsMock, STREAMELEMENTS_HISTORY_TYPES, STREAMELEMENTS_REPAIR_TYPES, streamElementsEmulatePlan, streamElementsHistoryUrl, streamElementsMockActivity, streamElementsMockActivityUrl, StreamElementsClient } from '../server/streamelements.js'
 import { ActivityWarningBanner, activityWarningKey, shouldShowActivityWarning } from '../src/activity/ActivityApp.tsx'
 import { kindColor, platformColor, profileHref } from '../src/activity/ActivityRow.tsx'
 import { activityKindLabel, activityListRows, activityPlanColor, activityPlanLabel, activitySubtitle, GIFT_GROUP_MS, kindLabel, pillTextColor } from '../src/activity/format.ts'
@@ -70,6 +70,20 @@ describe('activity store', () => {
         { id: 'a', platform: 'Twitch', kind: 'follow', user: 'Ada', userId: '1', time: '2026-08-01T12:00:00.000Z' },
         { id: 'b', platform: 'Twitch', kind: 'follow', user: 'Ada', userId: '1', time: '2026-09-02T12:00:00.000Z' },
       ), false)
+    } finally {
+      try { fs.unlinkSync(file) } catch { /* ignore */ }
+    }
+  })
+
+  it('persists a real viewer named TestUser and still drops test ids', () => {
+    const file = path.join(os.tmpdir(), `relay-activity-testuser-${Date.now()}-${Math.random().toString(16).slice(2)}.json`)
+    try {
+      const store = createActivityStore(file)
+      assert.equal(store.add({ id: 'follow-real', platform: 'Twitch', kind: 'follow', user: 'TestUser', time: '2026-09-02T12:00:00.000Z' }), true)
+      assert.equal(store.add({ id: 'test-keep', platform: 'Twitch', kind: 'follow', user: 'Ada', time: '2026-09-02T12:02:00.000Z' }), true)
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { id: string; user: string }[]
+      assert.equal(saved.some((event) => event.id === 'follow-real' && event.user === 'TestUser'), true)
+      assert.equal(saved.some((event) => event.id === 'test-keep'), false)
     } finally {
       try { fs.unlinkSync(file) } catch { /* ignore */ }
     }
@@ -458,6 +472,41 @@ describe('StreamElements activity', () => {
     assert.deepEqual(url.searchParams.getAll('types'), [...STREAMELEMENTS_HISTORY_TYPES])
     for (const type of STREAMELEMENTS_HISTORY_TYPES) {
       assert.ok(activityFromStreamElements({ type, provider: type === 'kicks' ? 'kick' : 'twitch', data: { username: 'ada', amount: 1 }, _id: type }), type)
+    }
+  })
+
+  it('fetches tips even when activity history already has events', async () => {
+    const urls: string[] = []
+    const previous = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.includes('/tips/')) {
+        return new Response(JSON.stringify([
+          { _id: 'tip-1', username: 'Ada', amount: 5, currency: 'USD', createdAt: '2026-09-02T12:00:00.000Z' },
+          { _id: 'follow-1', username: 'Dup', amount: 1, currency: 'USD', createdAt: '2026-09-02T12:00:00.000Z' },
+        ]), { status: 200 })
+      }
+      return new Response(JSON.stringify([
+        { _id: 'follow-1', type: 'follow', provider: 'twitch', data: { username: 'Ada' }, createdAt: '2026-09-02T12:00:00.000Z' },
+      ]), { status: 200 })
+    }) as typeof fetch
+    try {
+      const channel = { channelId: 'ch', handle: 'ada', jwt: 'jwt' }
+      const events = await fetchRecentActivities(channel)
+      assert.equal(urls.some((url) => url.includes('/activities/')), true)
+      assert.equal(urls.some((url) => url.includes('/tips/')), true)
+      assert.equal(events.filter((event) => event.id === 'follow-1').length, 1)
+      assert.equal(events.find((event) => event.id === 'follow-1')?.kind, 'follow')
+      assert.equal(events.find((event) => event.id === 'follow-1')?.platform, 'Twitch')
+      const tip = events.find((event) => event.id === 'tip-1')
+      assert.equal(tip?.kind, 'donation')
+      assert.equal(tip?.user, 'Ada')
+      const skipped = await fetchRecentActivities(channel, { tips: false })
+      assert.equal(skipped.some((event) => event.id === 'tip-1'), false)
+      assert.equal(urls.filter((url) => url.includes('/tips/')).length, 1)
+    } finally {
+      globalThis.fetch = previous
     }
   })
 

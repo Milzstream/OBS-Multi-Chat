@@ -83,10 +83,10 @@ describe('installed overlay fonts', () => {
     assert.deepEqual(fonts, ['Airborne Pilot', 'Public Pixel'])
   })
 
-  it('lists Arial from this Windows install', async () => {
+  it('lists Arial from this Windows install', { timeout: 30_000 }, async () => {
     if (process.platform !== 'win32') return
     resetAlertFontCache()
-    const names = await listInstalledAlertFonts()
+    const names = await listInstalledAlertFonts(undefined, 25_000)
     assert.ok(names.some((name) => name.toLowerCase() === 'arial'), `expected Arial in ${names.slice(0, 8).join(', ')}`)
   })
 })

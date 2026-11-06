@@ -73,6 +73,7 @@ export {
   youtubeBadges,
   youtubeBanChatIds,
   youtubeBanRecord,
+  youtubeChatFailure,
   youtubeChatKeysFor,
   youtubeChatLabel,
   youtubeInsertedMessageId,
@@ -87,6 +88,7 @@ export {
   youtubeTagLine,
   youtubeTagWriteNeeded,
   youtubeTitleIsShorts,
+  youtubeTrackedIds,
 } from './logic/youtube.js'
 export {
   MODERATION_REASON_MAX,
@@ -100,6 +102,7 @@ export {
 } from './logic/moderation.js'
 export {
   applyOutgoingSendResult,
+  applyTranslatedChat,
   chatCopyKey,
   chatMessageCopies,
   chatTextMatches,

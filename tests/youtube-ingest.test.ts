@@ -9,6 +9,7 @@ import {
   isTruncatedText,
   labelYouTubeTargets,
   applyOutgoingSendResult,
+  applyTranslatedChat,
   mergeIncomingChat,
   youtubeInsertedMessageId,
   preferChatText,
@@ -112,6 +113,7 @@ describe('YouTube message ingest', () => {
     assert.equal(result.messages.length, 1)
     assert.deepEqual(result.messages[0].platforms, ['Twitch', 'YouTube'])
     assert.equal(result.messages[0].sourceId, 'CHAT')
+    assert.equal(result.messages[0].localId, 'local')
   })
 
   it('merges truncated Live and Shorts host echoes into the dock send', () => {
@@ -332,8 +334,68 @@ describe('YouTube message ingest', () => {
     const sent = applied.messages[1]
     assert.deepEqual(sent.platforms, ['Twitch', 'YouTube'])
     assert.deepEqual(sent.copies?.map((copy) => copy.id), ['helix-2', 'yt-live', 'yt-shorts'])
+    assert.equal(sent.localId, 'local-2')
     assert.equal(youtubeInsertedMessageId('{"id":"LCC.abc","snippet":{"liveChatId":"CHAT_LIVE"}}'), 'LCC.abc')
     assert.equal(youtubeInsertedMessageId('not-json'), undefined)
+  })
+
+  it('keeps echoed ids when a later send result omits them, and deletes the row when every platform fails', () => {
+    const outgoing = chat({ id: 'local', platform: 'Twitch', platforms: ['Twitch', 'Kick'], user: 'Host', text: 'hello', time: '2026-09-02T12:00:00.000Z' })
+    const recent = [{ id: 'local', text: 'hello', platforms: ['Twitch', 'Kick'] as const, at: Date.parse(outgoing.time) }]
+    const echoed = mergeIncomingChat([outgoing], chat({ id: 'twitch-1', platform: 'Twitch', user: 'Host', text: 'hello', time: '2026-09-02T12:00:01.000Z' }), undefined, { ownHandles: own('Host'), recentOutgoing: recent })
+    assert.equal(echoed.messages[0].localId, 'local')
+    const failed = applyOutgoingSendResult(echoed.messages, 'local', [{ platform: 'Twitch', ok: false }, { platform: 'Kick', ok: false }])
+    assert.deepEqual(failed.messages, [])
+    const partial = applyOutgoingSendResult(echoed.messages, 'local', [{ platform: 'Twitch', ok: true }, { platform: 'Kick', ok: false }])
+    assert.equal(partial.messages[0].id, 'twitch-1')
+    assert.equal(partial.messages[0].localId, 'local')
+    assert.deepEqual(partial.messages[0].platforms, ['Twitch'])
+    const row = chat({
+      id: 'twitch-1',
+      localId: 'local',
+      platform: 'Twitch',
+      platforms: ['Twitch', 'Kick', 'YouTube'],
+      user: 'Host',
+      text: 'hello',
+      copies: [
+        { platform: 'Twitch', id: 'twitch-1' },
+        { platform: 'Kick', id: 'kick-1' },
+        { platform: 'YouTube', id: 'yt-live', sourceId: 'CHAT_LIVE' },
+        { platform: 'YouTube', id: 'yt-shorts', sourceId: 'CHAT_SHORTS' },
+      ],
+    })
+    const kept = applyOutgoingSendResult([row], 'local', [
+      { platform: 'Twitch', ok: true },
+      { platform: 'Kick', ok: true, id: 'kick-real' },
+      { platform: 'YouTube', ok: true, sent: [{ id: 'yt-live-real', sourceId: 'CHAT_LIVE' }] },
+    ])
+    assert.equal(kept.messages[0].id, 'twitch-1')
+    assert.equal(kept.messages[0].localId, 'local')
+    assert.deepEqual(kept.messages[0].copies?.map((copy) => copy.id), ['kick-real', 'yt-live-real', 'twitch-1', 'yt-shorts'])
+  })
+
+  it('applies a translation without dropping emotes or a queued local id', () => {
+    const plain = chat({ id: 'yt-1', localId: 'local', user: 'Ada', text: 'こんにちは', parts: [{ type: 'text', text: 'こんにちは' }] })
+    const applied = applyTranslatedChat([plain], 'local', 'こんにちは', { text: 'hello' })
+    assert.equal(applied.messages[0].text, 'hello')
+    assert.equal(applied.messages[0].originalText, 'こんにちは')
+    assert.equal(applied.messages[0].localId, 'local')
+    assert.equal(applied.messages[0].parts?.[0].text, 'こんにちは')
+    assert.equal(applyTranslatedChat([plain], 'yt-1', 'old', { text: 'hello' }).changed, false)
+    const emote = chat({ id: '1', user: 'Ada', text: 'こんにちは', parts: [{ type: 'emote', name: 'x', url: 'x' }, { type: 'text', text: 'こんにちは' }] })
+    const kept = applyTranslatedChat([emote], '1', 'こんにちは', { text: 'hello', parts: [{ type: 'text', text: 'hello' }] })
+    assert.equal(kept.messages[0].parts?.[0].type, 'emote')
+    assert.equal(kept.messages[0].text, 'hello')
+    const translated = applyTranslatedChat([emote], '1', 'こんにちは', { text: 'hello', parts: [{ type: 'emote', name: 'x', url: 'x' }, { type: 'text', text: 'hello' }] })
+    assert.equal(translated.messages[0].parts?.[0].type, 'emote')
+    assert.equal(translated.messages[0].parts?.[1].text, 'hello')
+    const afterSend = applyOutgoingSendResult([{ ...emote, id: 'local' }], 'local', [{ platform: 'YouTube', ok: true, id: 'yt-1' }])
+    const afterTranslate = applyTranslatedChat(afterSend.messages, 'local', 'こんにちは', { text: 'hello', parts: [{ type: 'emote', name: 'x', url: 'x' }, { type: 'text', text: 'hello' }] })
+    assert.equal(afterTranslate.messages[0].id, 'yt-1')
+    assert.equal(afterTranslate.messages[0].text, 'hello')
+    assert.equal(afterTranslate.messages[0].parts?.[1].text, 'hello')
+    const copied = chat({ id: 'row', user: 'Ada', text: 'hola', copies: [{ platform: 'YouTube', id: 'copy-1' }] })
+    assert.equal(applyTranslatedChat([copied], 'copy-1', 'hola', { text: 'hello' }).messages[0].text, 'hello')
   })
 
   it('merges own Live and Shorts YouTube copies without a dock send', () => {

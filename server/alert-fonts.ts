@@ -49,12 +49,12 @@ export function resetAlertFontCache() {
   cached = undefined
 }
 
-function collectInstalledFonts(run: AlertFontExecFile): Promise<string[]> {
+function collectInstalledFonts(run: AlertFontExecFile, timeoutMs = ALERT_FONT_LIST_MS): Promise<string[]> {
   const plan = windowsInstalledFontsPlan()
   return new Promise((resolve, reject) => {
     try {
       run(plan.command, plan.args, {
-        timeout: ALERT_FONT_LIST_MS,
+        timeout: timeoutMs,
         windowsHide: true,
         encoding: 'utf8',
         maxBuffer: ALERT_FONT_LIST_BUFFER,
@@ -72,11 +72,11 @@ function collectInstalledFonts(run: AlertFontExecFile): Promise<string[]> {
  * Family names Windows reports. Sanitizing and Outfit-first ordering happen
  * in `mergeAlertFontList`. Tests pass `run` so they never spawn.
  */
-export function listInstalledAlertFonts(run?: AlertFontExecFile): Promise<string[]> {
-  if (run) return collectInstalledFonts(run)
+export function listInstalledAlertFonts(run?: AlertFontExecFile, timeoutMs = ALERT_FONT_LIST_MS): Promise<string[]> {
+  if (run) return collectInstalledFonts(run, timeoutMs)
   if (process.platform !== 'win32') return Promise.resolve([])
   if (!cached) {
-    cached = collectInstalledFonts(execFile as unknown as AlertFontExecFile).catch((error) => {
+    cached = collectInstalledFonts(execFile as unknown as AlertFontExecFile, timeoutMs).catch((error) => {
       cached = undefined
       throw error
     })

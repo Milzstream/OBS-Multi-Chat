@@ -32,6 +32,7 @@ import { createThirdPartyEmotes } from './third-party-emotes.js'
 import {
   YOUTUBE_QUOTA_LIMIT,
   applyChatModeration,
+  applyTranslatedChat,
   applyThirdPartyEmotes,
   defaultAppSettings,
   LIVE_STATUS_POLL_MS,
@@ -452,11 +453,10 @@ async function applyTranslation(message: ChatMessage) {
     } catch { next.push(part) }
   }
   if (!changed) return
-  const index = state.messages.findIndex((item) => item.id === message.id)
-  if (index < 0) return
-  const current = state.messages[index]
-  const text = next.filter((part) => part.type === 'text').map((part) => part.text).join('') || current.text
-  state.messages = state.messages.map((item, itemIndex) => itemIndex === index ? { ...item, text, parts: next, originalText: current.originalText || current.text } : item)
+  const text = next.filter((part) => part.type === 'text').map((part) => part.text).join('') || message.text
+  const applied = applyTranslatedChat(state.messages, message.id, message.text, { text, parts: next })
+  if (!applied.changed) return
+  state.messages = applied.messages
   scheduleChatSave()
   broadcast()
 }

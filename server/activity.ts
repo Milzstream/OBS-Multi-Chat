@@ -115,7 +115,7 @@ function fallbackId(event: Omit<ActivityEvent, 'id'> & { id?: string }) {
 }
 
 function isTestEvent(event: ActivityEvent) {
-  return event.id.startsWith('test-') || event.user === 'TestUser'
+  return event.id.startsWith('test-')
 }
 
 function prune(events: ActivityEvent[], maxAgeMs = 0, maxEvents = ACTIVITY_MAX) {

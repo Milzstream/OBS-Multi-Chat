@@ -65,6 +65,7 @@ describe('chat frame compare', () => {
     const previous = [{ id: '1', text: 'hi' }, { id: '2', text: 'yo' }]
     assert.equal(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'yo' }]))
     assert.notEqual(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'yo', deleted: true }]))
+    assert.notEqual(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'yo', removed: 'message' }]))
     assert.notEqual(chatSliceStamp(previous), chatSliceStamp([{ id: '1', text: 'hi' }, { id: '2', text: 'hello' }]))
     assert.equal(sameStringList(['a'], ['a']), true)
     assert.equal(sameHealth({ Twitch: { status: 'ok', message: '' } }, { Twitch: { status: 'warn', message: 'down' } }), false)

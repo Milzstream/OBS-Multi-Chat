@@ -22,6 +22,7 @@ import {
   youtubeBadges,
   youtubeBanChatIds,
   youtubeBanRecord,
+  youtubeChatFailure,
   youtubeChatLabel,
   youtubeInsertedMessageId,
   youtubeLiveChatBanSnippet,
@@ -38,6 +39,7 @@ import {
   youtubeQuotaHealthStatus,
   youtubeQuotaLabel,
   youtubeScrapedTarget,
+  youtubeTrackedIds,
   youtubeSendGuard,
   youtubeStatusIntervalMs,
   type YoutubePrivacyNotice,
@@ -147,9 +149,9 @@ export function createYouTubeLive(d: YoutubeLiveDeps) {
   /** Remember which YouTube messages we have seen so a restart re-seeds the history buffer without re-sending the same messages to the docks. */
   function rememberYouTubeFromChat(messages: ChatMessage[]) {
     for (const item of messages) {
-      if (item.platform !== 'YouTube') continue
-      if (item.id) youtubeSeen.add(item.id)
-      if (item.sourceId) youtubeHistorySeeded.add(item.sourceId)
+      const tracked = youtubeTrackedIds(item)
+      for (const id of tracked.seen) youtubeSeen.add(id)
+      for (const id of tracked.chats) youtubeHistorySeeded.add(id)
     }
   }
 
@@ -660,10 +662,10 @@ export function createYouTubeLive(d: YoutubeLiveDeps) {
     const pending = chatIds.filter((chatId) => !youtubeHistorySeeded.has(chatId))
     if (!pending.length) return
     for (const chatId of pending) {
-      youtubeHistorySeeded.add(chatId)
       beginYouTubeHydration()
       try {
         const messages = await youtubeApi(youtubeLiveChatListQuery(chatId, undefined, 200), token)
+        youtubeHistorySeeded.add(chatId)
         for (const item of messages.items || []) if (!youtubeSeen.has(item.id)) {
           youtubeSeen.add(item.id)
           ingestYouTubeOfficialItem(item, chatId, chatIds, true)
@@ -671,11 +673,11 @@ export function createYouTubeLive(d: YoutubeLiveDeps) {
       } catch (error) {
         if (noteYouTubeQuota(error)) return
         if (isEndedYouTubeChat(error)) {
+          youtubeHistorySeeded.add(chatId)
           console.log('YouTube history seed skipped: live chat ended')
           dropEndedYouTubeChat(chatId)
           continue
         }
-        youtubeHistorySeeded.delete(chatId)
         console.error('YouTube history seed:', error instanceof Error ? error.message : error)
       }
     }
@@ -798,7 +800,7 @@ export function createYouTubeLive(d: YoutubeLiveDeps) {
       const id = youtubeInsertedMessageId(item.result.text)
       return id ? [{ id, sourceId: item.liveChatId }] : []
     })
-    return { ok: results.some((item) => item.result.ok), error: failed.length ? failed.map((item) => youtubeApiErrorReason(item.result.text)).join(' | ') : undefined, ...(sent.length ? { sent } : {}) }
+    return { ok: results.some((item) => item.result.ok), error: failed.length ? failed.map((item) => youtubeChatFailure(youtubeTargets, item.liveChatId, youtubeApiErrorReason(item.result.text))).join(' | ') : undefined, ...(sent.length ? { sent } : {}) }
   }
 
   function saveYoutubeBans() {
@@ -846,7 +848,8 @@ export function createYouTubeLive(d: YoutubeLiveDeps) {
       } catch { /* ignore */ }
     }
     if (remembered.length) {
-      youtubeBanIds.set(userId.toLowerCase(), remembered)
+      const key = userId.toLowerCase()
+      youtubeBanIds.set(key, [...new Set([...(youtubeBanIds.get(key) || []), ...remembered])])
       saveYoutubeBans()
     }
     return { ok: results.some((result) => result.ok), error: failed.length ? failed.map((result) => result.text).join(' | ') : undefined }

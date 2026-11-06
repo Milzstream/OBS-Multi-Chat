@@ -9,6 +9,7 @@ import {
   parseTranslatedText,
   pruneYouTubeSeenIds,
   resolveTranslateConfig,
+  youtubeChatFailure,
   sseBroadcastEvent,
   sseChangedKeys,
   sseNamedEvent,
@@ -27,6 +28,36 @@ describe('YouTube chat memory', () => {
     const seen = new Set(['keep', 'drop'])
     pruneYouTubeSeenIds(seen, [{ id: 'keep', platform: 'YouTube', user: 'Ada', text: 'hi', time: '2026-09-02T12:00:00.000Z' }])
     assert.deepEqual([...seen], ['keep'])
+  })
+
+  it('keeps YouTube copy ids and drops other platform ids', () => {
+    const seen = new Set(['yt-copy', 'twitch-row', 'gone'])
+    pruneYouTubeSeenIds(seen, [{
+      id: 'twitch-row',
+      platform: 'Twitch',
+      platforms: ['Twitch', 'YouTube'],
+      user: 'Ada',
+      text: 'hi',
+      time: '2026-09-02T12:00:00.000Z',
+      copies: [
+        { platform: 'Twitch', id: 'twitch-row' },
+        { platform: 'YouTube', id: 'yt-copy', sourceId: 'CHAT' },
+      ],
+    }])
+    assert.deepEqual([...seen], ['yt-copy'])
+  })
+
+  it('bans the matched chat alone and labels a failed chat when Live and Shorts are both open', () => {
+    const targets = [
+      { videoId: 'liveVid', liveChatId: 'CHAT_LIVE', title: 'Night' },
+      { videoId: 'shortVid', liveChatId: 'CHAT_SHORTS', title: 'Clip #shortsfeed' },
+    ]
+    assert.deepEqual(youtubeBanChatIds('CHAT_LIVE', targets), ['CHAT_LIVE'])
+    assert.deepEqual(youtubeBanChatIds('shortVid', targets), ['CHAT_SHORTS'])
+    assert.deepEqual(youtubeBanChatIds(undefined, targets), ['CHAT_LIVE', 'CHAT_SHORTS'])
+    assert.equal(youtubeChatFailure(targets, 'CHAT_SHORTS', 'forbidden'), 'Shorts: forbidden')
+    assert.equal(youtubeChatFailure(targets, 'CHAT_LIVE', 'forbidden'), 'Live: forbidden')
+    assert.equal(youtubeChatFailure([{ videoId: 'v', liveChatId: 'CHAT' }], 'CHAT', 'forbidden'), 'forbidden')
   })
 })
 
