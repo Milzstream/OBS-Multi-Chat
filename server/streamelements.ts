@@ -310,9 +310,8 @@ export async function fetchRecentActivities(channel: StreamElementsChannel, opti
       const rows = Array.isArray(json) ? json : Array.isArray(json?.docs) ? json.docs : Array.isArray(json?.data) ? json.data : []
       for (const row of rows) {
         const event = activityFromStreamElements(url.includes('/tips/') ? { type: 'tip', provider: 'StreamElements', data: row, _id: row?._id, createdAt: row?.createdAt } : row)
-        if (event) events.push(event)
+        if (event && !events.some((item) => item.id === event.id)) events.push(event)
       }
-      if (events.length) break
     } catch (error) {
       console.error('StreamElements activity backfill:', error instanceof Error ? error.message : error)
     }
