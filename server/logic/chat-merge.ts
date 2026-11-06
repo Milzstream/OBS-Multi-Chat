@@ -399,6 +399,7 @@ function sendResultCopies(row: ChatMessage, sent: OutgoingSendResult[]): ChatMes
  * Apply a dock send after the platform calls return.
  * Failure deletes the optimistic row, including after an echo stored its id on `localId`.
  * Success writes platform message ids and drops failed platforms without discarding echo ids.
+ * The optimistic id stays on `localId` so a translation queued before the platform ids arrive can still find the row.
  */
 export function applyOutgoingSendResult(messages: ChatMessage[], localId: string, results: OutgoingSendResult[]) {
   const index = messages.findIndex((item) => item.id === localId || item.localId === localId || Boolean(item.copies?.some((copy) => copy.id === localId)))
@@ -416,7 +417,7 @@ export function applyOutgoingSendResult(messages: ChatMessage[], localId: string
       : []
   ).filter((copy) => sentPlatforms.includes(copy.platform) && !replaced.has(chatCopyKey(copy)) && copy.id !== localId)
   const idCopies = [...fromResults, ...echoed]
-  const next: ChatMessage = { ...row, localId: undefined, platform: sentPlatforms[0] || row.platform, platforms: sentPlatforms.length ? sentPlatforms : row.platforms }
+  const next: ChatMessage = { ...row, localId: row.localId || localId, platform: sentPlatforms[0] || row.platform, platforms: sentPlatforms.length ? sentPlatforms : row.platforms }
   if (idCopies.length === 1) {
     next.id = idCopies[0].id
     next.sourceId = idCopies[0].sourceId || row.sourceId
@@ -440,7 +441,8 @@ export function applyTranslatedChat(messages: ChatMessage[], sourceId: string, s
   if (current.text !== sourceText) return { messages, changed: false }
   const incomingHasEmote = Boolean(next.parts?.some((part) => part.type === 'emote'))
   const currentHasEmote = Boolean(current.parts?.some((part) => part.type === 'emote'))
-  const updated: ChatMessage = { ...current, text: next.text, parts: currentHasEmote ? current.parts : (next.parts ?? current.parts), originalText: current.originalText || current.text }
+  const parts = currentHasEmote && !incomingHasEmote ? current.parts : (next.parts ?? current.parts)
+  const updated: ChatMessage = { ...current, text: next.text, parts, originalText: current.originalText || current.text }
   return { messages: messages.map((item, itemIndex) => itemIndex === index ? updated : item), changed: true }
 }
 
