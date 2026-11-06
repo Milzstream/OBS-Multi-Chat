@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { applyExactCategory, assignTagPlatforms, AVATAR_RETRY_MAX, avatarShowsImage, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sharedStreamTags, shouldRetryAvatar, streamDashboardUrl, streamTitleTip, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
+import { applyExactCategory, assignTagPlatforms, AVATAR_RETRY_MAX, avatarShowsImage, categoryPickNote, chatProfileUrl, commitTypedCategory, dockAvatarSrc, exactCategoryMatch, kickProfileSlug, mergeCategoryResults, moderationAcceptsReason, moderationNeedsDockConfirm, moderationPlatformLabel, moderationStatus, moderationTargets, nextOptionIndex, platformStatTip, preferredCategory, selectedSendPlatforms, sendFullyFailed, sendResultStatus, sharedStreamTags, shouldRetryAvatar, streamDashboardUrl, streamTitleTip, tagAssignments, tagPlatforms, unifiedCategoryQuery, visibleChatMessages, youtubeBanConfirmLabel, youtubePrivacyMessage, youtubeStudioUrl } from '../src/chat-helpers.ts'
 import { YoutubePrivacyBanner } from '../src/YoutubePrivacyBanner.tsx'
 
 describe('chat dock helpers', () => {
@@ -171,6 +171,18 @@ describe('stream category commit', () => {
     assert.match(categoryPickNote('Just Chatting', '1', undefined), /Kick was not changed/)
     assert.equal(categoryPickNote('IRL', '1', '2'), '')
     assert.match(streamTitleTip('Friday', 'IRL', ''), /Opens YouTube Studio/)
+  })
+})
+
+describe('composer send status', () => {
+  it('restores the composer only when every platform failed', () => {
+    assert.equal(sendFullyFailed(undefined), false)
+    assert.equal(sendFullyFailed([]), false)
+    assert.equal(sendFullyFailed([{ ok: false }, { ok: false }]), true)
+    assert.equal(sendFullyFailed([{ ok: true }, { ok: false }]), false)
+    assert.equal(sendResultStatus([{ platform: 'Twitch', ok: true }]), 'Sent')
+    assert.equal(sendResultStatus([{ platform: 'Kick', ok: false }]), 'Kick: failed')
+    assert.equal(sendResultStatus([{ platform: 'YouTube', ok: true, error: 'Shorts: forbidden' }]), 'YouTube: Shorts: forbidden')
   })
 })
 

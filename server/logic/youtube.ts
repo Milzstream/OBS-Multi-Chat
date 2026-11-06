@@ -31,14 +31,37 @@ export function resolveYouTubeLiveChatIds(targets: YouTubeChatTarget[], token?: 
   return []
 }
 
-/** Ban targets are live chat ids only. A scraped video id is not a `liveChatId`. */
+/** Ban targets are live chat ids only. A matched chat is banned alone; a matched video with no chat id bans nothing. */
 export function youtubeBanChatIds(sourceId: string | undefined, targets: YouTubeChatTarget[], token?: { liveChatIds?: string[]; liveChatId?: string }) {
-  const ids = new Set(resolveYouTubeLiveChatIds(targets, token))
   if (sourceId) {
     const match = targets.find((target) => target.liveChatId === sourceId || target.videoId === sourceId)
-    if (match?.liveChatId) ids.add(match.liveChatId)
+    if (match) return match.liveChatId ? [match.liveChatId] : []
   }
-  return [...ids].filter((id) => !targets.some((target) => target.videoId === id && target.liveChatId !== id))
+  return resolveYouTubeLiveChatIds(targets, token).filter((id) => !targets.some((target) => target.videoId === id && target.liveChatId !== id))
+}
+
+export function youtubeChatFailure(targets: YouTubeChatTarget[], liveChatId: string, reason: string) {
+  const target = targets.find((item) => item.liveChatId === liveChatId)
+  const label = target ? youtubeChatLabel(targets, target) : undefined
+  return label ? `${label}: ${reason}` : reason
+}
+
+export function youtubeTrackedIds(message: ChatMessage) {
+  const seen: string[] = []
+  const chats: string[] = []
+  const copies = message.copies?.filter((copy) => copy.platform === 'YouTube') || []
+  if (copies.length) {
+    for (const copy of copies) {
+      if (copy.id) seen.push(copy.id)
+      if (copy.sourceId) chats.push(copy.sourceId)
+    }
+    return { seen, chats }
+  }
+  if (message.platform === 'YouTube') {
+    if (message.id) seen.push(message.id)
+    if (message.sourceId) chats.push(message.sourceId)
+  }
+  return { seen, chats }
 }
 
 /** A newly scraped video must not inherit the previous broadcast's chat id. */
@@ -130,7 +153,7 @@ export function youtubeBadges(author?: { isChatOwner?: boolean; isChatModerator?
 
 
 export function pruneYouTubeSeenIds(seenIds: Set<string>, messages: ChatMessage[]) {
-  const retained = new Set(messages.filter((message) => message.platform === 'YouTube' || message.platforms?.includes('YouTube')).map((message) => message.id))
+  const retained = new Set(messages.flatMap((message) => youtubeTrackedIds(message).seen))
   for (const id of seenIds) if (!retained.has(id)) seenIds.delete(id)
 }
 

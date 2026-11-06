@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Gamepad2, Hash, Link2, Radio, Send, SlidersHorizontal, Users } from 'lucide-react'
 import { ScrollPausedBadge, useAutoScroll } from '../autoScroll'
 import { CHAT_ROW_ESTIMATE, CHAT_ROW_ESTIMATE_COMPACT, useVirtualWindow } from '../virtualList'
-import { mentionMatcher, moderationAcceptsReason, moderationNeedsDockConfirm, moderationStatus, moderationTargets, postYoutubePrivacy, preferredCategory, selectedSendPlatforms, streamDashboardUrl, streamTitleTip, visibleChatMessages, youtubeStudioUrl, type YoutubePrivacyNotice } from '../chat-helpers'
+import { mentionMatcher, moderationAcceptsReason, moderationNeedsDockConfirm, moderationStatus, moderationTargets, postYoutubePrivacy, preferredCategory, selectedSendPlatforms, sendFullyFailed, sendResultStatus, streamDashboardUrl, streamTitleTip, visibleChatMessages, youtubeStudioUrl, type YoutubePrivacyNotice } from '../chat-helpers'
 import { YoutubePrivacyBanner } from '../YoutubePrivacyBanner'
 import { chatDockFields, chatSliceStamp, sameHealth, samePrivacy, sameQuota, sameStringList, subscribeDockSse } from '../sse'
 import { CHAT_COMPACT_KEY, CHAT_FILTER_KEY, CHAT_FILTERS, parseStoredBoolean, parseStoredFilter, readLocalPref, writeLocalPref, type ChatFilter } from '../dock-prefs'
@@ -162,10 +162,10 @@ function App() {
     setSending(true)
     setComposer('')
     const restore = () => setComposer((current) => current.trim() ? current : text)
-    void fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platforms: selectedPlatforms, text }) }).then((response) => response.json()).then((result: { results: { platform: Platform; ok: boolean; error?: string }[] }) => {
-      const failed = result.results.filter((item) => !item.ok)
-      if (failed.length === result.results.length) restore()
-      setSendStatus(failed.length ? failed.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ') : 'Sent')
+    void fetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platforms: selectedPlatforms, text }) }).then((response) => response.json()).then((result: { results?: { platform: Platform; ok: boolean; error?: string }[] }) => {
+      if (!result.results?.length) { restore(); setSendStatus('Message request failed'); return }
+      if (sendFullyFailed(result.results)) restore()
+      setSendStatus(sendResultStatus(result.results))
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => { restore(); setSendStatus('Message request failed') }).finally(() => { sendingRef.current = false; setSending(false) })
   }

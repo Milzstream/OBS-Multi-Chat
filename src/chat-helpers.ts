@@ -318,6 +318,16 @@ export function youtubeBanConfirmLabel(user: string, platformLabel: string) {
   return `Ban ${user} on ${platformLabel}?`
 }
 
+export function sendFullyFailed(results: { ok: boolean }[] | undefined) {
+  return Boolean(results?.length) && results.every((item) => !item.ok)
+}
+
+export function sendResultStatus(results: { platform: string; ok: boolean; error?: string }[] | undefined) {
+  const problems = (results || []).filter((item) => !item.ok || item.error)
+  if (!problems.length) return 'Sent'
+  return problems.map((item) => `${item.platform}: ${item.error || 'failed'}`).join(' | ')
+}
+
 /** Dock status line after a moderation call. Includes the reason only when one was sent. */
 export function moderationStatus(action: 'delete' | 'timeout' | 'ban' | 'unban', user: string, reason?: string) {
   if (action === 'delete') return 'Message deleted'
