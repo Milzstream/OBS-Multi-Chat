@@ -96,14 +96,14 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 ### Automatic chat translation
 
-Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in Connection Settings.
+Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in the Relay Chat Dock window.
 
 By default the translated text comes from Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`), which needs no key. If you would rather not use the unofficial endpoint, set one of these in `production.env` and restart:
 
 - `TRANSLATE_API_KEY` — uses Google Cloud Translation (the official API).
 - `TRANSLATE_URL` — uses a LibreTranslate-compatible endpoint, with optional `TRANSLATE_API_KEY` for the service's key.
 
-If translation fails, Connection Settings shows why and messages stay in the original language. Translation is an outbound third-party request, so turn the setting off if that is not acceptable for your stream.
+If translation fails, the Relay Chat Dock window shows why and messages stay in the original language. Translation is an outbound third-party request, so turn the setting off if that is not acceptable for your stream.
 
 ### Google / YouTube
 
@@ -209,11 +209,11 @@ npm start
 
 The backend serves the docks at `http://localhost:4173` and `http://localhost:4173/activity`. Keep `npm start` running while OBS is open. For frontend development, use `npm run dev` and run `npm run dev:backend` in a second terminal.
 
-Click **Connect** for each platform in either dock's settings. Each button opens a browser authorization window. After authorization, the callback stores the token and the backend begins polling or connecting to the platform.
+Click **Connect** for each platform in the Relay Chat Dock window. Each button opens a browser authorization window. After authorization, the callback stores the token and the backend begins polling or connecting to the platform.
 
 ### Moderation
 
-Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch and Kick ask for an optional reason (up to 500 characters) before a ban or timeout. Leave it blank to send no reason. YouTube live chat bans have no reason field. The dock asks you to confirm in place; Cancel does not ban, and the confirm does not use a system dialog. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through row and choose **Unban / untimeout** to undo it and restore the messages. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id. Those ids are kept in the data folder, so a restart can still unban.
+Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch asks for an optional reason (up to 500 characters) before a ban or timeout. Kick accepts up to 100 characters; a longer reason is shortened for Kick only. Leave it blank to send no reason. YouTube live chat bans have no reason field. The dock asks you to confirm in place; Cancel does not ban, and the confirm does not use a system dialog. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through ban or timeout and choose **Unban / untimeout** to restore those messages. A deleted message stays struck through; unban does not bring it back. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id. Those ids are kept in the data folder, so a restart can still unban.
 
 ### Activity dock
 
