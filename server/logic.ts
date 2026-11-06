@@ -102,6 +102,7 @@ export {
 } from './logic/moderation.js'
 export {
   applyOutgoingSendResult,
+  applyTranslatedChat,
   chatCopyKey,
   chatMessageCopies,
   chatTextMatches,
