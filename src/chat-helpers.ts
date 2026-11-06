@@ -319,7 +319,8 @@ export function youtubeBanConfirmLabel(user: string, platformLabel: string) {
 }
 
 export function sendFullyFailed(results: { ok: boolean }[] | undefined) {
-  return Boolean(results?.length) && results.every((item) => !item.ok)
+  if (!results || results.length === 0) return false
+  return results.every((item) => !item.ok)
 }
 
 export function sendResultStatus(results: { platform: string; ok: boolean; error?: string }[] | undefined) {
