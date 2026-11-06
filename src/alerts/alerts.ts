@@ -96,6 +96,13 @@ export function isAlertAllowed(event: { platform: string; kind: string; powerUp?
   return !disabled.includes(alertKey(event.platform, event.kind))
 }
 
+export function alertPlayback(look: { audio?: unknown; video?: unknown } | undefined, sound: boolean): 'custom' | 'builtin' | 'video' | 'silent' {
+  if (!sound) return 'silent'
+  if (look?.audio) return 'custom'
+  if (look?.video) return 'video'
+  return 'builtin'
+}
+
 export function alertSoundGroup(kind: string): AlertSoundGroup {
   if (kind === 'follow') return 'follow'
   if (kind === 'subscription' || kind === 'membership' || kind === 'gift') return 'sub'

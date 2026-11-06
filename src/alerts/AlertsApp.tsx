@@ -4,6 +4,7 @@ import { activityDockFields, subscribeDockSse } from '../sse'
 import {
   DEFAULT_ALERT_SETTINGS,
   alertAssetUrl,
+  alertPlayback,
   alertHoldSeconds,
   alertSoundGroup,
   createAlertPresenter,
@@ -94,11 +95,10 @@ export default function AlertsApp() {
     const [next, ...rest] = queue
     setQueue(rest)
     setCurrent(next)
-    if (settings.sound) {
-      const look = resolveAlertLook(settings, next)
-      if (look?.audio) playAlertSoundUrl(alertAssetUrl(look.audio.id))
-      else playAlertSound(alertSoundGroup(next.kind))
-    }
+    const look = resolveAlertLook(settings, next)
+    const playback = alertPlayback(look, settings.sound)
+    if (playback === 'custom' && look?.audio) playAlertSoundUrl(alertAssetUrl(look.audio.id))
+    else if (playback === 'builtin') playAlertSound(alertSoundGroup(next.kind))
   }, [current, queue, settings])
 
   const holdSec = current ? alertHoldSeconds(settings, resolveAlertLook(settings, current)) : settings.displaySec
