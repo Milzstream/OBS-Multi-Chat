@@ -11,10 +11,12 @@ import {
   parseTwitchModerationLine,
   partsFromTwitchFragments,
   sanitizeIrcMessage,
+  shouldReconnectChat,
   summarizeApiError,
   twitchBadgesFromList,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
+  twitchEventSubResumeTimedOut,
   twitchEventSubRetryDelay,
   twitchEventSubSubscribeStillCurrent,
   twitchEventSubWatchdogShouldClose,
@@ -72,6 +74,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
   let twitchLastEventSub = 0
   let twitchEventSubResuming = false
   let twitchEventSubResumeSocket: WebSocket | undefined
+  let twitchEventSubResumeStartedAt = 0
   let twitchEventSubRetry: NodeJS.Timeout | undefined
   let twitchEventSubRetryAttempt = 0
   const twitchBadgeUrls = new Map<string, string>()
@@ -111,6 +114,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     twitchEventSubSessionId = ''
     twitchEventSubResuming = false
     twitchEventSubResumeSocket = undefined
+    twitchEventSubResumeStartedAt = 0
     twitchEventSubRetryAttempt = 0
     cancelTwitchEventSubRetry()
     twitchIrcReady = false
@@ -132,9 +136,14 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     twitchEventSubRetry = undefined
   }
 
+  function twitchChatReconnectAllowed() {
+    const account = state.accounts.find((item) => item.platform === 'Twitch')
+    return shouldReconnectChat(Boolean(account?.connected), state.health.Twitch.message)
+  }
+
   function scheduleTwitchEventSubReconnect() {
     if (twitchEventSubRetry || twitchEventSubResuming) return
-    if (!tokens.Twitch || twitchEventSubUnsupported) return
+    if (!tokens.Twitch || twitchEventSubUnsupported || !twitchChatReconnectAllowed()) return
     const delay = twitchEventSubRetryDelay(twitchEventSubRetryAttempt)
     twitchEventSubRetryAttempt += 1
     twitchEventSubRetry = setTimeout(() => {
@@ -145,7 +154,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
 
   function connectTwitchEventSub(url = TWITCH_EVENTSUB_DEFAULT_URL) {
     // Reconnect generations: a stale socket's events are dropped once a newer session wins
-    if (!tokens.Twitch?.userId || twitchEventSubUnsupported) return
+    if (!tokens.Twitch?.userId || twitchEventSubUnsupported || !twitchChatReconnectAllowed()) return
     const plan = twitchEventSubConnectPlan(url, twitchEventSubGeneration)
     twitchEventSubGeneration = plan.generation
     const generation = plan.generation
@@ -153,12 +162,14 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     if (plan.resume) {
       twitchEventSubResuming = true
       twitchEventSubResumeSocket = socket
+      twitchEventSubResumeStartedAt = Date.now()
     } else {
       twitchEventSub = socket
       twitchEventSubReady = false
       twitchLastEventSub = 0
       twitchEventSubResuming = false
       twitchEventSubResumeSocket = undefined
+      twitchEventSubResumeStartedAt = 0
     }
     socket.on('message', (data) => {
       if (generation !== twitchEventSubGeneration) return
@@ -172,6 +183,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
         if (previous && previous !== socket) detachTwitchEventSub(previous)
         twitchEventSubResuming = false
         twitchEventSubResumeSocket = undefined
+        twitchEventSubResumeStartedAt = 0
         twitchEventSubRetryAttempt = 0
         cancelTwitchEventSubRetry()
         twitchLastEventSub = Date.now()
@@ -198,14 +210,17 @@ export function createTwitchLive(d: TwitchLiveDeps) {
       if (action === 'resume-failed') {
         twitchEventSubResuming = false
         twitchEventSubResumeSocket = undefined
+        twitchEventSubResumeStartedAt = 0
         twitchEventSubReady = false
         scheduleTwitchEventSubReconnect()
+        connectTwitchIrc()
         return
       }
       twitchEventSub = undefined
       twitchEventSubReady = false
       twitchEventSubResuming = false
       twitchEventSubResumeSocket = undefined
+      twitchEventSubResumeStartedAt = 0
       scheduleTwitchEventSubReconnect()
     })
     socket.on('error', (error) => { console.error('Twitch EventSub:', error.message); socket.close() })
@@ -319,13 +334,32 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     if (activity) addNativeActivity(activity, { always: Boolean(activity.powerUp) })
   }
 
+  function abortHungTwitchEventSubResume() {
+    const resume = twitchEventSubResumeSocket
+    const current = twitchEventSub
+    twitchEventSubResuming = false
+    twitchEventSubResumeSocket = undefined
+    twitchEventSubResumeStartedAt = 0
+    twitchEventSubReady = false
+    detachTwitchEventSub(resume)
+    if (current && current !== resume) detachTwitchEventSub(current)
+    twitchEventSub = undefined
+    console.error('Twitch EventSub resume timed out; reconnecting')
+    scheduleTwitchEventSubReconnect()
+    connectTwitchIrc()
+  }
+
   function watchTwitchEventSub() {
+    if (twitchEventSubResumeTimedOut(twitchEventSubResuming, twitchEventSubResumeStartedAt, Date.now(), twitchKeepaliveMs)) {
+      abortHungTwitchEventSubResume()
+      return
+    }
     if (!twitchEventSub) return
     if (twitchEventSubWatchdogShouldClose(twitchEventSubReady, twitchLastEventSub, Date.now(), twitchKeepaliveMs)) twitchEventSub.close()
   }
 
   function ensureTwitchChat() {
-    if (!tokens.Twitch) return
+    if (!tokens.Twitch || !twitchChatReconnectAllowed()) return
     if (twitchEventSubReady) return
     if (twitchIrc && twitchIrc.readyState === WebSocket.OPEN) return
     if (twitchIrc) {
@@ -335,15 +369,15 @@ export function createTwitchLive(d: TwitchLiveDeps) {
   }
 
   function connectTwitchIrc() {
-    if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
-    void ensureToken('Twitch').then(() => {
-      if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
+    if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady || !twitchChatReconnectAllowed()) return
+    void ensureToken('Twitch').then((token) => {
+      if (!token?.user || twitchIrc || twitchEventSubReady || !twitchChatReconnectAllowed()) return
       openTwitchIrc()
     })
   }
 
   function openTwitchIrc() {
-    if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady) return
+    if (!tokens.Twitch?.user || twitchIrc || twitchEventSubReady || !twitchChatReconnectAllowed()) return
     const nick = tokens.Twitch.user.toLowerCase()
     twitchIrcReady = false
     twitchIrc = new WebSocket('wss://irc-ws.chat.twitch.tv:443')
@@ -376,7 +410,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     twitchIrc.on('close', () => {
       twitchIrc = undefined
       twitchIrcReady = false
-      if (tokens.Twitch && !twitchEventSubReady) setTimeout(connectTwitchIrc, 5_000)
+      if (tokens.Twitch && !twitchEventSubReady && twitchChatReconnectAllowed()) setTimeout(connectTwitchIrc, 5_000)
     })
     twitchIrc.on('error', (error) => {
       if (!/closed before the connection was established/i.test(error.message)) console.error('Twitch IRC:', error.message)

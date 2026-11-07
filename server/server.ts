@@ -1092,7 +1092,7 @@ registerHttpRoutes(app, {
   announcedYoutubePrivacy: youtube.announcedYoutubePrivacy,
   startAdapter,
   authorizationUrl: (platform) => oauth.authorizationUrl(platform),
-  exchangeCode: (platform, code, codeVerifier) => oauth.exchangeCode(platform, code, codeVerifier),
+  completeLogin: (platform, code, codeVerifier) => oauth.completeLogin(platform, code, codeVerifier),
   oauthStates,
   get sseSeq() { return sseSeq },
   get twitchEventSubSessionId() { return twitch.twitchEventSubSessionId },

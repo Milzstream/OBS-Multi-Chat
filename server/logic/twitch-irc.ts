@@ -297,6 +297,12 @@ export function twitchEventSubWatchdogShouldClose(ready: boolean, lastMessageAt:
   return now - lastMessageAt > keepaliveMs + 2_000
 }
 
+/** A resume that never welcomes must not keep chat on a session whose close is ignored. */
+export function twitchEventSubResumeTimedOut(resuming: boolean, startedAt: number, now: number, keepaliveMs: number) {
+  if (!resuming || startedAt <= 0) return false
+  return now - startedAt > Math.max(keepaliveMs, 10_000) + 2_000
+}
+
 /**
  * Subscribe completion must not mark a socket ready after a newer session won.
  * A stale completion used to set ready and close IRC for a session that was already gone.

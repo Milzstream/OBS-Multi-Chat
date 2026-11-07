@@ -26,7 +26,7 @@ export type {
 export { parseActivityMax, parseChatMax } from './logic/limits.js'
 export { activityAppendedEvent, activitySseFields, chatSseFields, snapshotActivityEvents, sseBroadcastEvent, sseChangedKeys, sseNamedEvent } from './logic/sse.js'
 export { looksLikePlaceholder, kickBadges, kickCategorySkipped, kickChannelPatch, kickChannelPollFailure, kickEmoteUrl, kickStreamDetails, parseKickParts, shouldWarnKickChatDown } from './logic/kick.js'
-export { normalizeAvatar, shareInFlight, summarizeApiError } from './logic/http.js'
+export { enqueueExclusive, normalizeAvatar, shareInFlight, summarizeApiError } from './logic/http.js'
 export {
   LIVE_STATUS_POLL_MS,
   YOUTUBE_STATUS_LIVE_MS,
@@ -138,6 +138,7 @@ export {
   twitchEmoteUrl,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
+  twitchEventSubResumeTimedOut,
   twitchEventSubRetryDelay,
   twitchEventSubSubscribeStillCurrent,
   twitchEventSubWatchdogShouldClose,
@@ -202,7 +203,9 @@ export {
   isPermanentTokenRefreshError,
   isTokenRefreshHealthMessage,
   oauthAuthorizeUrl,
+  refreshedTokenIfCurrent,
   shouldKeepTokenRefreshBanner,
+  shouldReconnectChat,
   tokenRefreshFailureMessage,
   tokenRefreshRetryMessage,
 } from './logic/oauth.js'
