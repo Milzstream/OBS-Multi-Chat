@@ -41,6 +41,27 @@ export function shouldKeepTokenRefreshBanner(health: Health, connected: boolean)
   return isTokenRefreshHealthMessage(health.message) && !connected
 }
 
+/** A failed refresh leaves the token so the reconnect banner can show. Chat must not reopen until the user reconnects. */
+export function shouldReconnectChat(connected: boolean, healthMessage: string) {
+  return connected || !isTokenRefreshHealthMessage(healthMessage)
+}
+
+/** A refresh that started on a replaced login must not write over the newer token. */
+export function refreshedTokenIfCurrent<T extends { accessToken: string; refreshToken?: string; expiresAt?: number }>(
+  current: T | undefined,
+  started: T,
+  json: { access_token: string; refresh_token?: string; expires_in?: number },
+  now: number,
+): T | undefined {
+  if (current !== started) return
+  return {
+    ...started,
+    accessToken: json.access_token,
+    refreshToken: json.refresh_token || started.refreshToken,
+    expiresAt: json.expires_in ? now + json.expires_in * 1000 : started.expiresAt,
+  }
+}
+
 /**
  * Kick's first realtime handshake does extra HTTP before the socket is up.
  * "Not connected yet" on launch is that handshake, not a drop — wait until a

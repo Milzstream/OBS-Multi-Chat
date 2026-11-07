@@ -36,3 +36,11 @@ export function shareInFlight<K, T>(locks: Map<K, Promise<T>>, key: K, run: () =
   locks.set(key, pending)
   return pending
 }
+
+/** Serialize different operations on one key. A rejection does not stall the next caller. */
+export function enqueueExclusive<K, T>(tails: Map<K, Promise<unknown>>, key: K, run: () => Promise<T>): Promise<T> {
+  const previous = tails.get(key) ?? Promise.resolve()
+  const result = previous.then(run, run)
+  tails.set(key, result.then(() => undefined, () => undefined))
+  return result
+}

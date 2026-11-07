@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { isPermanentTokenRefreshError, isTokenRefreshHealthMessage, oauthAuthorizeUrl, shareInFlight, tokenRefreshFailureMessage, tokenRefreshRetryMessage } from './logic.js'
+import { enqueueExclusive, isPermanentTokenRefreshError, oauthAuthorizeUrl, refreshedTokenIfCurrent, shareInFlight, tokenRefreshFailureMessage, tokenRefreshRetryMessage } from './logic.js'
 import type { Account, Health, Platform, Token, TokenPlatform } from './types.js'
 import type { createOAuthStateStore } from './oauth-state.js'
 
@@ -31,6 +31,7 @@ export function createOAuth(d: OAuthDeps) {
     setHealth,
   } = d
   const refreshLocks = new Map<Platform, Promise<Token | undefined>>()
+  const authQueue = new Map<Platform, Promise<unknown>>()
 
   function authorizationUrl(platform: Platform) {
     const clientId = process.env[`${platform.toUpperCase()}_CLIENT_ID`]
@@ -60,6 +61,15 @@ export function createOAuth(d: OAuthDeps) {
       try { await hydrateYouTubeToken(token) } catch { token.user = token.user || 'YouTube' }
     } else await hydrateKickToken(token)
     return token
+  }
+
+  async function completeLogin(platform: Platform, code: string, codeVerifier?: string): Promise<Token> {
+    return enqueueExclusive(authQueue, platform, async () => {
+      const token = await exchangeCode(platform, code, codeVerifier)
+      tokens[platform] = token
+      saveTokens()
+      return token
+    })
   }
 
   async function hydrateYouTubeToken(token: Token) {
@@ -100,12 +110,12 @@ export function createOAuth(d: OAuthDeps) {
   }
 
   async function refreshAccessToken(platform: Platform): Promise<Token | undefined> {
-    return shareInFlight(refreshLocks, platform, () => refreshAccessTokenNow(platform))
+    return shareInFlight(refreshLocks, platform, () => enqueueExclusive(authQueue, platform, () => refreshAccessTokenNow(platform)))
   }
 
   async function refreshAccessTokenNow(platform: Platform): Promise<Token | undefined> {
-    const token = tokens[platform]
-    if (!token?.refreshToken) {
+    const started = tokens[platform]
+    if (!started?.refreshToken) {
       markTokenRefreshFailure(platform)
       return
     }
@@ -114,19 +124,17 @@ export function createOAuth(d: OAuthDeps) {
         client_id: process.env[`${platform.toUpperCase()}_CLIENT_ID`] || '',
         client_secret: process.env[`${platform.toUpperCase()}_CLIENT_SECRET`] || '',
         grant_type: 'refresh_token',
-        refresh_token: token.refreshToken,
+        refresh_token: started.refreshToken,
       })
-      tokens[platform] = {
-        ...token,
-        accessToken: json.access_token,
-        refreshToken: json.refresh_token || token.refreshToken,
-        expiresAt: json.expires_in ? Date.now() + json.expires_in * 1000 : token.expiresAt,
-      }
+      const next = refreshedTokenIfCurrent(tokens[platform], started, json, Date.now())
+      if (!next) return tokens[platform]
+      tokens[platform] = next
       saveTokens()
       console.log(`${platform} access token refreshed`)
       restorePlatformConnection(platform)
-      return tokens[platform]
+      return next
     } catch (error) {
+      if (tokens[platform] !== started) return tokens[platform]
       console.error(`${platform} token refresh:`, error instanceof Error ? error.message : error)
       if (isPermanentTokenRefreshError(error)) markTokenRefreshFailure(platform)
       else setHealth(platform, 'warn', tokenRefreshRetryMessage(platform))
@@ -143,6 +151,7 @@ export function createOAuth(d: OAuthDeps) {
   return {
     authorizationUrl,
     exchangeCode,
+    completeLogin,
     hydrateYouTubeToken,
     hydrateKickToken,
     requestToken,

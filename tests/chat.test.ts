@@ -15,6 +15,7 @@ import {
   sseNamedEvent,
   summarizeApiError,
   translateFailureMessage,
+  enqueueExclusive,
   shareInFlight,
   restoreYouTubeQuotaBlock,
   youtubeBanChatIds,
@@ -155,6 +156,24 @@ describe('0.7.4 relay fixes', () => {
     assert.equal(calls, 1)
     assert.equal(first, 1)
     assert.equal(second, 1)
+  })
+
+  it('runs one platform login and refresh at a time, and a failure does not stall the next', async () => {
+    const tails = new Map<string, Promise<unknown>>()
+    const order: string[] = []
+    const first = enqueueExclusive(tails, 'Twitch', async () => {
+      order.push('first-start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('first-end')
+      throw new Error('refresh failed')
+    })
+    const second = enqueueExclusive(tails, 'Twitch', async () => {
+      order.push('second')
+      return 'login'
+    })
+    await assert.rejects(first, /refresh failed/)
+    assert.equal(await second, 'login')
+    assert.deepEqual(order, ['first-start', 'first-end', 'second'])
   })
 
   it('keeps a scraped video off the previous live chat id', () => {

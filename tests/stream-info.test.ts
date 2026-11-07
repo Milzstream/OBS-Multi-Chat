@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { createOAuth } from '../server/oauth.js'
+import { createOAuthStateStore } from '../server/oauth-state.js'
+import type { Account, Health, Platform, Token } from '../server/types.js'
 import {
   applyLiveStreamDetails,
   defaultAppSettings,
@@ -29,7 +32,9 @@ import {
   loadYouTubeQuota,
   oauthAuthorizeUrl,
   parseAppSettings,
+  refreshedTokenIfCurrent,
   shouldKeepTokenRefreshBanner,
+  shouldReconnectChat,
   LIVE_STATUS_POLL_MS,
   shouldPollLiveStatus,
   shouldRunYouTubeStatusCheck,
@@ -234,6 +239,23 @@ describe('token refresh health', () => {
     assert.equal(shouldKeepTokenRefreshBanner(down, true), false)
     assert.equal(shouldKeepTokenRefreshBanner(retry, false), true)
     assert.equal(shouldKeepTokenRefreshBanner({ status: 'ok', message: '' }, false), false)
+    assert.equal(shouldReconnectChat(true, down.message), true)
+    assert.equal(shouldReconnectChat(false, down.message), false)
+    assert.equal(shouldReconnectChat(true, retry.message), true)
+    assert.equal(shouldReconnectChat(false, ''), true)
+  })
+
+  it('keeps a newer login when a refresh started on the previous token', () => {
+    const started = { accessToken: 'old', refreshToken: 'old-refresh', expiresAt: 1, user: 'old' }
+    const replacement = { accessToken: 'login', refreshToken: 'login-refresh', expiresAt: 2, user: 'new' }
+    assert.equal(refreshedTokenIfCurrent(replacement, started, { access_token: 'refreshed', refresh_token: 'rotated', expires_in: 60 }, 1_000), undefined)
+    assert.equal(refreshedTokenIfCurrent(undefined, started, { access_token: 'refreshed' }, 1_000), undefined)
+    const next = refreshedTokenIfCurrent(started, started, { access_token: 'refreshed', refresh_token: 'rotated', expires_in: 60 }, 1_000)
+    assert.equal(next?.accessToken, 'refreshed')
+    assert.equal(next?.refreshToken, 'rotated')
+    assert.equal(next?.expiresAt, 61_000)
+    assert.equal(next?.user, 'old')
+    assert.notEqual(next, started)
   })
 
   it('treats invalid grants as permanent and network/quota errors as retryable', () => {
@@ -243,5 +265,60 @@ describe('token refresh health', () => {
     assert.equal(isPermanentTokenRefreshError(new Error('fetch failed')), false)
     assert.equal(isPermanentTokenRefreshError(new Error('YouTube token request: 503 Service Unavailable')), false)
     assert.equal(isPermanentTokenRefreshError(new Error('Kick token request: 429')), false)
+  })
+})
+
+describe('login and refresh lock', () => {
+  it('does not let an in-flight refresh overwrite or fail a login that replaced its token', async () => {
+    const started: Token = { accessToken: 'old', refreshToken: 'old-refresh', user: 'old', expiresAt: 1 }
+    const replacement: Token = { accessToken: 'login', refreshToken: 'login-refresh', user: 'new', userId: '9' }
+    const tokens: Partial<Record<'Twitch', Token>> = { Twitch: started }
+    const account: Account = { platform: 'Twitch', connected: true, live: false, viewers: 0, handle: 'old' }
+    const health: Record<Platform, Health> = {
+      Twitch: { status: 'ok', message: '' },
+      Kick: { status: 'ok', message: '' },
+      YouTube: { status: 'ok', message: '' },
+    }
+    let releaseRefresh!: () => void
+    const refreshHeld = new Promise<void>((resolve) => { releaseRefresh = resolve })
+    let refreshEntered!: () => void
+    const refreshStarted = new Promise<void>((resolve) => { refreshEntered = resolve })
+    const original = globalThis.fetch
+    globalThis.fetch = async (_url, init) => {
+      const body = String(init?.body || '')
+      if (body.includes('grant_type=refresh_token')) {
+        refreshEntered()
+        await refreshHeld
+        return new Response('{"error":"invalid_grant"}', { status: 400 })
+      }
+      return new Response(JSON.stringify({ access_token: 'from-code', refresh_token: 'from-code-refresh', expires_in: 3600 }), { status: 200 })
+    }
+    try {
+      const oauth = createOAuth({
+        tokens,
+        state: { accounts: [account], health },
+        oauthStates: createOAuthStateStore(),
+        redirectUri: 'http://127.0.0.1/oauth/callback',
+        twitchApi: async () => ({ data: [{ id: '9', login: 'new' }] }),
+        youtubeApi: async () => ({}),
+        kickApi: async () => new Response('{}'),
+        saveTokens: () => {},
+        restorePlatformConnection: () => {},
+        setHealth: (_platform, status, message) => { health.Twitch = { status, message: message || '' } },
+      })
+      const refresh = oauth.refreshAccessToken('Twitch')
+      await refreshStarted
+      tokens.Twitch = replacement
+      const login = oauth.completeLogin('Twitch', 'code')
+      releaseRefresh()
+      assert.equal(await refresh, replacement)
+      assert.equal(account.connected, true)
+      const loggedIn = await login
+      assert.equal(tokens.Twitch, loggedIn)
+      assert.equal(loggedIn.accessToken, 'from-code')
+      assert.equal(loggedIn.user, 'new')
+    } finally {
+      globalThis.fetch = original
+    }
   })
 })

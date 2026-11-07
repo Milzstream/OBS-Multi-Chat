@@ -18,6 +18,7 @@ import {
   twitchEmoteUrl,
   twitchEventSubCloseAction,
   twitchEventSubConnectPlan,
+  twitchEventSubResumeTimedOut,
   twitchEventSubRetryDelay,
   twitchEventSubSubscribeStillCurrent,
   twitchEventSubWatchdogShouldClose,
@@ -166,6 +167,12 @@ describe('Twitch EventSub reconnect', () => {
     assert.equal(twitchEventSubWatchdogShouldClose(false, 1, 100_000, 10_000), false)
     assert.equal(twitchEventSubWatchdogShouldClose(true, 0, 100_000, 10_000), false)
     assert.equal(twitchEventSubWatchdogShouldClose(true, 1, 20_000, 10_000), true)
+    assert.equal(twitchEventSubResumeTimedOut(false, 1_000, 20_000, 10_000), false)
+    assert.equal(twitchEventSubResumeTimedOut(true, 0, 20_000, 10_000), false)
+    assert.equal(twitchEventSubResumeTimedOut(true, 1_000, 13_000, 10_000), false)
+    assert.equal(twitchEventSubResumeTimedOut(true, 1_000, 13_001, 10_000), true)
+    assert.equal(twitchEventSubResumeTimedOut(true, 1_000, 33_000, 30_000), false)
+    assert.equal(twitchEventSubResumeTimedOut(true, 1_000, 33_001, 30_000), true)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 5, 'session-a'), true)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 6, 'session-a'), false)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, '', 5, ''), false)

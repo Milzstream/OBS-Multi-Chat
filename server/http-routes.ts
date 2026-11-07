@@ -118,7 +118,7 @@ export type HttpRouteDeps = {
   announcedYoutubePrivacy: Set<string>
   startAdapter: (platform: Platform) => void
   authorizationUrl: (platform: Platform) => string | null
-  exchangeCode: (platform: Platform, code: string, codeVerifier?: string) => Promise<Token>
+  completeLogin: (platform: Platform, code: string, codeVerifier?: string) => Promise<Token>
   oauthStates: ReturnType<typeof createOAuthStateStore>
   get sseSeq(): number
   get twitchEventSubSessionId(): string
@@ -183,7 +183,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     announcedYoutubePrivacy,
     startAdapter,
     authorizationUrl,
-    exchangeCode,
+    completeLogin,
     oauthStates,
   } = d
 
@@ -599,10 +599,9 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     if (!code || !platform || Date.now() - oauthState.createdAt > OAUTH_STATE_TTL_MS) return response.status(400).send('OAuth callback is missing a valid state or code.')
     oauthStates.delete(String(request.query.state))
     try {
-      tokens[platform] = await exchangeCode(platform, code, oauthState.codeVerifier)
-      saveTokens()
+      const token = await completeLogin(platform, code, oauthState.codeVerifier)
       const account = state.accounts.find((item) => item.platform === platform)
-      if (account) Object.assign(account, { connected: true, handle: tokens[platform]?.user || platform })
+      if (account) Object.assign(account, { connected: true, handle: token.user || platform })
       setHealth(platform, 'ok')
       startAdapter(platform)
       broadcast()
