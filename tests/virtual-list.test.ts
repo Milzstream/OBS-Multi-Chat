@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { keyLeavesEdge, movedAwayFromEdge, nextPinState, scrollLeavesEdge } from '../src/autoScroll.tsx'
+import { holdSettlesPinned, keyLeavesEdge, movedAwayFromEdge, nextPinState, scrollLeavesEdge, scrolledPastEdge } from '../src/autoScroll.tsx'
 import { consumeCodeScroll, recordRowHeights, rowOffsets, scrollListTo, virtualWindow } from '../src/virtualList.ts'
 
 describe('virtual list window', () => {
@@ -72,7 +72,18 @@ describe('auto-scroll pinning', () => {
     assert.equal(nextPinState(true, false, false), true)
     // Still inside the edge zone, but heading away: a smooth scroll's first small steps must not re-pin.
     assert.equal(nextPinState(true, false, false, true), false)
-    assert.equal(nextPinState(true, false, true, true), false)
+    // A clamp drops scrollTop while the viewport is still on the live edge, so a pinned list stays pinned.
+    assert.equal(nextPinState(true, false, true, true), true)
+  })
+
+  it('settles a leave-edge gesture back onto the edge unless the user scrolled past it', () => {
+    assert.equal(scrolledPastEdge('bottom', 1000, 990), false)
+    assert.equal(scrolledPastEdge('bottom', 1000, 900), true)
+    assert.equal(scrolledPastEdge('top', 0, 40), false)
+    assert.equal(scrolledPastEdge('top', 0, 100), true)
+    assert.equal(holdSettlesPinned(true, true), true)
+    assert.equal(holdSettlesPinned(false, false), true)
+    assert.equal(holdSettlesPinned(false, true), false)
   })
 
   it('marks a code scroll for one scroll event only, so returning to that spot later counts as the user', () => {
