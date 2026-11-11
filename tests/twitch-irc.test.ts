@@ -12,7 +12,13 @@ import {
   parseTwitchEmoteParts,
   parseTwitchModerationLine,
   partsFromTwitchFragments,
+  applyOutgoingSendResult,
   sanitizeIrcMessage,
+  twitchEventSubEchoId,
+  twitchHelixSendAck,
+  twitchHelixSendError,
+  twitchIrcEchoId,
+  twitchSendStep,
   twitchBadgeLabel,
   twitchBadgesFromTag,
   twitchEmoteUrl,
@@ -176,6 +182,65 @@ describe('Twitch EventSub reconnect', () => {
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 5, 'session-a'), true)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, 'session-a', 6, 'session-a'), false)
     assert.equal(twitchEventSubSubscribeStillCurrent(5, '', 5, ''), false)
+  })
+})
+
+describe('Twitch send acknowledgement', () => {
+  it('treats a Helix message id as the ack and a drop as final', () => {
+    assert.deepEqual(twitchHelixSendAck({ data: [{ is_sent: true, message_id: 'msg-1' }] }), { ok: true, id: 'msg-1' })
+    assert.deepEqual(twitchHelixSendAck({ data: [{ message_id: 'msg-2' }] }), { ok: true, id: 'msg-2' })
+    assert.deepEqual(twitchHelixSendAck({ data: [{ is_sent: false, message_id: 'ignored', drop_reason: { message: 'banned' } }] }), { ok: false, error: 'banned', dropped: true })
+    assert.deepEqual(twitchHelixSendAck({ data: [{ is_sent: true }] }), { ok: false, error: 'Twitch did not acknowledge the message', unacked: true })
+    assert.deepEqual(twitchHelixSendAck({}), { ok: false, error: 'Twitch did not acknowledge the message', unacked: true })
+    assert.equal(twitchHelixSendError('Twitch user id missing').unavailable, true)
+    assert.equal(twitchHelixSendError('Twitch API 403: missing scope').unavailable, true)
+    assert.equal(twitchHelixSendError('Twitch API 401: unauthorized').unavailable, true)
+    assert.equal(twitchHelixSendError('Twitch API 500: upstream').ambiguous, true)
+    assert.equal(twitchHelixSendError('Twitch API 400: message too long').ambiguous, true)
+    assert.equal(twitchHelixSendError('fetch failed').ambiguous, true)
+  })
+
+  it('does not send a second copy after a drop or an ambiguous Helix call', () => {
+    const up = { ircReady: true, eventSubReady: true }
+    const down = { ircReady: false, eventSubReady: false }
+    assert.equal(twitchSendStep(twitchHelixSendAck({ data: [{ is_sent: true, message_id: 'msg-1' }] }), down), 'return')
+    assert.equal(twitchSendStep(twitchHelixSendAck({ data: [{ is_sent: false, drop_reason: { message: 'no' } }] }), up), 'return')
+    assert.equal(twitchSendStep(twitchHelixSendAck({ data: [{ is_sent: true }] }), up), 'await-echo')
+    assert.equal(twitchSendStep(twitchHelixSendAck({}), down), 'return')
+    assert.equal(twitchSendStep(twitchHelixSendError('Twitch API 403: missing scope'), down), 'irc')
+    assert.equal(twitchSendStep(twitchHelixSendError('Twitch user id missing'), { ircReady: false, eventSubReady: true }), 'irc')
+    assert.equal(twitchSendStep(twitchHelixSendError('Twitch API 500: upstream'), up), 'await-echo')
+    assert.equal(twitchSendStep(twitchHelixSendError('Twitch API 500: upstream'), down), 'return')
+    assert.equal(twitchSendStep(twitchHelixSendError('fetch failed'), { ircReady: true, eventSubReady: false }), 'await-echo')
+  })
+
+  it('reads a real IRC id and ignores a synthetic one', () => {
+    const own = '@display-name=Ada;id=abc :ada!ada@ada.tmi.twitch.tv PRIVMSG #ada :gg'
+    assert.equal(twitchIrcEchoId(own, 'ada', 'gg'), 'abc')
+    assert.equal(twitchIrcEchoId(own, 'ADA', 'gg'), 'abc')
+    assert.equal(twitchIrcEchoId(own, 'other', 'gg'), undefined)
+    assert.equal(twitchIrcEchoId(own, 'ada', 'nope'), undefined)
+    const untagged = ':ada!ada@ada.tmi.twitch.tv PRIVMSG #ada :gg'
+    const parsed = parseTwitchChatLine(untagged)
+    assert.ok(parsed && parsed !== 'ping' && parsed.id)
+    assert.equal(twitchIrcEchoId(untagged, 'ada', 'gg'), undefined)
+    assert.equal(twitchIrcEchoId('@id= :ada!ada@ada.tmi.twitch.tv PRIVMSG #ada :gg', 'ada', 'gg'), undefined)
+  })
+
+  it('reads an EventSub echo id only for this login and text', () => {
+    const event = { chatter_user_login: 'ada', chatter_user_name: 'Ada', message_id: 'm1', message: { text: 'gg' } }
+    assert.equal(twitchEventSubEchoId(event, 'ada', 'gg'), 'm1')
+    assert.equal(twitchEventSubEchoId(event, 'bob', 'gg'), undefined)
+    assert.equal(twitchEventSubEchoId(event, 'ada', 'nope'), undefined)
+    assert.equal(twitchEventSubEchoId({ ...event, message_id: '  ' }, 'ada', 'gg'), undefined)
+    assert.equal(twitchEventSubEchoId({ ...event, message_id: undefined }, 'ada', 'gg'), undefined)
+  })
+
+  it('stamps the Helix message id onto the optimistic row', () => {
+    const sent = [{ id: 'local', platform: 'Twitch' as const, user: 'me', text: 'gg', time: '2026-09-02T12:00:00.000Z' }]
+    const next = applyOutgoingSendResult(sent, 'local', [{ platform: 'Twitch', ok: true, id: 'msg-1' }]).messages
+    assert.equal(next[0].id, 'msg-1')
+    assert.equal(next[0].localId, 'local')
   })
 })
 

@@ -1,5 +1,5 @@
 /**
- * Twitch IRC parse, badges, emotes, EventSub reconnect plans, EventSub-to-activity mapping.
+ * Twitch IRC parse, badges, emotes, send acknowledgement, EventSub reconnect plans, EventSub-to-activity mapping.
  */
 
 import crypto from 'node:crypto'
@@ -161,6 +161,51 @@ export function parseTwitchModerationLine(line: string): ChatModeration | undefi
 
 export function sanitizeIrcMessage(text: string) {
   return text.replace(/[\r\n\0]/g, ' ')
+}
+
+export type TwitchHelixSendAck =
+  | { ok: true; id: string }
+  | { ok: false; error: string; dropped?: true; unacked?: true; unavailable?: true; ambiguous?: true }
+
+export function twitchHelixSendAck(body: unknown): TwitchHelixSendAck {
+  const row = (body as { data?: { is_sent?: boolean; message_id?: string; drop_reason?: { message?: string } }[] } | null)?.data?.[0]
+  if (row?.is_sent === false) return { ok: false, error: row.drop_reason?.message || 'Twitch dropped the message', dropped: true }
+  const id = String(row?.message_id || '').trim()
+  if (id) return { ok: true, id }
+  return { ok: false, error: 'Twitch did not acknowledge the message', unacked: true }
+}
+
+export function twitchHelixSendError(error: string): TwitchHelixSendAck {
+  const status = /^Twitch API (\d{3})\b/.exec(error)?.[1]
+  if (/user id missing/i.test(error) || status === '401' || status === '403' || /user:write:chat/i.test(error)) return { ok: false, error, unavailable: true }
+  return { ok: false, error, ambiguous: true }
+}
+
+export function twitchSendStep(
+  ack: { ok: boolean; dropped?: boolean; unacked?: boolean; unavailable?: boolean; ambiguous?: boolean },
+  chat: { ircReady: boolean; eventSubReady: boolean },
+): 'return' | 'irc' | 'await-echo' {
+  if (ack.ok || ack.dropped) return 'return'
+  if (ack.unavailable) return 'irc'
+  if ((ack.unacked || ack.ambiguous) && (chat.ircReady || chat.eventSubReady)) return 'await-echo'
+  return 'return'
+}
+
+export function twitchIrcEchoId(line: string, nick: string, sentText: string) {
+  const match = line.match(/^(?:@([^ ]+) )?:([^!]+)!.* PRIVMSG #[^ ]+ :(.*)$/)
+  if (!match || !nick) return
+  if (match[2].toLowerCase() !== nick.toLowerCase()) return
+  if (match[3] !== sentText) return
+  const id = parseIrcTags(match[1] || '').id?.trim()
+  return id || undefined
+}
+
+export function twitchEventSubEchoId(event: { chatter_user_login?: string; message_id?: string; message?: { text?: string } } | null | undefined, nick: string, sentText: string) {
+  const login = String(event?.chatter_user_login || '')
+  if (!nick || !login || login.toLowerCase() !== nick.toLowerCase()) return
+  if (String(event?.message?.text ?? '') !== sentText) return
+  const id = String(event?.message_id || '').trim()
+  return id || undefined
 }
 
 
