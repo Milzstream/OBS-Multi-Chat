@@ -96,7 +96,7 @@ The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, 
 
 ### Automatic chat translation
 
-Messages containing CJK, Cyrillic, Arabic, Hangul, or Hebrew text can be translated to English for the dock. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in the Relay Chat Dock window.
+Messages in another language can be translated to English for the dock. Script detection covers CJK, Cyrillic, Arabic, Hangul, and Hebrew. Longer Latin-script lines are detected locally, so Spanish, French, German, and other languages are included without sending every line to the translator. Short lines are skipped because detection is unreliable there; right-click a chat line and choose Translate to force that one. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in the Relay Chat Dock window. Right-click Translate is hidden while that setting is off.
 
 By default the translated text comes from Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`), which needs no key. If you would rather not use the unofficial endpoint, set one of these in `production.env` and restart:
 

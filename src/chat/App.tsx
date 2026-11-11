@@ -169,6 +169,20 @@ function App() {
       window.setTimeout(() => setSendStatus(''), 4000)
     }).catch(() => { restore(); setSendStatus('Message request failed') }).finally(() => { sendingRef.current = false; setSending(false) })
   }
+  const translateMessage = () => {
+    if (!menu || !translateChat || menu.message.originalText || !menu.message.text.trim()) return
+    const id = menu.message.id
+    setMenu(null)
+    void fetch(`/api/messages/${encodeURIComponent(id)}/translate`, { method: 'POST' }).then(async (response) => {
+      const result = await response.json().catch(() => ({})) as { ok?: boolean; error?: string }
+      if (response.ok && result.ok !== false) return
+      setSendStatus(result.error || 'Could not translate')
+      window.setTimeout(() => setSendStatus(''), 4000)
+    }).catch(() => {
+      setSendStatus('Translate request failed')
+      window.setTimeout(() => setSendStatus(''), 4000)
+    })
+  }
   const moderate = (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => {
     if (!menu || moderatingRef.current) return
     const target = menu.message
@@ -230,7 +244,7 @@ function App() {
       <section className="chat-section"><div className="chat-toolbar"><div className="filter-tabs">{(['All', 'Twitch', 'Kick', 'YouTube'] as const).map((filter) => <button key={filter} className={activeFilter === filter ? 'filter active' : 'filter'} onClick={() => setActiveFilter(filter)}>{filter === 'All' ? <Hash size={13} /> : platformIcon(filter, 13)}<span className="filter-label">{filter}</span>{filter !== 'All' && <i />}</button>)}</div><button className="toolbar-icon" onClick={() => setCompactMode((mode) => !mode)} aria-label="Toggle compact chat"><SlidersHorizontal size={16} /></button></div><div className="chat-feed"><div className="chat-list" ref={chatListRef} onScroll={onChatScroll}>{visibleMessages.length ? <><div className="virtual-spacer" style={{ height: chatPadTop }} aria-hidden="true" />{visibleMessages.slice(chatStart, chatEnd).map((message, offset) => <MessageItem key={message.id} rowIndex={chatStart + offset} message={message} channelLogin={twitchChannel} showTranslationMark={translateChat} mentioned={mentionsYou(message)} onModerate={(event, item) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, message: item }) }} />)}<div className="virtual-spacer" style={{ height: chatPadBottom }} aria-hidden="true" /></> : <div className="empty-chat"><div className="empty-icon"><Radio size={20} /></div><strong>{connectedAccounts.length ? 'Waiting for chat' : 'No messages yet'}</strong><span>{connectedAccounts.length ? 'Live chat will show up here.' : 'Connect accounts in the Relay Chat Dock window.'}</span></div>}</div>{chatPaused ? <ScrollPausedBadge onResume={resumeChatScroll} /> : null}</div></section>
       <section className="composer-section"><div className="send-to"><span>SEND TO</span>{(['Twitch', 'Kick', 'YouTube'] as Platform[]).map((platform) => { const connection = connections.find((item) => item.platform === platform)!; return <button key={platform} disabled={!connection.connected} className={selectedPlatforms.includes(platform) ? 'destination selected' : 'destination'} onClick={() => togglePlatform(platform)} aria-label={`Send to ${platform}`}><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 14)}</span>{selectedPlatforms.includes(platform) && <Check size={11} />}</button> })}</div><form className="composer" onSubmit={sendMessage}><input disabled={!backendOnline} value={composer} onChange={(event) => setComposer(event.target.value)} placeholder={!backendOnline ? 'Start Relay backend to send' : 'Send a message...'} /><button className="send-button" disabled={sending || selectedPlatforms.length === 0 || !backendOnline} type="submit" aria-label="Send message"><Send size={16} /></button></form>{sendStatus ? <div className="composer-footer"><span><Link2 size={12} /> {sendStatus}</span></div> : null}</section>
       {showControls && <StreamControls title={streamTitle} details={streamDetails} connections={connections} onSave={saveStreamInfo} onClose={() => setShowControls(false)} />}
-      {menu && <ModMenu menu={menu} onModerate={moderate} onClose={() => setMenu(null)} />}
+      {menu && <ModMenu menu={menu} onModerate={moderate} onTranslate={translateChat && !menu.message.originalText && menu.message.text.trim() ? translateMessage : undefined} onClose={() => setMenu(null)} />}
       <div className="resize-hint"><span>RESIZABLE</span></div>
     </main>
   )
