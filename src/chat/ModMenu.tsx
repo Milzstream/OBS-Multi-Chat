@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { moderationPlatformLabel, youtubeBanConfirmLabel } from '../chat-helpers'
 import type { ModMenuState } from './types'
 
-export function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onModerate: (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => void; onClose: () => void }) {
+export function ModMenu({ menu, onModerate, onTranslate, onClose }: { menu: ModMenuState; onModerate: (action: 'delete' | 'timeout' | 'ban' | 'unban', duration?: number, reason?: string) => void; onTranslate?: () => void; onClose: () => void }) {
   const [reason, setReason] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const prompt = menu.prompt
@@ -14,7 +14,8 @@ export function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onM
   const width = prompting ? 228 : 168
   const messageDeleted = menu.message.removed === 'message'
   const userHidden = Boolean(menu.message.deleted && !messageDeleted)
-  const height = confirmOnly ? 112 : prompting ? 168 : userHidden ? 90 : 190
+  const showTranslate = Boolean(onTranslate) && !prompting
+  const height = (confirmOnly ? 112 : prompting ? 168 : userHidden ? 90 : 190) + (showTranslate ? 32 : 0)
   const platformLabel = moderationPlatformLabel(menu.message)
   return (
     <div className={prompting ? 'mod-menu mod-menu-prompt' : 'mod-menu'} style={{ left: Math.max(6, Math.min(menu.x, window.innerWidth - width)), top: Math.max(6, Math.min(menu.y, window.innerHeight - height)) }} onClick={(event) => event.stopPropagation()}>
@@ -36,7 +37,11 @@ export function ModMenu({ menu, onModerate, onClose }: { menu: ModMenuState; onM
             <button type="button" onClick={onClose}>Cancel</button>
           </div>
         </form>
-      ) : userHidden ? <button type="button" onClick={() => onModerate('unban')}>Unban / untimeout</button> : <>
+      ) : userHidden ? <>
+        {showTranslate ? <button type="button" onClick={onTranslate}>Translate</button> : null}
+        <button type="button" onClick={() => onModerate('unban')}>Unban / untimeout</button>
+      </> : <>
+        {showTranslate ? <button type="button" onClick={onTranslate}>Translate</button> : null}
         {messageDeleted ? null : <button type="button" onClick={() => onModerate('delete')}>Delete message</button>}
         <button type="button" onClick={() => onModerate('timeout', 60)}>Timeout 1m</button>
         <button type="button" onClick={() => onModerate('timeout', 600)}>Timeout 10m</button>

@@ -89,6 +89,7 @@ export type HttpRouteDeps = {
   scheduleChatSave: () => void
   broadcast: () => void
   moderate: (platform: Platform, body: { action: string; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }) => Promise<{ ok: boolean; error?: string; reason?: string }>
+  forceTranslate: (messageId: string) => Promise<{ ok: boolean; error?: string; status?: number }>
   applyChatModerationToState: (change: ChatModeration) => boolean
   youtubePrivacyDismissed: Set<string>
   setYoutubePrivacy: (notices: YoutubePrivacyNotice[]) => void
@@ -154,6 +155,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     scheduleChatSave,
     broadcast,
     moderate,
+    forceTranslate,
     applyChatModerationToState,
     youtubePrivacyDismissed,
     setYoutubePrivacy,
@@ -276,6 +278,17 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       broadcast()
     }
     response.json({ results })
+  })
+  app.post('/api/messages/:id/translate', async (request, response) => {
+    const raw = request.params.id
+    const id = (Array.isArray(raw) ? raw[0] : raw || '').trim()
+    if (!id) return response.status(400).json({ ok: false, error: 'message id is required' })
+    try {
+      const result = await forceTranslate(id)
+      response.status(result.status ?? 200).json({ ok: result.ok, ...(result.error ? { error: result.error } : {}) })
+    } catch (error) {
+      response.status(502).json({ ok: false, error: error instanceof Error ? error.message : String(error) })
+    }
   })
   app.post('/api/moderate', async (request, response) => {
       const body = request.body as { action?: string; platform?: Platform; messageId?: string; userId?: string; sourceId?: string; duration?: number; reason?: string }

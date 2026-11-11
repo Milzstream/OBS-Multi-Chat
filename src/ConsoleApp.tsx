@@ -487,6 +487,7 @@ export default function ConsoleApp() {
             <span>Translate non-English chat to English</span>
             <input type="checkbox" checked={settings.translateChat} onChange={() => patchSettings({ translateChat: !settings.translateChat })} />
           </label>
+          <p className="settings-note">Longer Latin messages are detected on this computer. Right-click a chat line and choose Translate for a short one.</p>
           {settings.translateChat && settings.translateError ? <p className="settings-note">{settings.translateError}</p> : null}
           <label className="settings-field">
             <span>Highlight words</span>

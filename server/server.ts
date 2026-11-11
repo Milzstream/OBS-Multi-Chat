@@ -399,9 +399,9 @@ function clearTranslateFailure() {
   broadcast()
 }
 /** Translate a chat snippet to English using the configured provider, with a per-session cache. Falls back silently to the original text on any failure. */
-async function translateToEnglish(text: string) {
+async function translateToEnglish(text: string, options?: { force?: boolean }) {
   const key = text.trim()
-  if (!key || !needsTranslation(key)) return
+  if (!key || (!options?.force && !needsTranslation(key))) return
   const cached = translationCache.get(key)
   if (cached) return cached
   const config = resolveTranslateConfig()
@@ -439,15 +439,15 @@ async function translateToEnglish(text: string) {
   }
 }
 
-async function applyTranslation(message: ChatMessage) {
+async function applyTranslation(message: ChatMessage, options?: { force?: boolean }) {
   if (!settings.translateChat) return
   const parts = message.parts?.length ? message.parts : (message.text ? [{ type: 'text' as const, text: message.text }] : [])
   let changed = false
   const next: MessagePart[] = []
   for (const part of parts) {
-    if (part.type !== 'text' || !needsTranslation(part.text)) { next.push(part); continue }
+    if (part.type !== 'text' || (!options?.force && !needsTranslation(part.text))) { next.push(part); continue }
     try {
-      const translated = await translateToEnglish(part.text)
+      const translated = await translateToEnglish(part.text, options)
       if (translated) { next.push({ type: 'text', text: translated }); changed = true }
       else next.push(part)
     } catch { next.push(part) }
@@ -477,6 +477,15 @@ async function drainTranslations() {
     await Promise.all(batch.map((item) => applyTranslation(item)))
   }
   translating = false
+}
+
+async function forceTranslateMessage(messageId: string): Promise<{ ok: boolean; error?: string; status?: number }> {
+  if (!settings.translateChat) return { ok: false, error: 'Translation is off', status: 409 }
+  const message = state.messages.find((item) => item.id === messageId || item.localId === messageId || item.copies?.some((copy) => copy.id === messageId))
+  if (!message) return { ok: false, error: 'Message not found', status: 404 }
+  if (message.originalText) return { ok: true }
+  await applyTranslation(message, { force: true })
+  return { ok: true }
 }
 
 function addActivity(event: ActivityEvent, options?: { fillOnly?: boolean }) {
@@ -1063,6 +1072,7 @@ registerHttpRoutes(app, {
   scheduleChatSave,
   broadcast,
   moderate,
+  forceTranslate: forceTranslateMessage,
   applyChatModerationToState,
   youtubePrivacyDismissed: youtube.youtubePrivacyDismissed,
   setYoutubePrivacy: (notices) => youtube.setYoutubePrivacy(notices),

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { ModMenu } from '../src/chat/ModMenu.tsx'
 import {
   gigantifyLastEmote,
   kickEmoteUrl,
@@ -140,8 +141,13 @@ describe('Emotes and avatars', () => {
 
   it('detects non-English text for translation', () => {
     assert.equal(needsTranslation('hello'), false)
+    assert.equal(needsTranslation('Hola, como estas?'), false)
     assert.equal(needsTranslation('こんにちは'), true)
     assert.equal(needsTranslation('Привет chat'), true)
+    assert.equal(needsTranslation('Hola amigos, espero que todos esten teniendo un buen dia hoy'), true)
+    assert.equal(needsTranslation('This is a perfectly normal English sentence about the stream.'), false)
+    assert.equal(needsTranslation('Bonjour tout le monde, j espere que vous passez une tres bonne journee'), true)
+    assert.equal(needsTranslation('Kappa Kappa Kappa Kappa Kappa Kappa PogChamp'), false)
   })
 })
 
@@ -247,6 +253,18 @@ describe('Twitch send acknowledgement', () => {
 describe('gigantified emote rendering', () => {
   // tsx runs tests with the classic JSX transform, and MessageItem does not import React itself.
   ;(globalThis as { React?: typeof React }).React ??= React
+  const windowStub = globalThis as { window?: { innerWidth: number; innerHeight: number } }
+  windowStub.window ??= { innerWidth: 1280, innerHeight: 720 }
+
+  it('shows Translate on the chat menu only when the dock asks for it', () => {
+    const message = { id: 'm1', platform: 'Twitch' as const, user: 'Ada', text: 'hola', time: '2026-09-02T12:00:00.000Z' }
+    const shown = renderToStaticMarkup(createElement(ModMenu, { menu: { x: 10, y: 10, message }, onModerate: () => {}, onTranslate: () => {}, onClose: () => {} }))
+    const hidden = renderToStaticMarkup(createElement(ModMenu, { menu: { x: 10, y: 10, message }, onModerate: () => {}, onClose: () => {} }))
+    const prompting = renderToStaticMarkup(createElement(ModMenu, { menu: { x: 10, y: 10, message, prompt: { action: 'ban' } }, onModerate: () => {}, onTranslate: () => {}, onClose: () => {} }))
+    assert.equal(shown.includes('>Translate<'), true)
+    assert.equal(hidden.includes('>Translate<'), false)
+    assert.equal(prompting.includes('>Translate<'), false)
+  })
 
   it('draws a big emote with the emote-big class and a normal one without it', () => {
     const html = renderToStaticMarkup(createElement(MessageItem, {

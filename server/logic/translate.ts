@@ -1,11 +1,19 @@
+import { eld } from 'eld/small'
+
 /**
  * Non-English detection and translation provider config/parse.
  */
 
 const NON_ENGLISH = /[\u0400-\u052F\u0600-\u06FF\u0750-\u077F\u1100-\u11FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF\u0590-\u05FF]/
+const LATIN_LETTER = /[A-Za-z\u00C0-\u024F]/g
+const MIN_LATIN_LETTERS = 20
 
 export function needsTranslation(text: string) {
-  return NON_ENGLISH.test(text)
+  if (NON_ENGLISH.test(text)) return true
+  const letters = text.match(LATIN_LETTER)
+  if (!letters || letters.length < MIN_LATIN_LETTERS) return false
+  const detected = eld.detect(text)
+  return detected.language !== '' && detected.language !== 'en' && detected.isReliable()
 }
 
 
