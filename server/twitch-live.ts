@@ -11,6 +11,11 @@ import {
   parseTwitchModerationLine,
   partsFromTwitchFragments,
   sanitizeIrcMessage,
+  twitchEventSubEchoId,
+  twitchHelixSendAck,
+  twitchHelixSendError,
+  twitchIrcEchoId,
+  twitchSendStep,
   shouldReconnectChat,
   summarizeApiError,
   twitchBadgesFromList,
@@ -77,6 +82,9 @@ export function createTwitchLive(d: TwitchLiveDeps) {
   let twitchEventSubResumeStartedAt = 0
   let twitchEventSubRetry: NodeJS.Timeout | undefined
   let twitchEventSubRetryAttempt = 0
+  const TWITCH_SEND_ECHO_MS = 5_000
+  type TwitchSendEchoWaiter = { nick: string; text: string; settled: boolean; timer?: ReturnType<typeof setTimeout>; resolve: (id: string | undefined) => void }
+  const twitchSendEchoWaiters: TwitchSendEchoWaiter[] = []
   const twitchBadgeUrls = new Map<string, string>()
   const twitchAvatars = new Map<string, string>()
   const twitchAvatarPending = new Set<string>()
@@ -300,6 +308,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     const type = String(payload?.metadata?.subscription_type || '')
     const event = payload?.payload?.event
     if (type === 'channel.chat.message') {
+      noteTwitchEventSubEcho(event)
       const parts = partsFromTwitchFragments(event?.message?.fragments, event?.message?.text || '')
       addMessage({
         id: event?.message_id || crypto.randomUUID(),
@@ -420,6 +429,7 @@ export function createTwitchLive(d: TwitchLiveDeps) {
 
   function parseTwitchLines(raw: string): ChatMessage[] {
     return raw.split(/\r?\n/).flatMap((line) => {
+      noteTwitchIrcLine(line)
       const parsed = parseTwitchChatLine(line, { urls: twitchBadgeUrls })
       if (parsed === 'ping') { twitchIrc?.send('PONG :tmi.twitch.tv\r\n'); return [] }
       if (parsed) return [{ ...parsed, avatar: parsed.userId ? twitchAvatars.get(parsed.userId) : undefined }]
@@ -505,36 +515,109 @@ export function createTwitchLive(d: TwitchLiveDeps) {
     ensureTwitchChat()
   }
 
+  function finishTwitchSendEcho(waiter: TwitchSendEchoWaiter, id: string | undefined) {
+    if (waiter.settled) return
+    waiter.settled = true
+    if (waiter.timer) clearTimeout(waiter.timer)
+    const index = twitchSendEchoWaiters.indexOf(waiter)
+    if (index >= 0) twitchSendEchoWaiters.splice(index, 1)
+    waiter.resolve(id)
+  }
+
+  function expectTwitchSendEcho(nick: string, text: string) {
+    let resolveWait: (id: string | undefined) => void = () => {}
+    const promise = new Promise<string | undefined>((resolve) => { resolveWait = resolve })
+    const waiter: TwitchSendEchoWaiter = { nick: nick.toLowerCase(), text, settled: false, resolve: (id) => resolveWait(id) }
+    twitchSendEchoWaiters.push(waiter)
+    return {
+      promise,
+      arm(ms: number) {
+        if (waiter.settled || waiter.timer) return
+        waiter.timer = setTimeout(() => finishTwitchSendEcho(waiter, undefined), ms)
+      },
+      cancel() { finishTwitchSendEcho(waiter, undefined) },
+    }
+  }
+
+  function noteTwitchIrcLine(line: string) {
+    for (const waiter of twitchSendEchoWaiters) {
+      if (waiter.settled) continue
+      const id = twitchIrcEchoId(line, waiter.nick, waiter.text)
+      if (!id) continue
+      finishTwitchSendEcho(waiter, id)
+      return
+    }
+  }
+
+  function noteTwitchEventSubEcho(event: { chatter_user_login?: string; message_id?: string; message?: { text?: string } } | null | undefined) {
+    for (const waiter of twitchSendEchoWaiters) {
+      if (waiter.settled) continue
+      const id = twitchEventSubEchoId(event, waiter.nick, waiter.text)
+      if (!id) continue
+      finishTwitchSendEcho(waiter, id)
+      return
+    }
+  }
+
   async function sendTwitchMessage(text: string) {
+    const nick = tokens.Twitch?.user?.toLowerCase() || ''
+    const echo = nick ? expectTwitchSendEcho(nick, text) : undefined
+    try {
+      const helix = await sendTwitchHelix(text)
+      const step = twitchSendStep(helix, {
+        ircReady: Boolean(twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady),
+        eventSubReady: twitchEventSubReady,
+      })
+      const failure = helix.ok ? 'Twitch did not acknowledge the message' : helix.error
+      if (step === 'await-echo') {
+        if (!echo) return { ok: false, error: failure }
+        echo.arm(TWITCH_SEND_ECHO_MS)
+        const id = await echo.promise
+        if (id) return { ok: true, id }
+        return { ok: false, error: failure }
+      }
+      echo?.cancel()
+      if (step === 'return') return helix.ok ? { ok: true, id: helix.id } : { ok: false, error: failure }
+      return sendTwitchIrc(text, failure)
+    } catch (error) {
+      echo?.cancel()
+      return { ok: false, error: error instanceof Error ? error.message : 'Twitch did not accept the message' }
+    }
+  }
+
+  async function sendTwitchIrc(text: string, fallbackError?: string) {
     const safeText = sanitizeIrcMessage(text)
     const nick = tokens.Twitch?.user?.toLowerCase()
-    if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-      twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
-      return { ok: true }
+    const notReady = fallbackError || 'Twitch chat is not ready; reconnect Twitch and try again'
+    if (!nick) return { ok: false as const, error: notReady }
+    if (!(twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady)) await waitForTwitchIrc()
+    const socket = twitchIrc
+    if (!socket || socket.readyState !== WebSocket.OPEN || !twitchIrcReady) return { ok: false as const, error: notReady }
+    const echo = expectTwitchSendEcho(nick, safeText)
+    try {
+      socket.send(`PRIVMSG #${nick} :${safeText}\r\n`)
+    } catch (error) {
+      echo.cancel()
+      return { ok: false as const, error: error instanceof Error ? error.message : 'Twitch did not accept the message' }
     }
-    const helix = await sendTwitchHelix(text)
-    if (helix.ok) return helix
-    await waitForTwitchIrc()
-    if (twitchIrc?.readyState === WebSocket.OPEN && twitchIrcReady && nick) {
-      twitchIrc.send(`PRIVMSG #${nick} :${safeText}\r\n`)
-      return { ok: true }
-    }
-    return { ok: false, error: helix.error || 'Twitch chat is not ready; reconnect Twitch and try again' }
+    echo.arm(TWITCH_SEND_ECHO_MS)
+    const id = await echo.promise
+    if (!id) return { ok: false as const, error: 'Twitch did not accept the message' }
+    return { ok: true as const, id }
   }
 
   async function sendTwitchHelix(text: string) {
     const token = await ensureToken('Twitch')
-    if (!token?.userId) return { ok: false, error: 'Twitch user id missing' }
+    if (!token?.userId) return twitchHelixSendError('Twitch user id missing')
     try {
       const result = await twitchApi('/helix/chat/messages', token, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ broadcaster_id: token.userId, sender_id: token.userId, message: text }),
       })
-      if (result.data?.[0]?.is_sent === false) return { ok: false, error: result.data[0].drop_reason?.message || 'Twitch dropped the message' }
-      return { ok: true, id: result.data?.[0]?.message_id }
+      return twitchHelixSendAck(result)
     } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : String(error) }
+      return twitchHelixSendError(error instanceof Error ? error.message : String(error))
     }
   }
 

@@ -21,6 +21,6 @@ A dock gets the whole chat history in a `snapshot`: on connect, then every 60 se
 
 The chat dock skips `setMessages` when a snapshot's `chatSliceStamp` matches, so the periodic snapshot does not rewrite the whole feed. The stamp includes avatar, color, badges, parts, and other in-place fields because Twitch and Kick backfill photos onto existing rows (#152).
 
-Unified chat send creates one local row; platform echoes merge through `mergeIncomingChat` in `server/logic/chat-merge.ts`.
+Unified chat send creates one local row; platform echoes merge through `mergeIncomingChat` in `server/logic/chat-merge.ts`. Twitch send prefers Helix so the row gets a real message id; IRC is only a fallback and does not count as sent until that id is echoed.
 
 User-facing setup (OAuth apps, YouTube quota, Watch LAN, installer) lives in the README. Coding conventions live in `AGENTS.md`.
