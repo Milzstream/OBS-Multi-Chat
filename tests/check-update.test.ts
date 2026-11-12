@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { checkForUpdates, confirmWithSpawn, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, type GitHubRelease } from '../server/check-update.js'
+import { checkForUpdates, confirmWithSpawn, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, releaseNotesExcerpt, releaseNotesPath, updateAvailableMessage, updatePromptMessage, windowsReleaseNotesCommand, type GitHubRelease } from '../server/check-update.js'
 
 function release(tag: string): GitHubRelease {
   return {
@@ -13,6 +13,31 @@ function release(tag: string): GitHubRelease {
     draft: false,
     prerelease: false,
     assets: [{ name: `obs-multi-chat-${tag}-windows-x64-setup.exe`, browser_download_url: 'https://example/setup.exe' }],
+  }
+}
+
+const releaseBody = [
+  'Windows x64 build of Relay Chat Dock.',
+  '',
+  '**Installer (recommended):** run `obs-multi-chat-v*-windows-x64-setup.exe`.',
+  '',
+  "## What's Changed",
+  '* show release notes by @Milzstream in https://github.com/Milzstream/OBS-Multi-Chat/pull/191',
+  '',
+  '**Full Changelog**: https://github.com/Milzstream/OBS-Multi-Chat/compare/v1.1.6...v1.1.7',
+].join('\n')
+
+function downloadable(tag: string, body?: string | null): GitHubRelease {
+  const bytes = Buffer.from('setup-bytes')
+  const digest = `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`
+  return {
+    ...release(tag),
+    body,
+    assets: [{
+      name: `obs-multi-chat-${tag}-windows-x64-setup.exe`,
+      browser_download_url: `https://github.com/Milzstream/OBS-Multi-Chat/releases/download/${tag}/setup.exe`,
+      digest,
+    }],
   }
 }
 
@@ -150,5 +175,97 @@ describe('update check flow', () => {
     releaseConfirm(false)
     await pending
     assert.deepEqual(started, [])
+  })
+
+  it('puts the notes excerpt in the confirm prompt and leaves the installer blurb out', async () => {
+    let message = ''
+    await checkForUpdates({
+      currentVersion: '0.6.1',
+      latestRelease: downloadable('v0.6.2', releaseBody),
+      installerCopy: true,
+      confirm: (prompt) => { message = prompt; return false },
+    })
+    assert.match(message, /What's Changed/)
+    assert.match(message, /Full notes: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/releases\/tag\/v0\.6\.2/)
+    assert.match(message, /production\.env/)
+    assert.doesNotMatch(message, /Installer \(recommended\)/)
+    assert.doesNotMatch(message, /\*\*/)
+  })
+
+  it('keeps the short prompt when the release has no notes', async () => {
+    let message = ''
+    await checkForUpdates({
+      currentVersion: '0.6.1',
+      latestRelease: downloadable('v0.6.2', null),
+      installerCopy: true,
+      confirm: (prompt) => { message = prompt; return false },
+    })
+    assert.equal(message, updateAvailableMessage('v0.6.2'))
+    assert.doesNotMatch(message, /Full notes/)
+  })
+
+  it('logs the same excerpt for a portable copy and does not confirm or start Setup', async () => {
+    const logs: string[] = []
+    const started: string[] = []
+    const original = console.log
+    console.log = (...args: unknown[]) => { logs.push(args.map(String).join(' ')) }
+    try {
+      await checkForUpdates({
+        currentVersion: '0.6.1',
+        latestRelease: { ...release('v0.6.2'), body: releaseBody },
+        installerCopy: false,
+        confirm: () => { started.push('confirm'); return true },
+        startInstaller: () => started.push('start'),
+        exit: () => started.push('exit'),
+      })
+    } finally {
+      console.log = original
+    }
+    assert.deepEqual(started, [])
+    const logged = logs.join('\n')
+    assert.match(logged, /What's Changed/)
+    assert.doesNotMatch(logged, /Installer \(recommended\)/)
+  })
+})
+
+describe('release notes excerpt', () => {
+  it('drops the installer blurb, strips markdown, and caps a long excerpt', () => {
+    assert.equal(releaseNotesExcerpt(null), '')
+    assert.equal(releaseNotesExcerpt(''), '')
+    assert.equal(releaseNotesExcerpt('just a blurb'), '')
+    assert.equal(releaseNotesExcerpt("## What's Changed"), '')
+    const excerpt = releaseNotesExcerpt(releaseBody)
+    assert.match(excerpt, /^What's Changed\n/)
+    assert.match(excerpt, /Full Changelog: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/compare\/v1\.1\.6\.\.\.v1\.1\.7/)
+    assert.doesNotMatch(excerpt, /Installer \(recommended\)/)
+    assert.doesNotMatch(excerpt, /\*\*/)
+    assert.doesNotMatch(excerpt, /`/)
+    const capped = releaseNotesExcerpt(`${releaseBody}\n${'x'.repeat(5000)}`, 80)
+    assert.ok(capped.endsWith('\n…'))
+    assert.ok(capped.length <= 82)
+    const prompt = updatePromptMessage('v0.6.2', 'https://github.com/Milzstream/OBS-Multi-Chat/releases/tag/v0.6.2', capped)
+    assert.match(prompt, /Full notes: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/releases\/tag\/v0\.6\.2/)
+  })
+
+  it('keeps the notes text out of the PowerShell command', () => {
+    const notes = 'SECRET-NOTES-BODY'
+    const notesPath = releaseNotesPath('v/../../Users/Public/evil', os.tmpdir(), '../nope')
+    assert.equal(path.dirname(notesPath), path.resolve(os.tmpdir()))
+    const command = windowsReleaseNotesCommand(updateAvailableMessage('v1.1.7'), 'Relay Chat Dock', notesPath)
+    assert.equal(command.includes(notes), false)
+    assert.match(command, /ReadAllText/)
+    assert.match(command, /Replace\(\$lf, \$crlf\)/)
+    assert.match(command, /ActiveControl = \$yes/)
+    assert.match(command, /AutoScroll = \$true/)
+    assert.match(command, /UseMnemonic = \$false/)
+    assert.equal(command.includes('TextBox'), false)
+    assert.match(command, /exit 0/)
+    assert.match(command, /exit 1/)
+    assert.ok(command.includes(notesPath))
+    const hostile = windowsReleaseNotesCommand("ok'@; calc", "title'@; calc", "C:\\Temp\\x'@notes.txt")
+    assert.equal(hostile.includes("ok'@"), false)
+    assert.equal(hostile.includes("title'@"), false)
+    assert.equal(hostile.includes("x'@notes"), false)
+    assert.match(hostile, /ok' @; calc/)
   })
 })
