@@ -23,4 +23,4 @@ The chat dock skips `setMessages` when a snapshot's `chatSliceStamp` matches, so
 
 Unified chat send creates one local row; platform echoes merge through `mergeIncomingChat` in `server/logic/chat-merge.ts`. Twitch send prefers Helix so the row gets a real message id; IRC is only a fallback and does not count as sent until that id is echoed.
 
-User-facing setup (OAuth apps, YouTube quota, Watch LAN, installer) lives in the README. Coding conventions live in `AGENTS.md`.
+User-facing setup lives under `docs/`: [install.md](install.md), [setup.md](setup.md), [docks.md](docks.md), [activity.md](activity.md), [alerts.md](alerts.md), and [develop.md](develop.md). The GitHub landing page is the repo README. Coding conventions live in `AGENTS.md`.
