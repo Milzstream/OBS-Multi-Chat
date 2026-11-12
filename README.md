@@ -15,21 +15,33 @@
   <a href="https://github.com/Milzstream/OBS-Multi-Chat/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/Milzstream/OBS-Multi-Chat/build.yml?style=for-the-badge&label=build"></a>
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/obs.png" width="760" alt="OBS with Relay Chat and Relay Activity docks">
-</p>
+## What it looks like
 
 <p align="center">
-  <img src="docs/screenshots/activity.png" height="300" alt="Activity dock with follows, donations, and platform icons">
-  <img src="docs/screenshots/stream-controls.png" height="300" alt="Stream controls for a shared Twitch and Kick title, category, and tags">
+  <img src="docs/screenshots/obs.png" width="760" alt="OBS with Relay Chat and Relay Activity docks"><br>
+  OBS with Relay Chat and Relay Activity docks
 </p>
 
-<p align="center">
-  <img src="docs/screenshots/screenshot.png" height="420" alt="Chat dock combining Twitch, Kick, and YouTube">
-</p>
+<table>
+  <tr>
+    <td align="center" valign="bottom" width="34%">
+      <img src="docs/screenshots/screenshot.png" height="320" alt="Chat dock combining Twitch, Kick, and YouTube"><br>
+      Chat dock combining Twitch, Kick, and YouTube
+    </td>
+    <td align="center" valign="bottom" width="33%">
+      <img src="docs/screenshots/activity.png" height="320" alt="Activity dock with follows, donations, and platform icons"><br>
+      Activity dock with follows, donations, and platform icons
+    </td>
+    <td align="center" valign="bottom" width="33%">
+      <img src="docs/screenshots/stream-controls.png" height="320" alt="Stream controls for a shared Twitch and Kick title, category, and tags"><br>
+      Stream controls for a shared Twitch and Kick title, category, and tags
+    </td>
+  </tr>
+</table>
 
 <p align="center">
-  <img src="docs/screenshots/AlertsCustomization.png" width="760" alt="Editor for the on-stream alerts browser source">
+  <img src="docs/screenshots/AlertsCustomization.png" width="760" alt="Editor for the on-stream alerts browser source"><br>
+  Editor for the on-stream alerts browser source
 </p>
 
 ## Features
@@ -45,7 +57,7 @@
 
 The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest) page. Use the installer. A portable zip is on the same release.
 
-Install steps, where `production.env` and `data\` live, and why an older build is not guaranteed after a provider change: [Install](docs/install.md).
+Stay on the latest release. Install steps and where your settings live: [Install](docs/install.md).
 
 ## Docs
 

@@ -35,13 +35,13 @@ The same package command also creates a ready-to-copy `deploy` folder containing
 
 On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
 
-The companion window only opens allowlisted https links, plus this app's own OAuth page. Other addresses stay closed. The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot connect at all. Watch behavior is in [Install](install.md).
+The companion window only opens links from a short approved list (plus the app's own sign-in page). Other addresses stay closed. The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot connect at all. Watch behavior is in [Install](install.md).
 
 GitHub Actions attaches both the zip and the setup exe when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab. A version that already has a release tag is not published again.
 
 ## Backend endpoints
 
-Loopback (this computer) can call every route with no token. Off this computer the classes are:
+Loopback (this computer) can call every route with no token. From another computer, access is split into:
 
 - Watch token (`?token=` on the shared link, then the `relay_watch` cookie): `GET /watch`, `GET /api/state`, `GET /events`, and `GET /api/media` only.
 - `RELAY_API_TOKEN` header (`x-relay-token` or `Authorization: Bearer`): other reads and writes, including the JWT routes below. Not accepted from the query string. A matching `Origin` is not enough.
@@ -72,4 +72,4 @@ Loopback (this computer) can call every route with no token. Off this computer t
 
 ## Current platform status
 
-Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens that cannot call Helix. A Helix send that Twitch drops is not also sent on IRC. The IRC fallback counts as sent only after Twitch echoes a real message id. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's realtime WebSocket after resolving the channel's chatroom id. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections. Stay on the latest [release](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest) when a provider changes; older builds are not guaranteed to keep working.
+Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens that cannot call Helix. A Helix send that Twitch drops is not also sent on IRC. The IRC fallback counts as sent only after Twitch echoes a real message id. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's realtime WebSocket after resolving the channel's chatroom id. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections. Stay on the latest [release](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest).

@@ -9,12 +9,12 @@ Use the latest [release](https://github.com/Milzstream/OBS-Multi-Chat/releases/l
 The installer is the recommended download: `obs-multi-chat-v*-windows-x64-setup.exe`.
 
 1. Run the setup exe.
-2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. After OBS starts, open **Docks** and check **Relay Chat** and **Relay Activity**. OBS lists installer-added docks but leaves them hidden until you enable them.
-3. Optional: walk through Twitch, Kick, YouTube, and StreamElements. Each page can open that provider. Skip and edit the env file later if you prefer.
+2. In the installer, leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. In OBS, open **Docks** and turn on **Relay Chat** and **Relay Activity**. OBS lists installer-added docks but leaves them hidden until you enable them.
+3. Optional: connect Twitch, Kick, YouTube, and StreamElements in the installer. Each page has a button to open that provider's site. Skip and edit the env file later if you prefer.
 4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env`. The companion window shows that path on every launch.
 5. Start **Relay Chat Dock** from the Start Menu.
 
-The app installs under Program Files. `production.env`, `data\`, and `logs\` stay in `%LOCALAPPDATA%\Relay Chat Dock`, so an update does not need to write next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing values you already set.
+The app installs under Program Files. Settings stay out of that folder. See [Where your settings live](#where-your-settings-live). On launch, missing keys from `.env.example` are appended to `production.env` without changing values you already set.
 
 Installed copies can prompt to download the next setup exe, run it, and reopen. That Yes/No prompt does not freeze chat while it is open. The download starts only when the asset URL is a GitHub release host and the file matches the release `sha256` digest. An update replaces the program files and leaves the LocalAppData folder alone.
 
@@ -25,7 +25,15 @@ Installed copies can prompt to download the next setup exe, run it, and reopen. 
 3. Keep the unzipped folder together. `relay-chat-dock.exe` needs the files beside it.
 4. Run `relay-chat-dock.exe`. Add the two dock URLs in OBS if you did not use the installer. See [Docks](docks.md).
 
-A portable folder uses `production.env` and `data\` beside the exe only when that machine has no existing LocalAppData profile. If a profile already exists, the exe uses `%LOCALAPPDATA%\Relay Chat Dock`.
+A portable unzip does not start a second settings folder if you already installed once. See [Where your settings live](#where-your-settings-live).
+
+## Where your settings live
+
+The installer puts the app under Program Files. `production.env`, `data\`, and `logs\` stay in `%LOCALAPPDATA%\Relay Chat Dock`, so an update does not write next to the exe.
+
+A portable zip uses `production.env` and `data\` beside the exe only when that machine has no LocalAppData profile yet. Install once, then run a portable copy, and the exe still uses `%LOCALAPPDATA%\Relay Chat Dock`.
+
+Development runs keep those files under the project directory. `RELAY_DATA_DIR` overrides any of these.
 
 ## Companion window
 
@@ -45,11 +53,11 @@ Click **Watch** in the companion window to share chat and activity with a friend
 
 Bind and Watch are separate:
 
-- Default bind (`127.0.0.1`, or unset `RELAY_BIND`): Watch on temporarily listens on `0.0.0.0`. Watch off returns to loopback, so other devices can no longer open a TCP connection.
+- Default bind (`127.0.0.1`, or unset `RELAY_BIND`): Watch on temporarily listens on `0.0.0.0`. Watch off closes the LAN listener again.
 - `RELAY_BIND=0.0.0.0` or a LAN IP such as `192.168.1.20`: that socket stays bound. Watch only hosts or unhosts the `/watch` page. Tools with `RELAY_API_TOKEN` can still reach the LAN listener while Watch is off.
 
 Until Watch is on (and bind is loopback), other devices cannot reach the chat dock, the activity dock, or the live update stream. `RELAY_LAN=1` starts with Watch already on; you can still turn it off from the window. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
 
 That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
 
-A browser on another device still cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. Requesting `/` or sending a matching `Origin` does not change that. `RELAY_API_TOKEN` is only for a tool that sends it in `x-relay-token` or `Authorization: Bearer`. It is not accepted from the query string. Shutdown, the companion window, and the operator docks stay on this computer even with that token. OAuth from another device requires the header; the companion window does not, because it is on this computer.
+A browser on another device still cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. `RELAY_API_TOKEN` is only for a tool that sends it in `x-relay-token` or `Authorization: Bearer`. It is not accepted from the query string. Shutdown, the companion window, and the operator docks stay on this computer even with that token. OAuth from another device requires the header; the companion window does not, because it is on this computer.

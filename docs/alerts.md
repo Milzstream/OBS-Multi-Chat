@@ -10,7 +10,12 @@ A saved look (graphic, video, placed `{token}` text with a font, or sound) plays
 
 Tokens include `{name}` `{amount}` `{message}` `{kind}` `{platform}` `{months}` `{viewers}` `{plan}` `{gifter}`. Empty values collapse, so `{name} cheered {amount}` becomes `Ada cheered 100 Bits` or just `Ada cheered` when there is no amount. Custom files live in `data/alerts/` and are served from `/alerts/assets/`. Clearing a graphic or sound, or Reset to default, drops files that no look still references.
 
-The queue holds as many alerts as the activity feed does; past that the oldest waiting ones are dropped. The **Alerts** section in the companion settings has a sound toggle (one short built-in clip per group: follow, sub/member, cheer/KICKs, donation/merch, Super Chat, raid), **Show Platform** (on by default; turn it off to hide platform icons and colors and use generic labels, so a YouTube subscriber reads FOLLOW and a member reads SUBSCRIBER), the display time (default 5 seconds), and platform buttons that open each platform's alert types so you can uncheck the ones to skip.
+The queue holds as many alerts as the activity feed does; past that the oldest waiting ones are dropped. The **Alerts** section in the companion settings has:
+
+- A sound toggle. One short built-in clip per group: follow, sub/member, cheer/KICKs, donation/merch, Super Chat, raid.
+- **Show Platform**, on by default. Turn it off to hide platform icons and colors and use generic labels, so a YouTube subscriber reads FOLLOW and a member reads SUBSCRIBER.
+- Display time, default 5 seconds.
+- Platform buttons that open each platform's alert types so you can uncheck the ones to skip.
 
 A gift bomb plays as one alert (the gifter). Gifted subs under that gift do not each play. A gifted sub with no gift row nearby plays once as a gift. Twitch Power-ups do not play here. Enable **Control audio via OBS** on the browser source or the sound never leaves the page.
 
