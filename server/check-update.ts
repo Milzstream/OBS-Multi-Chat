@@ -153,6 +153,9 @@ Add-Type -AssemblyName System.Drawing
 $notes = [System.IO.File]::ReadAllText(@'
 ${file}
 '@, [System.Text.UTF8Encoding]::new($false))
+$lf = [string][char]10
+$crlf = [string][char]13 + $lf
+$notes = $notes.Replace($crlf, $lf).Replace($lf, $crlf)
 $form = New-Object System.Windows.Forms.Form
 $form.Text = @'
 ${caption}
@@ -169,14 +172,23 @@ ${body}
 '@
 $label.Location = New-Object System.Drawing.Point(12, 12)
 $label.Size = New-Object System.Drawing.Size(496, 110)
-$box = New-Object System.Windows.Forms.TextBox
-$box.Multiline = $true
-$box.ReadOnly = $true
-$box.ScrollBars = 'Vertical'
-$box.WordWrap = $true
+$box = New-Object System.Windows.Forms.Panel
+$box.AutoScroll = $true
+$box.BorderStyle = 'Fixed3D'
+$box.BackColor = [System.Drawing.SystemColors]::Window
 $box.Location = New-Object System.Drawing.Point(12, 130)
 $box.Size = New-Object System.Drawing.Size(496, 274)
-$box.Text = $notes
+$box.TabStop = $true
+$notesText = New-Object System.Windows.Forms.Label
+$notesText.AutoSize = $true
+$notesText.MaximumSize = New-Object System.Drawing.Size(460, 0)
+$notesText.Location = New-Object System.Drawing.Point(4, 4)
+$notesText.UseMnemonic = $false
+$notesText.BackColor = [System.Drawing.SystemColors]::Window
+$notesText.Text = $notes
+$box.Controls.Add($notesText)
+$box.Add_MouseEnter({ $box.Focus() })
+$notesText.Add_MouseEnter({ $box.Focus() })
 $yes = New-Object System.Windows.Forms.Button
 $yes.Text = 'Yes'
 $yes.DialogResult = [System.Windows.Forms.DialogResult]::Yes
@@ -188,6 +200,7 @@ $no.Location = New-Object System.Drawing.Point(408, 416)
 $form.AcceptButton = $yes
 $form.CancelButton = $no
 $form.Controls.AddRange(@($label, $box, $yes, $no))
+$form.ActiveControl = $yes
 $r = $form.ShowDialog()
 if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 } else { exit 1 }`
 }
