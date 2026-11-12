@@ -16,8 +16,8 @@ A gift bomb plays as one alert (the gifter). Gifted subs under that gift do not 
 
 The pill and custom banners scale with the browser source: its width and height set the size, so a 1000 x 250 source gives a roughly 800 px wide pill, and a bigger source makes a bigger banner. Use a wide, short size like that, place the source where you want alerts, and avoid a tiny one. The flask icon in the Activity dock emulates alerts, which also play here. How to fire a test is in [Activity](activity.md).
 
-![Companion Customize editor for on-stream alert looks](AlertsCustomization.png)
+![Companion Customize editor for on-stream alert looks](screenshots/AlertsCustomization.png)
 
-![On-stream alert pill with platform icons and colors](alerts-1.png)
+![On-stream alert pill with platform icons and colors](screenshots/alerts-1.png)
 
-![On-stream alert pill with Show Platform off: generic colors, no platform icon](alerts-2.png)
+![On-stream alert pill with Show Platform off: generic colors, no platform icon](screenshots/alerts-2.png)

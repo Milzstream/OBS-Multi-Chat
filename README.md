@@ -4,15 +4,15 @@ A local OBS companion that combines Twitch, Kick, and YouTube live chat into one
 
 Windows · [![latest release](https://img.shields.io/github/v/release/Milzstream/OBS-Multi-Chat)](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest) · [![license: MIT with Commons Clause](https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-blue)](LICENSE)
 
-![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshot.png)
+![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshots/screenshot.png)
 
-![OBS with Relay Chat and Relay Activity docks](docs/obs.png)
+![OBS with Relay Chat and Relay Activity docks](docs/screenshots/obs.png)
 
-![Activity dock with follows, donations, and platform icons. Right-click a pill to delete it.](docs/activity.png)
+![Activity dock with follows, donations, and platform icons. Right-click a pill to delete it.](docs/screenshots/activity.png)
 
-![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
+![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/screenshots/stream-controls.png)
 
-![Relay Chat Dock window with the log, account connections, and settings](docs/app.png)
+![Relay Chat Dock window with the log, account connections, and settings](docs/screenshots/app.png)
 
 ## Features
 
