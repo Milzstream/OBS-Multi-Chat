@@ -7,13 +7,14 @@ import { isInstallerInstall } from './obs-docks.js'
 
 /**
  * Startup update check: compares the local `package.json` version against the
- * latest GitHub release. Portable copies log the download URL. Installer
- * copies can prompt, download the setup exe, exit, and let Setup replace the files.
+ * latest GitHub release. Portable copies log the download URL and release notes.
+ * Installer copies can prompt, download the setup exe, exit, and let Setup replace the files.
  */
 
 export type GitHubRelease = {
   tag_name: string
   html_url: string
+  body?: string | null
   draft: boolean
   prerelease: boolean
   assets?: InstallerAsset[]
@@ -100,6 +101,97 @@ export function windowsYesNoCommand(message: string, title: string) {
   return `Add-Type -AssemblyName System.Windows.Forms; $r = [System.Windows.Forms.MessageBox]::Show(@'\n${body}\n'@, @'\n${caption}\n'@, 'YesNo', 'Question'); if ($r -eq 'Yes') { exit 0 } else { exit 1 }`
 }
 
+export const RELEASE_NOTES_EXCERPT_MAX = 4000
+
+export function releaseNotesExcerpt(body: string | null | undefined, maxLength = RELEASE_NOTES_EXCERPT_MAX) {
+  if (!body) return ''
+  const at = body.indexOf("## What's Changed")
+  if (at < 0) return ''
+  let text = body.slice(at).replace(/\r\n/g, '\n')
+  text = text.replace(/^#{1,6}[ \t]+/gm, '')
+  text = text.replace(/\*\*(.+?)\*\*/g, '$1')
+  text = text.replace(/__([^_]+)__/g, '$1')
+  text = text.replace(/`([^`]*)`/g, '$1')
+  text = text.trim()
+  if (!text || text === "What's Changed") return ''
+  if (text.length <= maxLength) return text
+  const cut = text.slice(0, maxLength)
+  const line = cut.lastIndexOf('\n')
+  const trimmed = (line > maxLength * 0.6 ? cut.slice(0, line) : cut).trimEnd()
+  return `${trimmed}\n…`
+}
+
+export function updateAvailableMessage(version: string) {
+  return `Relay Chat Dock ${safeReleaseTag(version)} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
+}
+
+export function updatePromptMessage(version: string, htmlUrl: string, excerpt: string) {
+  const base = updateAvailableMessage(version)
+  if (!excerpt) return base
+  return `${base}\n\n${excerpt}\n\nFull notes: ${htmlUrl}`
+}
+
+export function releaseNotesFileText(excerpt: string, htmlUrl: string) {
+  return `Full notes: ${htmlUrl}\n\n${excerpt}`
+}
+
+export function releaseNotesPath(tag: string, tmpDir = os.tmpdir(), suffix = '') {
+  const extra = suffix.replace(/[^A-Za-z0-9._-]/g, '')
+  const name = `obs-multi-chat-${safeReleaseTag(tag)}${extra ? `-${extra}` : ''}-notes.txt`
+  const dest = path.resolve(tmpDir, name)
+  const relative = path.relative(path.resolve(tmpDir), dest)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('notes path escaped temp')
+  return dest
+}
+
+export function windowsReleaseNotesCommand(message: string, title: string, notesPath: string) {
+  const body = escapePowerShellHereString(message)
+  const caption = escapePowerShellHereString(title)
+  const file = escapePowerShellHereString(notesPath)
+  return `Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$notes = [System.IO.File]::ReadAllText(@'
+${file}
+'@, [System.Text.UTF8Encoding]::new($false))
+$form = New-Object System.Windows.Forms.Form
+$form.Text = @'
+${caption}
+'@
+$form.FormBorderStyle = 'FixedDialog'
+$form.StartPosition = 'CenterScreen'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+$form.ClientSize = New-Object System.Drawing.Size(520, 460)
+$label = New-Object System.Windows.Forms.Label
+$label.Text = @'
+${body}
+'@
+$label.Location = New-Object System.Drawing.Point(12, 12)
+$label.Size = New-Object System.Drawing.Size(496, 110)
+$box = New-Object System.Windows.Forms.TextBox
+$box.Multiline = $true
+$box.ReadOnly = $true
+$box.ScrollBars = 'Vertical'
+$box.WordWrap = $true
+$box.Location = New-Object System.Drawing.Point(12, 130)
+$box.Size = New-Object System.Drawing.Size(496, 274)
+$box.Text = $notes
+$yes = New-Object System.Windows.Forms.Button
+$yes.Text = 'Yes'
+$yes.DialogResult = [System.Windows.Forms.DialogResult]::Yes
+$yes.Location = New-Object System.Drawing.Point(320, 416)
+$no = New-Object System.Windows.Forms.Button
+$no.Text = 'No'
+$no.DialogResult = [System.Windows.Forms.DialogResult]::No
+$no.Location = New-Object System.Drawing.Point(408, 416)
+$form.AcceptButton = $yes
+$form.CancelButton = $no
+$form.Controls.AddRange(@($label, $box, $yes, $no))
+$r = $form.ShowDialog()
+if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 } else { exit 1 }`
+}
+
 export function digestMatches(body: Buffer, digest?: string) {
   const match = String(digest || '').match(/^sha256:([a-f0-9]{64})$/i)
   if (!match) return false
@@ -160,7 +252,7 @@ type YesNoSpawn = (
   options: { windowsHide: boolean; stdio: 'ignore' },
 ) => { on(event: string, listener: (...args: any[]) => void): unknown }
 
-export function confirmWithSpawn(spawnImpl: YesNoSpawn, message: string, title: string) {
+export function confirmWithSpawn(spawnImpl: YesNoSpawn, message: string, title: string, command = windowsYesNoCommand(message, title)) {
   return new Promise<boolean>((resolve) => {
     let settled = false
     const finish = (yes: boolean) => {
@@ -169,7 +261,7 @@ export function confirmWithSpawn(spawnImpl: YesNoSpawn, message: string, title: 
       resolve(yes)
     }
     try {
-      const child = spawnImpl('powershell.exe', ['-NoProfile', '-STA', '-Command', windowsYesNoCommand(message, title)], { windowsHide: true, stdio: 'ignore' })
+      const child = spawnImpl('powershell.exe', ['-NoProfile', '-STA', '-Command', command], { windowsHide: true, stdio: 'ignore' })
       child.on('error', () => finish(false))
       child.on('close', (code) => finish(code === 0))
     } catch {
@@ -181,6 +273,25 @@ export function confirmWithSpawn(spawnImpl: YesNoSpawn, message: string, title: 
 function windowsYesNo(message: string, title: string) {
   if (process.platform !== 'win32') return Promise.resolve(false)
   return confirmWithSpawn((command, args, options) => spawn(command, args, options), message, title)
+}
+
+function confirmReleaseNotes(label: string, title: string, tag: string, notesText: string) {
+  if (process.platform !== 'win32') return Promise.resolve(false)
+  let notesPath: string
+  try {
+    notesPath = releaseNotesPath(tag, os.tmpdir(), crypto.randomBytes(4).toString('hex'))
+    fs.writeFileSync(notesPath, notesText, 'utf8')
+  } catch {
+    return windowsYesNo(label, title)
+  }
+  return confirmWithSpawn(
+    (command, args, options) => spawn(command, args, options),
+    label,
+    title,
+    windowsReleaseNotesCommand(label, title, notesPath),
+  ).finally(() => {
+    fs.rmSync(notesPath, { force: true })
+  })
 }
 
 async function downloadFile(url: string, dest: string) {
@@ -208,7 +319,7 @@ function startInstaller(setupPath: string) {
 }
 
 /**
- * Checks if an update is available. Portable copies log the GitHub URL.
+ * Checks if an update is available. Portable copies log the GitHub URL and notes.
  * Installer copies prompt once, then download setup, exit, and let Setup relaunch.
  */
 export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
@@ -222,11 +333,16 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     const setupAsset = pickInstallerAssetRecord(latestRelease.assets)
     const setupUrl = setupAsset?.browser_download_url
     const installerCopy = hooks.installerCopy ?? (isDesktopPackaged() && isInstallerInstall(process.execPath))
+    const excerpt = releaseNotesExcerpt(latestRelease.body)
 
     console.log('')
     console.log('  Update available!')
     console.log(`  Current: ${currentVersion}, Latest: ${latestVersion}`)
     console.log(`  Download: ${latestRelease.html_url}`)
+    if (excerpt) {
+      console.log('')
+      for (const line of excerpt.split('\n')) console.log(`  ${line}`)
+    }
     console.log('')
 
     if (!installerCopy || !setupUrl) return
@@ -239,8 +355,11 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
       return
     }
 
-    const confirm = hooks.confirm || ((message) => windowsYesNo(message, 'Relay Chat Dock'))
-    const message = `Relay Chat Dock ${safeReleaseTag(latestVersion)} is available.\n\nDownload and install it now? The companion will close, update, and reopen.\n\nYour production.env and data folder are kept.`
+    const message = updatePromptMessage(latestVersion, latestRelease.html_url, excerpt)
+    const confirm = hooks.confirm || ((prompt) => {
+      if (!excerpt) return windowsYesNo(prompt, 'Relay Chat Dock')
+      return confirmReleaseNotes(updateAvailableMessage(latestVersion), 'Relay Chat Dock', latestVersion, releaseNotesFileText(excerpt, latestRelease.html_url))
+    })
     if (!(await confirm(message))) return
 
     const dest = installerSetupPath(latestVersion)
