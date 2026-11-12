@@ -1,18 +1,36 @@
-# Relay Chat Dock
+<p align="center">
+  <img src="assets/app-icon.png" width="88" alt="Relay Chat Dock">
+</p>
 
-A local OBS companion that combines Twitch, Kick, and YouTube live chat into one dock, plus an Activity dock for follows, subs, gifts, cheers, raids, Super Chats, memberships, merch, and StreamElements donations.
+<h1 align="center">Relay Chat Dock</h1>
 
-Windows · [![latest release](https://img.shields.io/github/v/release/Milzstream/OBS-Multi-Chat)](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest) · [![license: MIT with Commons Clause](https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-blue)](LICENSE)
+---
 
-![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshots/screenshot.png)
+<p align="center">A local OBS companion with three pieces: a unified chat dock, a unified activity dock, and an alerts browser source you can customize.</p>
 
-![OBS with Relay Chat and Relay Activity docks](docs/screenshots/obs.png)
+<p align="center">
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge">
+  <a href="https://github.com/Milzstream/OBS-Multi-Chat/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/Milzstream/OBS-Multi-Chat?style=for-the-badge&label=release&color=orange"></a>
+  <a href="LICENSE"><img alt="license: MIT with Commons Clause" src="https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-blue?style=for-the-badge"></a>
+  <a href="https://github.com/Milzstream/OBS-Multi-Chat/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/Milzstream/OBS-Multi-Chat/build.yml?style=for-the-badge&label=build"></a>
+</p>
 
-![Activity dock with follows, donations, and platform icons. Right-click a pill to delete it.](docs/screenshots/activity.png)
+<p align="center">
+  <img src="docs/screenshots/obs.png" width="760" alt="OBS with Relay Chat and Relay Activity docks">
+</p>
 
-![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/screenshots/stream-controls.png)
+<p align="center">
+  <img src="docs/screenshots/activity.png" height="300" alt="Activity dock with follows, donations, and platform icons">
+  <img src="docs/screenshots/stream-controls.png" height="300" alt="Stream controls for a shared Twitch and Kick title, category, and tags">
+</p>
 
-![Relay Chat Dock window with the log, account connections, and settings](docs/screenshots/app.png)
+<p align="center">
+  <img src="docs/screenshots/screenshot.png" height="420" alt="Chat dock combining Twitch, Kick, and YouTube">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/AlertsCustomization.png" width="760" alt="Editor for the on-stream alerts browser source">
+</p>
 
 ## Features
 
