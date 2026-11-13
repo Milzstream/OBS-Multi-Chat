@@ -6,6 +6,7 @@ import {
   applyLiveStreamDetails,
   kickBadges,
   kickChannelPollFailure,
+  kickChatSendAck,
   kickModerationBanPayload,
   kickStreamDetails,
   looksLikePlaceholder,
@@ -179,8 +180,10 @@ export function createKickLive(d: KickLiveDeps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: text, type: 'user', ...(token.userId ? { broadcaster_user_id: Number(token.userId) } : {}) }),
     })
-    if (response.ok) return { ok: true }
-    return { ok: false, error: await response.text() }
+    if (!response.ok) return { ok: false, error: await response.text() }
+    let body: unknown
+    try { body = await response.json() } catch { body = undefined }
+    return kickChatSendAck(body)
   }
 
   async function moderateKick(body: { action: string; messageId?: string; userId?: string; duration?: number; reason?: string }) {
