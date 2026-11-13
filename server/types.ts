@@ -106,7 +106,7 @@ export type AppSettings = {
   autoLiveCheck: AutoLiveCheck
   streamInfo: StreamInfoMap
   youtubeQuota: YoutubeQuota
-  /** Readonly LAN watch link. Unset means follow RELAY_LAN / RELAY_BIND. */
+  /** Readonly LAN watch link. Unset means off. Old RELAY_LAN / RELAY_BIND keys are ignored. */
   lanWatch?: boolean
 }
 

@@ -90,9 +90,7 @@ notepad production.env
 ```env
 PORT=4173
 OAUTH_REDIRECT_URI=http://localhost:4173/oauth/callback
-# RELAY_BIND=127.0.0.1
 # RELAY_WATCH_TOKEN=
-# RELAY_API_TOKEN=
 # RELAY_DATA_DIR=
 
 TWITCH_CLIENT_ID=your_twitch_client_id

@@ -7,20 +7,16 @@ import type { NextFunction, Request, Response } from 'express'
 /**
  * Local control API helpers: hardening and URL allowlists for the docks.
  *
- * Bind and Watch are separate. `RELAY_BIND=0.0.0.0` or a LAN IP is sticky: the
- * socket stays there and Watch only hosts `/watch`. Default / loopback bind:
- * Watch on temporarily listens on `0.0.0.0`, Watch off returns to `127.0.0.1`.
+ * The socket stays on this computer until Watch is on. Watch on listens on
+ * `0.0.0.0` so the readonly `/watch` link works, then Watch off returns to
+ * `127.0.0.1`. `RELAY_BIND`, `RELAY_LAN`, and `RELAY_API_TOKEN` are ignored.
  * Off this computer:
  * - A watch token (query `token` or `relay_watch` cookie) can only read
  *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
  *   moderate, open links, or read JWTs. Neighbors on the Wi-Fi do not get
  *   that token unless the streamer shares the watch URL.
- * - `RELAY_API_TOKEN` is a header secret for tools (`x-relay-token` or
- *   `Authorization: Bearer`). It is never read from the query string, so a
- *   watch URL cannot be reused as a write credential. A matching Origin is
- *   not permission to write.
- * - Shutdown, the companion, and the operator docks stay on this computer
- *   even with the API token. OAuth from another device requires the header.
+ * - Sending, settings, OAuth, shutdown, the companion, and the operator docks
+ *   stay on this computer. A matching Origin is not permission to write.
  * HTTP only, no TLS.
  */
 
@@ -28,7 +24,6 @@ export type LocalApiOptions = {
   port: number
   bindHost: string
   lanEnabled: boolean
-  apiToken?: string
   watchToken?: string
   /** Test seam. Production leaves this unset and uses the socket address. */
   peerAddress?: (request: Request) => string | undefined
@@ -41,8 +36,6 @@ export type ControlRequestInfo = {
   origin?: string
   referer?: string
   host?: string
-  /** Header secret only (`x-relay-token` or Bearer). Never a query value. */
-  token?: string
   watchToken?: string
   watchTokenFrom?: 'query' | 'cookie'
 }
@@ -68,40 +61,20 @@ export function isLoopbackHost(host: string) {
 }
 
 /**
- * Resolve the HTTP bind host from env. Defaults to loopback-only. `RELAY_LAN=1`
- * (or any non-loopback `RELAY_BIND`) starts with Watch on. A non-loopback
- * `RELAY_BIND` is sticky: Watch will not unbind it. Default bind + Watch on
- * temporarily listens on all interfaces via `listenHostFor`.
+ * Always this computer. `RELAY_BIND` and `RELAY_LAN` are ignored so an old
+ * `production.env` cannot keep the socket on the LAN. Watch chooses the socket.
  */
-export function resolveBindHost(env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
-  const raw = String(env.RELAY_BIND || '').trim()
-  const lanFlag = env.RELAY_LAN === '1' || /^true$/i.test(String(env.RELAY_LAN || ''))
-  if (lanFlag) return { host: raw || '0.0.0.0', lanEnabled: true }
-  if (raw) return { host: raw, lanEnabled: !isLoopbackHost(raw) }
+export function resolveBindHost(_env: NodeJS.ProcessEnv = process.env): { host: string; lanEnabled: boolean } {
   return { host: '127.0.0.1', lanEnabled: false }
 }
 
-/** True when `RELAY_BIND` is `0.0.0.0` or a LAN IP. That socket stays bound. */
-export function stickyLanBind(envBind = '') {
-  const bound = envBind.trim()
-  return Boolean(bound && !isLoopbackHost(bound))
-}
-
-/**
- * Socket bind for the current Watch state.
- * Sticky LAN `RELAY_BIND` is always returned, Watch on or off.
- * Default / loopback config: Watch on uses `0.0.0.0`, Watch off uses `127.0.0.1`.
- */
-export function listenHostFor(lanEnabled: boolean, envBind = '') {
-  const bound = envBind.trim()
-  if (stickyLanBind(bound)) return bound
+/** Watch on listens on every interface. Watch off listens on this computer only. */
+export function listenHostFor(lanEnabled: boolean) {
   return lanEnabled ? '0.0.0.0' : '127.0.0.1'
 }
 
-export function watchOffLogLine(envBind = '') {
-  const bound = envBind.trim()
-  if (stickyLanBind(bound)) return `Watch is off. RELAY_BIND=${bound} is still listening; the watch page is not hosted.`
-  return 'Watch is off. Other devices cannot open the relay.'
+export function watchOffLogLine() {
+  return 'Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.'
 }
 
 /** Watch URL without the view secret, for the companion log. */
@@ -213,14 +186,13 @@ export function normalizeWatchToken(raw: string | undefined) {
 }
 
 /**
- * View secret for the watch URL. `RELAY_WATCH_TOKEN` wins when it is valid and
- * distinct from `RELAY_API_TOKEN`. Otherwise reuse `data/watch-token`, or
- * return a new value the caller should persist. LAN off means no secret.
+ * View secret for the watch URL. `RELAY_WATCH_TOKEN` wins when it is valid.
+ * Otherwise reuse `data/watch-token`, or return a new value the caller should
+ * persist. LAN off means no secret.
  */
 export function resolveWatchSecret(input: {
   lanEnabled: boolean
   envToken?: string
-  apiToken?: string
   stored?: string
   create?: () => string
 }): { token?: string; source?: 'env' | 'file' | 'generated'; persist?: string; warning?: string } {
@@ -228,18 +200,15 @@ export function resolveWatchSecret(input: {
   const envRaw = String(input.envToken || '').trim()
   const envToken = normalizeWatchToken(envRaw)
   if (envRaw && !envToken) return { warning: 'RELAY_WATCH_TOKEN was ignored. Use 8–128 letters, numbers, "_" or "-".', ...keptWatchSecret(input) }
-  if (envToken && input.apiToken && envToken === input.apiToken) {
-    return { warning: 'RELAY_WATCH_TOKEN matches RELAY_API_TOKEN. A different view token was kept so the watch link cannot be reused as a write secret.', ...keptWatchSecret(input) }
-  }
   if (envToken) return { token: envToken, source: 'env' }
   return keptWatchSecret(input)
 }
 
-function keptWatchSecret(input: { apiToken?: string; stored?: string; create?: () => string }): { token?: string; source?: 'file' | 'generated'; persist?: string } {
+function keptWatchSecret(input: { stored?: string; create?: () => string }): { token?: string; source?: 'file' | 'generated'; persist?: string } {
   const stored = normalizeWatchToken(input.stored)
-  if (stored && stored !== input.apiToken) return { token: stored, source: 'file' }
+  if (stored) return { token: stored, source: 'file' }
   const created = normalizeWatchToken(input.create?.())
-  if (!created || created === input.apiToken) return {}
+  if (!created) return {}
   return { token: created, source: 'generated', persist: created }
 }
 
@@ -313,7 +282,7 @@ function limitedToThisComputer(): { ok: false; status: 403; error: string } {
 /**
  * Authorization gate. Loopback is the operator. Off-box, a trusted Origin is
  * only a cross-origin check — it never grants write, secret, or operator
- * access. The watch token is read-only. The API token is header-only.
+ * access. The watch token is read-only. Sending and settings stay on this computer.
  */
 export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true; watchCookie?: boolean } | { ok: false; status: number; error: string } {
   const kind = classifyAccess(request.method, request.path)
@@ -333,26 +302,11 @@ export function authorizeLocalControl(request: ControlRequestInfo, options: Loca
   }
   if (loopback) return { ok: true }
   if (!options.lanEnabled) return limitedToThisComputer()
-  const apiOk = tokenMatches(options.apiToken, request.token)
-  const watchOk = tokenMatches(options.watchToken, request.watchToken)
   if (kind === 'operator') return { ok: false, status: 403, error: 'Companion and dock controls stay on this computer' }
-  if (kind === 'oauth') {
-    if (apiOk) return { ok: true }
-    return { ok: false, status: 403, error: 'OAuth stays on this computer' }
-  }
-  if (kind === 'write' || kind === 'secret') {
-    if (apiOk) return { ok: true }
-    return { ok: false, status: 403, error: 'LAN control requests require RELAY_API_TOKEN' }
-  }
-  if (apiOk) return { ok: true }
-  if (watchOk) return { ok: true, watchCookie: request.watchTokenFrom === 'query' }
+  if (kind === 'oauth') return { ok: false, status: 403, error: 'OAuth stays on this computer' }
+  if (kind === 'write' || kind === 'secret') return { ok: false, status: 403, error: 'Sending and settings stay on this computer' }
+  if (tokenMatches(options.watchToken, request.watchToken)) return { ok: true, watchCookie: request.watchTokenFrom === 'query' }
   return { ok: false, status: 403, error: 'This watch link needs its view token' }
-}
-
-function requestToken(request: Request) {
-  const header = String(request.get('x-relay-token') || '').trim()
-  const bearer = String(request.get('authorization') || '').match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || ''
-  return header || bearer
 }
 
 function denyControl(request: Request, response: Response, error: string) {
@@ -376,7 +330,6 @@ export function createControlGuard(options: LocalApiOptions) {
       origin: request.get('origin'),
       referer: request.get('referer'),
       host: request.get('host'),
-      token: requestToken(request),
       watchToken: presented?.token,
       watchTokenFrom: presented?.from,
     }, options)
