@@ -323,6 +323,32 @@ describe('release notes excerpt', () => {
     assert.equal(text, '1.1.10\n* notes for v1.1.10')
   })
 
+  it('shows generated 1.1.11 notes to an installed 1.1.10', () => {
+    const generated = [
+      "## What's Changed",
+      '* Read Kick chat send acknowledgements by @Milzstream in https://github.com/Milzstream/OBS-Multi-Chat/pull/206',
+      '* Remove sticky LAN bind and the write token by @Milzstream in https://github.com/Milzstream/OBS-Multi-Chat/pull/208',
+      '',
+      '**Full Changelog**: https://github.com/Milzstream/OBS-Multi-Chat/compare/v1.1.10...v1.1.11',
+    ].join('\n')
+    const published = publishedReleaseBody(generated)
+    assert.equal(published.includes(LEGACY_NOTES_HEADING), false)
+    const fromPublished = releaseNotesSince('1.1.10', [
+      downloadable('v1.1.10', `${LEGACY_NOTES_HEADING}\n* older`),
+      downloadable('v1.1.11', published),
+    ], 'v1.1.11')
+    const fromGenerated = releaseNotesSince('1.1.10', [
+      downloadable('v1.1.11', generated),
+    ], 'v1.1.11')
+    for (const text of [fromPublished, fromGenerated]) {
+      assert.match(text, /^1\.1\.11\n\* Read Kick chat send acknowledgements/)
+      assert.match(text, /Remove sticky LAN bind and the write token/)
+      assert.match(text, /Full Changelog: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/compare\/v1\.1\.10\.\.\.v1\.1\.11/)
+      assert.doesNotMatch(text, /What's Changed/)
+      assert.doesNotMatch(text, /older/)
+    }
+  })
+
   it('writes a release body that does not contain the old heading', () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-'))
