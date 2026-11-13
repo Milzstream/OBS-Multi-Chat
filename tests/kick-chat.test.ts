@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   kickBadges,
   kickChannelPollFailure,
+  kickChatSendAck,
   looksLikePlaceholder,
   shouldWarnKickChatDown,
 } from '../server/logic.js'
@@ -14,6 +15,16 @@ describe('Kick chat and activity', () => {
     assert.equal(kickChannelPollFailure(401)?.refresh, true)
     assert.match(kickChannelPollFailure(500)?.message || '', /500/)
     assert.equal(kickChannelPollFailure(500)?.refresh, false)
+  })
+
+  it('stores a Kick message id and rejects a dropped send', () => {
+    assert.deepEqual(kickChatSendAck({ data: { is_sent: true, message_id: 'msg-1' }, message: 'OK' }), { ok: true, id: 'msg-1' })
+    assert.deepEqual(kickChatSendAck({ data: { message_id: 'msg-2' } }), { ok: true, id: 'msg-2' })
+    assert.deepEqual(kickChatSendAck({ data: { is_sent: false, message_id: 'ignored' }, message: 'banned' }), { ok: false, error: 'banned', dropped: true })
+    assert.deepEqual(kickChatSendAck({ data: { is_sent: false } }), { ok: false, error: 'Kick dropped the message', dropped: true })
+    assert.deepEqual(kickChatSendAck({ data: { is_sent: true } }), { ok: false, error: 'Kick did not acknowledge the message', unacked: true })
+    assert.deepEqual(kickChatSendAck({}), { ok: false, error: 'Kick did not acknowledge the message', unacked: true })
+    assert.deepEqual(kickChatSendAck({ data: { is_sent: true, message_id: '  ' } }), { ok: false, error: 'Kick did not acknowledge the message', unacked: true })
   })
 
   it('does not warn that Kick chat is down until a connect attempt has failed', () => {

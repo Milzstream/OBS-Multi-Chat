@@ -114,3 +114,19 @@ export function shouldWarnKickChatDown(connected: boolean, failed: boolean) {
   return !connected && failed
 }
 
+export type KickChatSendAck =
+  | { ok: true; id: string }
+  | { ok: false; error: string; dropped?: true; unacked?: true }
+
+export function kickChatSendAck(body: unknown): KickChatSendAck {
+  const record = body && typeof body === 'object' ? body as { data?: { is_sent?: boolean; message_id?: string }; message?: string } : undefined
+  const data = record?.data && typeof record.data === 'object' ? record.data : undefined
+  if (data?.is_sent === false) {
+    const note = String(record?.message || '').trim()
+    return { ok: false, error: note || 'Kick dropped the message', dropped: true }
+  }
+  const id = String(data?.message_id || '').trim()
+  if (id) return { ok: true, id }
+  return { ok: false, error: 'Kick did not acknowledge the message', unacked: true }
+}
+
