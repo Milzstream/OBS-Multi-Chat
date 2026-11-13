@@ -201,6 +201,26 @@ $form.AcceptButton = $yes
 $form.CancelButton = $no
 $form.Controls.AddRange(@($label, $box, $yes, $no))
 $form.ActiveControl = $yes
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class RelayUpdateNative {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+$null = $form.Handle
+[RelayUpdateNative]::ShowWindow($form.Handle, 0) | Out-Null
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 50
+$timer.Add_Tick({
+  $timer.Stop()
+  [RelayUpdateNative]::ShowWindow($form.Handle, 5) | Out-Null
+  $form.Visible = $true
+  $form.Activate()
+  [RelayUpdateNative]::SetForegroundWindow($form.Handle) | Out-Null
+})
+$timer.Start()
 $r = $form.ShowDialog()
 if ($r -eq [System.Windows.Forms.DialogResult]::Yes) { exit 0 } else { exit 1 }`
 }

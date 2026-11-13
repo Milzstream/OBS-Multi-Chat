@@ -256,6 +256,8 @@ describe('release notes excerpt', () => {
     assert.match(command, /ReadAllText/)
     assert.match(command, /Replace\(\$lf, \$crlf\)/)
     assert.match(command, /ActiveControl = \$yes/)
+    assert.match(command, /ShowWindow\(\$form\.Handle, 0\)/)
+    assert.match(command, /ShowWindow\(\$form\.Handle, 5\)/)
     assert.match(command, /AutoScroll = \$true/)
     assert.match(command, /UseMnemonic = \$false/)
     assert.equal(command.includes('TextBox'), false)
