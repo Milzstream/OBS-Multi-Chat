@@ -41,7 +41,7 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 
 ## Backend endpoints
 
-Loopback (this computer) can call every route. From another computer, only the watch link can read:
+This computer can call every route only when the connection is loopback and the site name is `localhost`, `127.0.0.1`, or `::1`. This machine's LAN address is not that, even from a browser on the streaming PC. From another computer, only the watch link can read:
 
 - Watch token (`?token=` on the shared link, then the `relay_watch` cookie): `GET /watch`, `GET /api/state`, `GET /events`, and `GET /api/media` only.
 - Sending, settings, JWTs, OAuth, the operator docks (`/`, `/activity`, `/alerts`), the companion (`/console`, `/api/console`, `/api/logs`, `/events/logs`, `/api/console/*`), and `POST /api/shutdown` stay on this computer. A matching `Origin` is not enough.

@@ -10,6 +10,8 @@ import type { NextFunction, Request, Response } from 'express'
  * The socket stays on this computer until Watch is on. Watch on listens on
  * `0.0.0.0` so the readonly `/watch` link works, then Watch off returns to
  * `127.0.0.1`. `RELAY_BIND`, `RELAY_LAN`, and `RELAY_API_TOKEN` are ignored.
+ * This computer means a loopback peer and a loopback site name (`localhost`,
+ * `127.0.0.1`, or `::1`). The LAN address of this machine is not that.
  * Off this computer:
  * - A watch token (query `token` or `relay_watch` cookie) can only read
  *   `/watch`, `/api/state`, `/events`, and `/api/media`. It cannot send,
@@ -125,6 +127,17 @@ export function listenOn(server: Server, port: number, host: string): Promise<vo
 export function isLoopbackAddress(address?: string | null) {
   const host = String(address || '').replace(/^::ffff:/i, '').replace(/^\[|\]$/g, '')
   return host === '127.0.0.1' || host === '::1' || host === 'localhost'
+}
+
+/** Site name from the Host header. Missing or unreadable is not loopback. */
+export function requestSiteHost(host?: string) {
+  const raw = String(host || '').trim()
+  if (!raw) return ''
+  try {
+    return new URL(`http://${raw}`).hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  } catch {
+    return ''
+  }
 }
 
 /**
@@ -280,9 +293,11 @@ function limitedToThisComputer(): { ok: false; status: 403; error: string } {
 }
 
 /**
- * Authorization gate. Loopback is the operator. Off-box, a trusted Origin is
- * only a cross-origin check — it never grants write, secret, or operator
- * access. The watch token is read-only. Sending and settings stay on this computer.
+ * Authorization gate. This computer is a loopback peer whose site name is
+ * `localhost`, `127.0.0.1`, or `::1`. A loopback connection under any other
+ * name falls through to the watch rules. Off-box, a trusted Origin is only a
+ * cross-origin check — it never grants write, secret, or operator access.
+ * The watch token is read-only. Sending and settings stay on this computer.
  */
 export function authorizeLocalControl(request: ControlRequestInfo, options: LocalApiOptions): { ok: true; watchCookie?: boolean } | { ok: false; status: number; error: string } {
   const kind = classifyAccess(request.method, request.path)
@@ -293,14 +308,14 @@ export function authorizeLocalControl(request: ControlRequestInfo, options: Loca
   const origin = String(request.origin || '').trim()
   const referer = String(request.referer || '').trim()
   const source = origin || referer
-  const loopback = isLoopbackAddress(request.ip)
+  const local = isLoopbackAddress(request.ip) && isLoopbackHost(requestSiteHost(request.host))
   // YouTube, Twitch, and Kick send the browser back to /oauth/callback with
-  // their own Referer. That is still this computer. A foreign Referer must
-  // not block it, and must not unlock anything else.
-  if (source && !isTrustedOrigin(source, options, request.host) && !(kind === 'oauth' && loopback)) {
+  // their own Referer. That exception is only this computer. A foreign
+  // Referer must not block it, and must not unlock anything else.
+  if (source && !isTrustedOrigin(source, options, request.host) && !(kind === 'oauth' && local)) {
     return { ok: false, status: 403, error: 'Cross-origin control requests are blocked' }
   }
-  if (loopback) return { ok: true }
+  if (local) return { ok: true }
   if (!options.lanEnabled) return limitedToThisComputer()
   if (kind === 'operator') return { ok: false, status: 403, error: 'Companion and dock controls stay on this computer' }
   if (kind === 'oauth') return { ok: false, status: 403, error: 'OAuth stays on this computer' }
