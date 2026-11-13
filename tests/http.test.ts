@@ -16,7 +16,6 @@ import {
   listenOn,
   parseOpenUrl,
   resolveBindHost,
-  stickyLanBind,
   watchOffLogLine,
 } from '../server/local-api.js'
 import { createOAuthStateStore } from '../server/oauth-state.js'
@@ -37,24 +36,13 @@ async function listen(app: express.Express) {
 describe('local control authorization', () => {
   const options = { port: 4173, bindHost: '127.0.0.1', lanEnabled: false }
 
-  it('binds to loopback unless LAN mode is opted in', () => {
+  it('ignores old bind keys and follows Watch', () => {
     assert.deepEqual(resolveBindHost({}), { host: '127.0.0.1', lanEnabled: false })
-    assert.deepEqual(resolveBindHost({ RELAY_BIND: '0.0.0.0' }), { host: '0.0.0.0', lanEnabled: true })
-    assert.deepEqual(resolveBindHost({ RELAY_LAN: '1' }), { host: '0.0.0.0', lanEnabled: true })
+    assert.deepEqual(resolveBindHost({ RELAY_BIND: '0.0.0.0', RELAY_LAN: '1' }), { host: '127.0.0.1', lanEnabled: false })
+    assert.deepEqual(resolveBindHost({ RELAY_BIND: '192.168.1.20', RELAY_LAN: 'true' }), { host: '127.0.0.1', lanEnabled: false })
     assert.equal(listenHostFor(false), '127.0.0.1')
     assert.equal(listenHostFor(true), '0.0.0.0')
-    assert.equal(listenHostFor(true, '127.0.0.1'), '0.0.0.0')
-    assert.equal(listenHostFor(false, '127.0.0.1'), '127.0.0.1')
-    assert.equal(stickyLanBind('0.0.0.0'), true)
-    assert.equal(stickyLanBind('192.168.1.20'), true)
-    assert.equal(stickyLanBind('127.0.0.1'), false)
-    assert.equal(stickyLanBind(''), false)
-    assert.equal(listenHostFor(false, '0.0.0.0'), '0.0.0.0')
-    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
-    assert.equal(listenHostFor(false, '192.168.1.20'), '192.168.1.20')
-    assert.equal(listenHostFor(true, '192.168.1.20'), '192.168.1.20')
-    assert.match(watchOffLogLine('0.0.0.0'), /RELAY_BIND=0\.0\.0\.0 is still listening/)
-    assert.match(watchOffLogLine(''), /cannot open the relay/)
+    assert.match(watchOffLogLine(), /Turn it on from the Relay Chat Dock window/)
   })
 
   it('closes and re-listens so Watch can bind and unbind the LAN', async () => {
@@ -90,24 +78,20 @@ describe('local control authorization', () => {
     assert.equal(isTrustedOrigin('https://evil.example', trust), false)
   })
 
-  it('allows same-origin loopback docks and token-authenticated LAN tools', () => {
+  it('allows same-origin loopback docks and keeps LAN writes on this computer', () => {
     assert.equal(authorizeLocalControl({
       method: 'POST',
       path: '/api/settings',
       ip: '127.0.0.1',
       origin: 'http://127.0.0.1:4173',
     }, options).ok, true)
-    assert.equal(authorizeLocalControl({
+    const remote = authorizeLocalControl({
       method: 'POST',
       path: '/api/settings',
       ip: '192.168.1.20',
-    }, { ...options, bindHost: '0.0.0.0', lanEnabled: true, apiToken: 'secret' }).ok, false)
-    assert.equal(authorizeLocalControl({
-      method: 'POST',
-      path: '/api/settings',
-      ip: '192.168.1.20',
-      token: 'secret',
-    }, { ...options, bindHost: '0.0.0.0', lanEnabled: true, apiToken: 'secret' }).ok, true)
+    }, { ...options, bindHost: '0.0.0.0', lanEnabled: true })
+    assert.equal(remote.ok, false)
+    if (!remote.ok) assert.equal(remote.error, 'Sending and settings stay on this computer')
   })
 })
 

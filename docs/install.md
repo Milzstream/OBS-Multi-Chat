@@ -51,13 +51,10 @@ Account apps, translation, and `production.env` keys are in [Setup](setup.md).
 
 Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved. Windows may ask to allow the app on private networks the first time the process listens on the LAN.
 
-Bind and Watch are separate:
+Watch on temporarily listens on the network so that link works. Watch off returns to this computer. The chat dock, activity dock, alerts page, and companion stay on this computer either way.
 
-- Default bind (`127.0.0.1`, or unset `RELAY_BIND`): Watch on temporarily listens on `0.0.0.0`. Watch off closes the LAN listener again.
-- `RELAY_BIND=0.0.0.0` or a LAN IP such as `192.168.1.20`: that socket stays bound. Watch only hosts or unhosts the `/watch` page. Tools with `RELAY_API_TOKEN` can still reach the LAN listener while Watch is off.
-
-Until Watch is on (and bind is loopback), other devices cannot reach the chat dock, the activity dock, or the live update stream. `RELAY_LAN=1` starts with Watch already on; you can still turn it off from the window. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
+Until Watch is on, other devices cannot reach the chat dock, the activity dock, or the live update stream. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself.
 
 That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
 
-A browser on another device still cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. `RELAY_API_TOKEN` is only for a tool that sends it in `x-relay-token` or `Authorization: Bearer`. It is not accepted from the query string. Shutdown, the companion window, and the operator docks stay on this computer even with that token. OAuth from another device requires the header; the companion window does not, because it is on this computer.
+A browser on another device cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. Those stay on this computer.

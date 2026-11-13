@@ -41,20 +41,18 @@ GitHub Actions attaches both the zip and the setup exe when `main` first ships a
 
 ## Backend endpoints
 
-Loopback (this computer) can call every route with no token. From another computer, access is split into:
+Loopback (this computer) can call every route. From another computer, only the watch link can read:
 
 - Watch token (`?token=` on the shared link, then the `relay_watch` cookie): `GET /watch`, `GET /api/state`, `GET /events`, and `GET /api/media` only.
-- `RELAY_API_TOKEN` header (`x-relay-token` or `Authorization: Bearer`): other reads and writes, including the JWT routes below. Not accepted from the query string. A matching `Origin` is not enough.
-- This computer only, even with that header: the operator docks (`/`, `/activity`), the companion (`/console`, `/api/console`, `/api/logs`, `/events/logs`, `/api/console/*`), and `POST /api/shutdown`.
-- OAuth (`GET /oauth/:platform`, `GET /oauth/callback`): this computer, or the API token header. A LAN browser cannot replace the stored Twitch, Kick, or YouTube token.
+- Sending, settings, JWTs, OAuth, the operator docks (`/`, `/activity`, `/alerts`), the companion (`/console`, `/api/console`, `/api/logs`, `/events/logs`, `/api/console/*`), and `POST /api/shutdown` stay on this computer. A matching `Origin` is not enough.
 
 - `GET /watch` — readonly chat and activity page for a shared LAN link
 - `GET /api/state` — current accounts, stream info, recent messages, activity, and settings
 - `GET /events` — Server-Sent Events stream for dock updates
 - `POST /api/messages` — send a message to selected platforms
 - `GET /api/jwts` — companion-internal StreamElements JWTs for Twitch, Kick, and YouTube. Not included in `/api/state`, and not readable with the watch token
-- `POST /api/jwts` — save those JWTs into `production.env` and reconnect StreamElements. Same write rule as the other mutating routes
-- `POST /api/settings` — toggle native backup, ignore-missing-JWT, 30-day drop, translate, per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on), `lanWatch` (hosts `/watch`; rebinds the socket only when `RELAY_BIND` is loopback), and `alerts` (including saved looks)
+- `POST /api/jwts` — save those JWTs into `production.env` and reconnect StreamElements. This computer only
+- `POST /api/settings` — toggle native backup, ignore-missing-JWT, 30-day drop, translate, per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on), `lanWatch` (hosts `/watch` and listens on the LAN while it is on), and `alerts` (including saved looks)
 - `POST /api/alerts/assets` — upload alert graphic or sound (this computer). JSON `{ name, mime, data }` with a data URL or base64 body. Files are `data/alerts/<uuid>`
 - `GET /alerts/assets/:id` — serve a stored alert file (this computer, same as `/alerts`)
 - `POST /api/moderate` — delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field

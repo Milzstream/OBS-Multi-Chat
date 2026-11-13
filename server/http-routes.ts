@@ -73,8 +73,7 @@ export type HttpRouteDeps = {
   envPath: string
   dataDir: string
   envTemplatePath: string
-  envBindHost: string
-  localApi: { port: number; bindHost: string; lanEnabled: boolean; apiToken?: string; watchToken?: string }
+  localApi: { port: number; bindHost: string; lanEnabled: boolean; watchToken?: string }
   currentWatchUrl: () => string | undefined
   relayLogs: { lines: () => { id: number }[]; since: (after: number) => { id: number }[]; subscribe: (write: (line: { id: number }) => void) => () => void }
   companionHost: { hello: () => void; bye: () => boolean }
@@ -140,7 +139,6 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
     envPath,
     dataDir,
     envTemplatePath,
-    envBindHost,
     localApi,
     currentWatchUrl,
     relayLogs,
@@ -443,7 +441,7 @@ export function registerHttpRoutes(app: Express, d: HttpRouteDeps): void {
       if (rebound.ok) {
         settings.lanWatch = body.lanWatch
         watchChanged = true
-        console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : watchOffLogLine(envBindHost))
+        console.log(body.lanWatch ? watchLogLine(currentWatchUrl()) : watchOffLogLine())
       } else {
         watchError = rebound.error
         console.error(watchError)

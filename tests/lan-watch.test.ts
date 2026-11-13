@@ -18,7 +18,7 @@ import {
   watchUrlForLog,
 } from '../server/local-api.js'
 
-const lan = { port: 4173, bindHost: '0.0.0.0', lanEnabled: true, apiToken: 'write-secret', watchToken: 'view-secret' }
+const lan = { port: 4173, bindHost: '0.0.0.0', lanEnabled: true, watchToken: 'view-secret' }
 
 async function listen(app: express.Express) {
   const server = createServer(app)
@@ -59,14 +59,13 @@ describe('LAN watch access', () => {
       watchToken: 'view-secret',
     }, lan)
     assert.equal(forged.ok, false)
-    if (!forged.ok) assert.equal(forged.error, 'LAN control requests require RELAY_API_TOKEN')
+    if (!forged.ok) assert.equal(forged.error, 'Sending and settings stay on this computer')
 
     assert.equal(authorizeLocalControl({
       method: 'POST',
       path: '/api/moderate',
       ip: '192.168.1.20',
-      token: 'write-secret',
-    }, lan).ok, true)
+    }, lan).ok, false)
     assert.equal(authorizeLocalControl({
       method: 'GET',
       path: '/api/jwts',
@@ -74,11 +73,11 @@ describe('LAN watch access', () => {
       watchToken: 'view-secret',
     }, lan).ok, false)
     assert.equal(authorizeLocalControl({
-      method: 'GET',
-      path: '/api/jwts',
+      method: 'POST',
+      path: '/api/activity/delete',
       ip: '192.168.1.20',
-      token: 'write-secret',
-    }, lan).ok, true)
+      watchToken: 'view-secret',
+    }, lan).ok, false)
     assert.equal(authorizeLocalControl({
       method: 'GET',
       path: '/api/state',
@@ -90,7 +89,6 @@ describe('LAN watch access', () => {
       method: 'POST',
       path: '/api/shutdown',
       ip: '192.168.1.20',
-      token: 'write-secret',
     }, lan).ok, false)
     assert.equal(authorizeLocalControl({
       method: 'GET',
@@ -101,8 +99,7 @@ describe('LAN watch access', () => {
       method: 'GET',
       path: '/oauth/twitch',
       ip: '192.168.1.20',
-      token: 'write-secret',
-    }, lan).ok, true)
+    }, lan).ok, false)
     assert.equal(authorizeLocalControl({
       method: 'GET',
       path: '/',
@@ -157,17 +154,16 @@ describe('LAN watch access', () => {
     }, lan).ok, false)
   })
 
-  it('keeps a view token that is not the write secret', () => {
+  it('keeps a view token from the env or a stored file', () => {
     assert.deepEqual(resolveWatchSecret({ lanEnabled: false, create: () => 'generated-token-value' }), {})
     assert.equal(resolveWatchSecret({ lanEnabled: true, envToken: 'short' }).warning?.includes('ignored'), true)
-    const kept = resolveWatchSecret({
+    const fromEnv = resolveWatchSecret({
       lanEnabled: true,
-      envToken: 'write-secret',
-      apiToken: 'write-secret',
+      envToken: 'watch-view-token',
       stored: 'stored-view-token',
     })
-    assert.equal(kept.token, 'stored-view-token')
-    assert.match(kept.warning || '', /matches RELAY_API_TOKEN/)
+    assert.equal(fromEnv.token, 'watch-view-token')
+    assert.equal(fromEnv.source, 'env')
     const created = resolveWatchSecret({ lanEnabled: true, stored: 'nope', create: () => 'generated-view-token' })
     assert.equal(created.token, 'generated-view-token')
     assert.equal(created.persist, 'generated-view-token')
@@ -190,8 +186,6 @@ describe('LAN watch access', () => {
     assert.equal(watchUrlForLog('http://192.168.1.20:4173/watch?token=view-secret'), 'http://192.168.1.20:4173/watch')
     assert.equal(watchLogLine('http://192.168.1.20:4173/watch?token=view-secret'), 'Watch          http://192.168.1.20:4173/watch')
     assert.equal(watchLogLine(undefined), 'Watch is on, but no private IPv4 address was found for a watch link.')
-    assert.equal(listenHostFor(false, '0.0.0.0'), '0.0.0.0')
-    assert.equal(listenHostFor(true, '0.0.0.0'), '0.0.0.0')
     assert.equal(listenHostFor(false), '127.0.0.1')
     assert.equal(listenHostFor(true), '0.0.0.0')
   })
@@ -253,7 +247,7 @@ describe('LAN watch access', () => {
       const jwtsWatch = await fetch(`${server.url}/api/jwts?token=view-secret`)
       assert.equal(jwtsWatch.status, 403)
       const jwtsToken = await fetch(`${server.url}/api/jwts`, { headers: { 'x-relay-token': 'write-secret' } })
-      assert.equal(jwtsToken.status, 200)
+      assert.equal(jwtsToken.status, 403)
 
       const forged = await fetch(`${server.url}/api/messages`, {
         method: 'POST',
@@ -262,7 +256,7 @@ describe('LAN watch access', () => {
       })
       assert.equal(forged.status, 403)
       const forgedBody = await forged.json() as { error?: string }
-      assert.equal(forgedBody.error, 'LAN control requests require RELAY_API_TOKEN')
+      assert.equal(forgedBody.error, 'Sending and settings stay on this computer')
 
       const queryWrite = await fetch(`${server.url}/api/messages?token=write-secret`, {
         method: 'POST',
@@ -280,10 +274,10 @@ describe('LAN watch access', () => {
 
       const tooled = await fetch(`${server.url}/api/messages`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-relay-token': 'write-secret' },
+        headers: { 'Content-Type': 'application/json', 'x-relay-token': 'write-secret', Authorization: 'Bearer write-secret' },
         body: JSON.stringify({ text: 'hi' }),
       })
-      assert.equal(tooled.status, 200)
+      assert.equal(tooled.status, 403)
 
       const state = await fetch(`${server.url}/api/state`)
       assert.equal(state.status, 403)
@@ -299,7 +293,7 @@ describe('LAN watch access', () => {
       const oauth = await fetch(`${server.url}/oauth/callback?code=1&state=1`)
       assert.equal(oauth.status, 403)
       const oauthToken = await fetch(`${server.url}/oauth/callback?code=1&state=1`, { headers: { Authorization: 'Bearer write-secret' } })
-      assert.equal(oauthToken.status, 200)
+      assert.equal(oauthToken.status, 403)
 
       const dock = await fetch(`${server.url}/`)
       assert.equal(dock.status, 403)

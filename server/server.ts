@@ -16,7 +16,7 @@ import { createDebouncedSave, readJsonFile, resolveDataDir, writeJsonAtomic } fr
 import { activityLogLine, createIngestLog, liveCheckLine, moderationLogLine } from './operator-log.js'
 import { createOAuthStateStore } from './oauth-state.js'
 import { fetchTimed } from './fetch-timed.js'
-import { closeListeningServer, corsOriginDelegate, createControlGuard, lanWatchUrl, listenHostFor, listenOn, resolveBindHost, resolveWatchSecret, stickyLanBind, watchLogLine, watchOffLogLine } from './local-api.js'
+import { closeListeningServer, corsOriginDelegate, createControlGuard, lanWatchUrl, listenHostFor, listenOn, resolveWatchSecret, watchLogLine, watchOffLogLine } from './local-api.js'
 import { createLogBuffer } from './log-buffer.js'
 import { createLogFile, resolveLogFilePath } from './log-file.js'
 import { createHostSession, findCompanionExe, nativeWindowPlan, serverShouldOpenWindow, windowsMessageBox } from './console-window.js'
@@ -188,11 +188,7 @@ if (process.argv.includes('--add-obs-docks')) {
 type State = { bootId: string; accounts: Account[]; streamInfo: StreamInfoMap; messages: ChatMessage[]; health: Record<Platform, Health>; activity: ActivityEvent[]; activityWarnings: string[]; chatWarnings: string[]; youtubePrivacy: YoutubePrivacyNotice[]; streamelements: StreamElementsStatus; activityFallback: boolean; ignoreMissingJwt: boolean; dropOldAlerts: boolean; translateChat: boolean; translateError: string; mentionKeywords: string[]; alerts: AlertSettings; activityMax: number; autoLiveCheck: AppSettings['autoLiveCheck']; youtubeQuota: YoutubeQuotaStatus }
 
 const port = Number(process.env.PORT || 4173)
-const { lanEnabled: envLanEnabled } = resolveBindHost()
-/** Honored as-is when it is 0.0.0.0 or a LAN IP. Default loopback only expands to the LAN while Watch is on. */
-const envBindHost = String(process.env.RELAY_BIND || '').trim()
-const apiToken = String(process.env.RELAY_API_TOKEN || '').trim() || undefined
-const localApi = { port, bindHost: '127.0.0.1', lanEnabled: envLanEnabled, apiToken, watchToken: undefined as string | undefined }
+const localApi = { port, bindHost: '127.0.0.1', lanEnabled: false, watchToken: undefined as string | undefined }
 const app = express()
 const httpServer = createServer(app)
 httpServer.requestTimeout = 0
@@ -207,8 +203,8 @@ const settingsFile = path.join(dataDir, 'settings.json')
 const chatFile = path.join(dataDir, 'chat.json')
 const settings = loadSettings()
 if (typeof settings.lanWatch === 'boolean') localApi.lanEnabled = settings.lanWatch
-localApi.bindHost = listenHostFor(localApi.lanEnabled, envBindHost)
-// View secret for the shared watch URL. Kept distinct from RELAY_API_TOKEN so that link cannot write.
+localApi.bindHost = listenHostFor(localApi.lanEnabled)
+// View secret for the shared watch URL. It cannot send or change settings.
 const watchTokenFile = path.join(dataDir, 'watch-token')
 let storedWatchToken = ''
 try { storedWatchToken = fs.readFileSync(watchTokenFile, 'utf8') } catch { /* created the first time Watch is turned on */ }
@@ -217,7 +213,6 @@ function ensureWatchToken() {
   const secret = resolveWatchSecret({
     lanEnabled: true,
     envToken: process.env.RELAY_WATCH_TOKEN,
-    apiToken,
     stored: storedWatchToken,
     create: () => crypto.randomBytes(24).toString('base64url'),
   })
@@ -1056,7 +1051,6 @@ registerHttpRoutes(app, {
   envPath,
   dataDir,
   envTemplatePath,
-  envBindHost,
   localApi,
   currentWatchUrl,
   relayLogs,
@@ -1124,13 +1118,9 @@ function dropSseClients() {
   clients.clear()
 }
 
-/**
- * Watch hosts or unhosts `/watch`. The socket only moves when bind is the
- * default loopback: Watch on → 0.0.0.0, Watch off → 127.0.0.1. A sticky
- * RELAY_BIND (0.0.0.0 or a LAN IP) stays put.
- */
+/** Watch on listens on the LAN for `/watch`. Watch off returns to this computer. */
 async function rebindForWatch(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
-  const nextHost = listenHostFor(enabled, envBindHost)
+  const nextHost = listenHostFor(enabled)
   if (enabled === localApi.lanEnabled && nextHost === localApi.bindHost && httpServer.listening) return { ok: true }
   if (nextHost === localApi.bindHost && httpServer.listening) {
     localApi.lanEnabled = enabled
@@ -1181,16 +1171,8 @@ function printListenBanner() {
     console.log(`Chat dock      ${base}`)
     console.log(`Activity dock  ${base}/activity`)
   }
-  if (localApi.lanEnabled) {
-    console.log(watchLogLine(currentWatchUrl()))
-    console.log(apiToken
-      ? 'LAN browsers can only open the watch link. Tools must send RELAY_API_TOKEN to write.'
-      : 'LAN browsers can only open the watch link. Set RELAY_API_TOKEN before a tool on another device can write.')
-  } else {
-    console.log(stickyLanBind(envBindHost)
-      ? watchOffLogLine(envBindHost)
-      : 'Watch is off. Turn it on from the Relay Chat Dock window to share a readonly link.')
-  }
+  if (localApi.lanEnabled) console.log(watchLogLine(currentWatchUrl()))
+  else console.log(watchOffLogLine())
   if (envKeysAdded.length) console.log(`Env file added ${envKeysAdded.join(', ')} (existing values kept).`)
   if (youtube.youtubeQuotaUsed) console.log(`YouTube quota ${youtube.youtubeQuotaUsed.toLocaleString()} / ${youtube.youtubeQuotaLimit.toLocaleString()}`)
   youtube.listenForYouTubeQuotaInput()
