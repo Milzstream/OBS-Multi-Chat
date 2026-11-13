@@ -1,338 +1,77 @@
-# Relay Chat Dock
+<p align="center">
+  <img src="assets/app-icon.png" width="88" alt="Relay Chat Dock">
+</p>
 
-A local OBS companion that combines Twitch, Kick, and YouTube live chat into one dock, plus a second Activity dock for follows, subs, gifts, cheers, raids, Super Chats, memberships, merch, and StreamElements donations.
+<h1 align="center">Relay Chat Dock</h1>
 
-![Relay Chat Dock combining Twitch, Kick, and YouTube](docs/screenshot.png)
+---
 
-![OBS with Relay Chat and Relay Activity docks](docs/obs.png)
+<p align="center">A local OBS companion with three pieces: a unified chat dock, a unified activity dock, and an alerts browser source you can customize.</p>
 
-![Activity dock with follows, donations, and platform icons. Right-click a pill to delete it.](docs/activity.png)
+<p align="center">
+  <img alt="Windows" src="https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge">
+  <a href="https://github.com/Milzstream/OBS-Multi-Chat/releases/latest"><img alt="latest release" src="https://img.shields.io/github/v/release/Milzstream/OBS-Multi-Chat?style=for-the-badge&label=release&color=orange"></a>
+  <a href="LICENSE"><img alt="license: MIT with Commons Clause" src="https://img.shields.io/badge/license-MIT%20with%20Commons%20Clause-blue?style=for-the-badge"></a>
+  <a href="https://github.com/Milzstream/OBS-Multi-Chat/actions/workflows/build.yml"><img alt="build" src="https://img.shields.io/github/actions/workflow/status/Milzstream/OBS-Multi-Chat/build.yml?style=for-the-badge&label=build"></a>
+</p>
 
-![Stream Controls with unified Twitch, Kick, and YouTube title and tags](docs/stream-controls.png)
+## What it looks like
 
-![Relay Chat Dock window with the log, account connections, and settings](docs/app.png)
+<p align="center">
+  <img src="docs/screenshots/obs.png" width="760" alt="OBS with Relay Chat and Relay Activity docks"><br>
+  OBS with Relay Chat and Relay Activity docks
+</p>
+
+<table>
+  <tr>
+    <td align="center" valign="bottom" width="34%">
+      <img src="docs/screenshots/screenshot.png" height="320" alt="Chat dock combining Twitch, Kick, and YouTube"><br>
+      Chat dock combining Twitch, Kick, and YouTube
+    </td>
+    <td align="center" valign="bottom" width="33%">
+      <img src="docs/screenshots/activity.png" height="320" alt="Activity dock with follows, donations, and platform icons"><br>
+      Activity dock with follows, donations, and platform icons
+    </td>
+    <td align="center" valign="bottom" width="33%">
+      <img src="docs/screenshots/stream-controls.png" height="320" alt="Stream controls for a shared Twitch and Kick title, category, and tags"><br>
+      Stream controls for a shared Twitch and Kick title, category, and tags
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/AlertsCustomization.png" width="760" alt="Editor for the on-stream alerts browser source"><br>
+  Editor for the on-stream alerts browser source
+</p>
+
+## Features
+
+- One OBS chat dock for Twitch, Kick, and YouTube, with filters, emotes, highlights, and moderation
+- Activity dock for follows, subs, gifts, cheers, raids, Super Chats, memberships, merch, and donations
+- On-stream alerts, with a look editor in the companion window
+- Shared Twitch and Kick title, category, and tag controls
+- Optional English translation of non-English chat
+- Readonly LAN watch link from the companion window
 
 ## Download
 
-The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases) page.
+The latest Windows build is on the [Releases](https://github.com/Milzstream/OBS-Multi-Chat/releases/latest) page. Use the installer. A portable zip is on the same release.
 
-**Use the latest release.** Twitch, Kick, and YouTube change their chat and APIs over time, and Relay tracks those changes in new builds. Kick chat is one example: this version uses Kick's current realtime WebSocket because the old Pusher app was retired. An older install is not guaranteed to keep working after a provider change.
+Stay on the latest release. Install steps and where your settings live: [Install](docs/install.md).
 
-**Installer (recommended)**
+## Docs
 
-1. Download `obs-multi-chat-v*-windows-x64-setup.exe` and run it
-2. Leave **Add Relay Chat and Relay Activity as OBS custom browser docks** checked unless those docks already exist. After OBS starts, open **Docks** and check **Relay Chat** and **Relay Activity** — OBS lists installer-added docks but leaves them hidden until you enable them
-3. Optional: walk through Twitch, Kick, YouTube, and StreamElements (each page can open that provider). Skip and edit the env file later if you prefer
-4. The finish page shows `%LOCALAPPDATA%\Relay Chat Dock\production.env` — the Relay Chat Dock window shows that path on every launch
-5. Start **Relay Chat Dock** from the Start Menu
-
-The app itself installs under Program Files. `production.env` and `data\` stay in `%LOCALAPPDATA%\Relay Chat Dock` so updates do not require writing next to the exe. On launch, missing keys from `.env.example` are appended to `production.env` without changing your existing values. Installed copies can prompt to download the next setup exe, run it, and reopen. That Yes/No prompt does not freeze chat while it is open. The download is only started when the asset URL is a GitHub release host and the file matches the release `sha256` digest.
-
-**Portable zip**
-
-1. Download `obs-multi-chat-v*-windows-x64.zip`
-2. Unzip it and fill in `production.env`
-3. Keep the unzipped folder together. `relay-chat-dock.exe` needs the files beside it
-4. Run `relay-chat-dock.exe` and add the two dock URLs in OBS if you did not use the installer
-
-GitHub Actions attaches both the zip and the setup exe when `main` first ships a given `package.json` version, when you push a `v*` tag, or when you run **Build and Release** from the Actions tab.
-
-## What is included
-
-- Responsive OBS chat dock with platform filters and compact mode
-- OAuth callback server for Twitch, Kick, and YouTube
-- Server-side token persistence in the local `data/tokens.json` file (beside the executable when packaged)
-- Chat history persistence in `data/chat.json` (the most recent `RELAY_CHAT_MAX` messages, 5000 by default). The file is rewritten about once a second and again on exit, so a crash can drop the last second of chat, and a backend restart does not empty the dock
-- Activity history persistence in `data/activity.json` (the most recent `RELAY_ACTIVITY_MAX` events, 5000 by default)
-- Twitch live detection, viewer count, EventSub/IRC chat, message sending, and title/category updates
-- YouTube live detection, concurrent viewer count (not the video's lifetime views), live-chat reading, and Live vs Shorts tags when the Shorts title includes `#shortsfeed`
-- Kick chat over Kick's public chat WebSocket
-- SSE updates from the backend to OBS
-- Unified Twitch + Kick stream title/category/tag controls, with arrow-key category picking and an Open YouTube Studio link
-
-- Activity dock (StreamElements as source of truth, optional native backup). YouTube subscribers are new in 0.9.3. Earlier builds did not show them: StreamElements sends those as subscriber events, and the dock used to store them as members, so a new YouTube subscriber never appeared as its own alert. They now show as **SUBSCRIBER**. YouTube members stay **MEMBER**.
-- Windows app window for the log, account connections, translate, and StreamElements JWTs. Closing that window stops the docks
-- Companion crash log in `logs/relay.log` (rotated to `relay.log.bak`), same folder as `production.env`. Watch tokens, JWTs, and OAuth secrets are redacted
-
-## Windows app
-
-Start **Relay Chat Dock** from the Start Menu. There is no console window. The app shows the launch log, Twitch / Kick / YouTube connect and disconnect, translate, StreamElements JWTs, and an optional YouTube quota field. Each connected platform has **Check live** and an **Auto** box beside it. Auto is on by default. Chat filters, activity filters, and stream controls stay in the OBS docks.
-
-The log is also the place to check a quiet dock. Each live-status poll prints `Twitch check: offline` or `Kick check: live, 12 viewers`. An unchanged result repeats about once a minute, and **Check live** always prints. YouTube also prints a quota line on every official call, which is why that platform looks busier while Auto is on and you are offline. Uncheck Auto if the app will sit open and you are not about to go live. New chat is a count, not each message (`Twitch: 40 messages (EventSub)`). A poll that added nothing stays silent. Deletes, timeouts, bans, and unbans print the action, platform, and user, never the message text. A stored activity alert prints one line (`Twitch follow: Ada`). Duplicate alerts the deduper drops are not logged.
-
-The same lines are appended to `logs\relay.log` next to `production.env` (installer: `%LOCALAPPDATA%\Relay Chat Dock\logs\relay.log`). A crash, a killed process, or closing the window leaves that file. It does not grow without bound: at about 2 MB it rotates into `relay.log.bak`, so disk use stays around 4 MB. Access tokens, refresh tokens, client secrets, StreamElements JWTs, and the Watch view token are stripped before a line is written.
-
-Closing the window stops the relay, so the docks go blank until you start it again. Installed copies keep `production.env`, `data\`, and `logs\` in `%LOCALAPPDATA%\Relay Chat Dock`. An update from GitHub replaces the program files and leaves that folder alone.
-
-## OBS docks
-
-The companion window shows both URLs on launch:
-
-```text
-http://localhost:4173
-http://localhost:4173/activity
-```
-
-Add both as **Docks → Custom Browser Docks**, or let the installer register them and then check **Relay Chat** and **Relay Activity** under **Docks**. Chat is for messages and sending. Twitch, Kick, and YouTube profile photos load through the local media proxy. A new chatter's photo fills in a moment after the line appears; you do not need to refresh the dock. Deleting a line you sent from the dock uses the platform message id from that send (or from the echo), so the message is removed in channel chat and not only struck through in the dock. A Twitch send that Twitch does not accept is removed from the dock instead of staying as a line Delete cannot remove. Saying the same thing twice within a few seconds stays as two lines. 7TV, BetterTTV, and FrankerFaceZ emotes show as images, from your channel's sets and each service's global set. Twitch gets all three. Kick gets 7TV (channel and global). YouTube gets 7TV global emotes; 7TV no longer has YouTube channel connections. A word becomes an emote only when it matches the emote name exactly, the same way the browser extensions work. The sets load in the background when a platform connects and refresh every 30 minutes, so the first few lines after a connect can still show the plain word. Your own messages from the dock pick up these emotes when Twitch, Kick, or YouTube echo them back. The requests only send your public channel id to 7TV, BetterTTV, and FrankerFaceZ. A line that names one of your connected accounts, with or without `@`, is highlighted with an orange edge. Add other words (a mod's name, `giveaway`) under **Highlight words** in the Relay Chat Dock window, separated by commas. Matching ignores case and only counts whole words, and your own lines are never highlighted. A Twitch Gigantify an Emote Power-up draws that emote large on its own line, the way Twitch chat shows it. Activity is the alert feed.
-
-Stream Controls (gamepad on the chat dock) sets one title, one category search, and one tag list for Twitch + Kick. Category search queries both platforms and merges matching names; platform-only hits show a Twitch or Kick icon and say which platform was not changed. A typed category is saved when it matches a listed game. Kick needs that listed id; if it does not have one, the save says the Kick category was not updated instead of looking successful. **Twitch / Kick separately** expands to two category fields when the games differ. Tags share one chip field (max 10). Toggle Twitch / Kick next to the field before adding a chip. Dots on each chip show who gets it. **Open YouTube Studio** (next to the Twitch + Kick badge) opens the livestreaming dashboard for scheduling. Click a platform tile to open that platform's live dashboard (Twitch Stream Manager, Kick stream dashboard, or YouTube Studio). Hover a tile to see that platform's stream title. If YouTube has more than one live broadcast, the hover lists each title. The stream title opens YouTube Studio. The tooltip says Opens YouTube Studio, and the link uses the connected channel when Relay has that channel id. Click a chat username to open that person's Twitch viewer card for your channel, Kick profile, or YouTube channel page in the system browser. The viewer card needs your connected Twitch login in the path (`/popout/<you>/viewercard/<them>`). YouTube's community tab is often disabled, so that click opens the channel instead.
-
-## API setup
-
-You need to create an API application for each platform. Use this callback URL in every provider dashboard:
-
-```text
-http://localhost:4173/oauth/callback
-```
-
-### Twitch
-
-1. Visit https://dev.twitch.tv/console/apps.
-2. Create a new application.
-3. Set the OAuth redirect URL to the callback URL above.
-4. Set the client type to **Confidential/Private**, copy the client ID, and generate a client secret.
-
-The app requests email, IRC chat, EventSub chat read/write, broadcast metadata, moderation (so platform-reported bans and unbans update the dock), follower, subscription, and bits permissions. After updating the app, disconnect and reconnect Twitch so the new chat and alert scopes can be granted. The client secret stays in the backend environment file and is never sent to OBS.
-
-### Automatic chat translation
-
-Messages in another language can be translated to English for the dock. Script detection covers CJK, Cyrillic, Arabic, Hangul, and Hebrew. Longer Latin-script lines are detected locally, so Spanish, French, German, and other languages are included without sending every line to the translator. Short lines are skipped because detection is unreliable there; right-click a chat line and choose Translate to force that one. The original message stays visible with an **EN** marker. Translation is on by default; turn it off with **Translate non-English chat to English** in the Relay Chat Dock window. Right-click Translate is hidden while that setting is off.
-
-By default the translated text comes from Google's unofficial `translate.googleapis.com` endpoint (`client=gtx`), which needs no key. If you would rather not use the unofficial endpoint, set one of these in `production.env` and restart:
-
-- `TRANSLATE_API_KEY` — uses Google Cloud Translation (the official API).
-- `TRANSLATE_URL` — uses a LibreTranslate-compatible endpoint, with optional `TRANSLATE_API_KEY` for the service's key.
-
-If translation fails, the Relay Chat Dock window shows why and messages stay in the original language. Translation is an outbound third-party request, so turn the setting off if that is not acceptable for your stream.
-
-### Google / YouTube
-
-1. Visit https://console.cloud.google.com/.
-2. Create or select a Google Cloud project.
-3. Enable **YouTube Data API v3**.
-4. Configure the OAuth consent screen.
-5. Create an OAuth client as a **Web application**.
-6. Add the callback URL above as an authorized redirect URI.
-7. Copy the client ID and client secret.
-
-The app requests YouTube read access and the live-chat scope needed to send and moderate chat. Google’s consent screen describes that scope as permission to delete videos. This app never deletes or uploads videos. The only video edit is setting a broadcast or archive to **public** when you confirm the privacy prompt.
-
-YouTube Data API v3 defaults to **10,000 units per day** (reset at midnight Pacific). This project is built to stay under that free-tier cap for a normal stream day, without requesting a quota increase. Higher limits exist only if Google approved a quota increase for that Cloud project — it is not a paid YouTube plan.
-
-The companion window links to the [Cloud Console quotas page](https://console.cloud.google.com/iam-admin/quotas?service=youtube.googleapis.com). To enter your current usage, open the **YouTube Data API v3** group and read the **Queries per day** row: **Current usage** (for example `35`) and **Value** (the daily limit, usually `10,000`). Ignore the **All quotas & system limits** card near the top of the page (for example `1,247`) — that is a count of how many quota rows exist, not units you have used. Type `35` or `35/10000` in the window; logging does not block on your input. After that, the app estimates forward from its own official API calls and warns near 80% and when the daily cap is reached. InnerTube site chat does not count against the quota.
-
-Live chat and viewer counts use YouTube’s public site/InnerTube reader, not a polling loop on `liveChatMessages.list`. The viewer number is concurrent viewers (`watching now` or `concurrentViewers`). A lifetime `viewCount` is not shown, and a page scrape does not mark YouTube live by itself. The official API is used sparingly: live-broadcast detection about every 15 seconds until the broadcast is live (same cadence as Twitch and Kick; `liveBroadcasts.list` is 1 unit), then about every 5 minutes while live so ending the stream is noticed without a status call four times a minute. A one-shot history seed runs when a new live chat appears, plus sending and deleting messages, and a slow official chat fallback only if InnerTube fails. Leaving Auto on while YouTube is offline all day is about 5,800 units, so uncheck it if the app stays open and you are not about to go live. **Check live** in connection settings runs that official status check immediately without changing the automatic interval. The **Auto** box beside it is on by default for Twitch, Kick, and YouTube. Uncheck it to skip that platform’s automatic live-status polls. Chat that is already connected keeps updating. Going live or offline, and viewer counts from those polls, stay as last seen until you press **Check live**. For YouTube, Auto off skips the official live-broadcast status call (the quota one) until **Check live**, including on launch. A restart with Auto off does not refresh the YouTube token, seed the saved live chat, or rediscover a YouTube live until then. InnerTube chat for a broadcast that is already connected keeps running. If the daily quota is exhausted, official calls pause until midnight Pacific and InnerTube chat continues. That pause is saved with the day's usage, so restarting the app the same Pacific day does not resume official calls.
-
-If you run two **separate** live broadcasts at the same time — a normal 16:9 stream and a vertical Shorts stream — put `#shortsfeed` in the title of the vertical/Shorts broadcast only. The dock then labels that chat **Shorts** and the other chat **Live**, without spending extra API calls to guess which is which. If only one live broadcast is up, the labels stay hidden. If your single scheduled livestream already feeds both 16:9 and vertical viewers at once, this tag is not needed and may not be honored.
-
-We do not use `search.list` (historically expensive). YouTube subscribers are StreamElements-only, and they were not shown before 0.9.3. A backend restart reloads `data/chat.json` and skips another YouTube history API call when that live chat is already on disk.
-
-If a YouTube broadcast is unlisted or private, the companion window and the chat dock each show that broadcast's title (`YouTube “Night stream” is unlisted.`). That can be intentional, or a leftover from reusing an unlisted stream. **Make public** sets only that video to public (a 50-unit `videos.update`, only when you confirm). **Dismiss** hides that video's warning until the app restarts; the next broadcast still warns. The post-stream check is a 1-unit `videos.list` about every 3 minutes for 30 minutes after the broadcast leaves the live list, so it does not add a poll while you are live.
-
-Twitch and Kick end when OBS stops sending RTMP. A scheduled YouTube live stays up until you end it in Studio. When you create or edit that schedule in YouTube Studio, turn on **end the stream when the signal stops** (or the equivalent “auto-stop” option). This companion does not end YouTube broadcasts.
-
-### Kick
-
-1. Create an application in the Kick developer portal: https://dev.kick.com/.
-2. Set the OAuth redirect URL to the callback URL above.
-3. Copy the client ID and client secret.
-4. Confirm that your account has access to the current Kick chat and channel API endpoints. The app requests `channel:write` so it can update stream metadata.
-
-Kick API access can vary by developer account and API version, so the backend accepts `KICK_API_BASE` for the current public API base URL. It defaults to `https://api.kick.com/public/v1`. Incoming Kick chat uses Kick's current realtime WebSocket. The old Pusher app key is retired. Sending still uses the official chat API.
-
-## Configure the backend
-
-Create the environment file from the included template. For the packaged Windows executable, name it `production.env` and place it beside the `.exe`:
-
-```powershell
-copy .env.example production.env
-notepad production.env
-```
-
-Fill in the values:
-
-```env
-PORT=4173
-OAUTH_REDIRECT_URI=http://localhost:4173/oauth/callback
-# RELAY_BIND=127.0.0.1
-# RELAY_WATCH_TOKEN=
-# RELAY_API_TOKEN=
-# RELAY_DATA_DIR=
-
-TWITCH_CLIENT_ID=your_twitch_client_id
-TWITCH_CLIENT_SECRET=your_twitch_client_secret
-
-KICK_CLIENT_ID=your_kick_client_id
-KICK_CLIENT_SECRET=your_kick_client_secret
-# KICK_API_BASE=
-# Optional if Edge/Chrome is installed in a non-standard location:
-# Shared by the Kick chatroom-ID lookup and the YouTube InnerTube fallback:
-# BROWSER_PATH=C:\\Path\\To\\msedge.exe
-# (KICK_BROWSER_PATH still works as a deprecated alias for it)
-
-YOUTUBE_CLIENT_ID=your_google_client_id
-YOUTUBE_CLIENT_SECRET=your_google_client_secret
-
-# StreamElements JWTs — one per linked platform
-# Dashboard → avatar → switch to that platform → Show secrets
-STREAMELEMENTS_JWT_TWITCH=
-STREAMELEMENTS_JWT_KICK=
-STREAMELEMENTS_JWT_YOUTUBE=
-```
-
-The docks, companion, and control API stay on this computer until Watch is turned on. Packaged runs store `data/` beside the executable; `RELAY_DATA_DIR` overrides the location. On launch, new keys from `.env.example` are merged into `production.env` with an atomic replace, so a crash during that rewrite does not wipe existing secrets. A failed title save, a Kick status error, or a locked settings file is logged and the relay keeps running.
-
-### Readonly LAN watch link
-
-Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved. Windows may ask to allow the app on private networks the first time the process listens on the LAN.
-
-Bind and Watch are separate:
-
-- Default bind (`127.0.0.1`, or unset `RELAY_BIND`): Watch on temporarily listens on `0.0.0.0`. Watch off returns to loopback, so other devices can no longer open a TCP connection.
-- `RELAY_BIND=0.0.0.0` or a LAN IP such as `192.168.1.20`: that socket stays bound. Watch only hosts or unhosts the `/watch` page. Tools with `RELAY_API_TOKEN` can still reach the LAN listener while Watch is off.
-
-Until Watch is on (and bind is loopback), other devices cannot reach the chat dock, the activity dock, or the live update stream. `RELAY_LAN=1` starts with Watch already on; you can still turn it off from the window. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself. Do not reuse `RELAY_API_TOKEN`: if they match, the app keeps a different view token so the shared link cannot be turned into a write secret.
-
-That page is chat and activity only. It has no composer, mod menu, settings, or stream controls. A username opens that profile in the friend's own browser. It does not call `/api/open`, so it cannot open a link on the streaming PC. Anyone on the Wi-Fi who does not have the link cannot read state or the live update stream.
-
-A browser on another device still cannot send, moderate, disconnect, change settings, read StreamElements JWTs, start OAuth, or shut the app down. Requesting `/` or sending a matching `Origin` does not change that. `RELAY_API_TOKEN` is only for a tool that sends it in `x-relay-token` or `Authorization: Bearer`. It is not accepted from the query string. Shutdown, the companion window, and the operator docks stay on this computer even with that token. OAuth from another device requires the header; the companion window does not, because it is on this computer.
-
-Never commit or share `.env` or `production.env`. Client secrets, JWTs, access tokens, and refresh tokens must remain on the backend and must not be placed in `VITE_` variables or the OBS Browser Source.
-
-## Run with Node
-
-```powershell
-npm install
-npm run build
-npm start
-```
-
-The backend serves the docks at `http://localhost:4173` and `http://localhost:4173/activity`. Keep `npm start` running while OBS is open. For frontend development, use `npm run dev` and run `npm run dev:backend` in a second terminal.
-
-Click **Connect** for each platform in the Relay Chat Dock window. Each button opens a browser authorization window. After authorization, the callback stores the token and the backend begins polling or connecting to the platform.
-
-### Moderation
-
-Right-click a chat row to delete that message, or timeout/ban the chatter on that platform. Twitch asks for an optional reason (up to 500 characters) before a ban or timeout. Kick accepts up to 100 characters; a longer reason is shortened for Kick only. Leave it blank to send no reason. YouTube live chat bans have no reason field. The dock asks you to confirm in place; Cancel does not ban, and the confirm does not use a system dialog. A successful ban or timeout shows the reason on the dock status line when one was sent (`Banned Ada: spam`). A ban or timeout strikes through every message from that chatter in the Relay chat (the same strikethrough Kick and YouTube show). Right-click a struck-through ban or timeout and choose **Unban / untimeout** to restore those messages. A deleted message stays struck through; unban does not bring it back. A delete reported by Twitch, Kick, or YouTube strikes through just that one message. If Twitch, Kick, or YouTube report a ban, timeout, unban, or delete themselves, the same line-out/restore runs automatically. YouTube unban from Relay only works for bans and timeouts that were issued from this dock, because YouTube's API needs that ban id. Those ids are kept in the data folder, so a restart can still unban.
-
-### Activity dock
-
-StreamElements is the source of truth. Paste one JWT per linked platform in the Relay Chat Dock window (or in `production.env`). Copy each while switched to that channel in the SE dashboard (avatar → Show secrets). JWTs last weeks, not hours. Saving a JWT reconnects StreamElements without restarting the companion.
-
-If a JWT is missing, the companion window and Activity dock warn you. Use **Ignore missing StreamElements JWT alerts** in the window if you only use some platforms. Dismissing the banner with × hides that warning for the current session. A later, different warning still shows. A page refresh brings dismissed warnings back unless ignore is checked.
-
-The banner waits before it complains. StreamElements hydrates its JWTs over the network on start and after every saved JWT, and it cycles its own websocket, so those windows read as `Connecting…` in the Relay Chat Dock window and raise no alert. A websocket that is back and streaming inside 10 seconds never warns at all; only a longer outage does.
-
-| Filter | What you see |
-| --- | --- |
-| Twitch / Kick / YouTube | Follows, subs, gifts, cheers, raids, Super Chats, memberships from that platform |
-| SE | Donations, merch, and other non-platform StreamElements events |
-| All | Everything |
-
-The funnel next to the flask filters by kind (Follow, Sub/gift, Cheer/raid, Donation/merch, Super Chat/membership) without a second toolbar. Combine it with the platform icons. All kinds are on by default.
-
-Gifted subs sit under the person who gifted them, slightly indented, so you see the gifter first. A gift row takes as many subs as it says it gifted, from within two minutes of it. A gifted sub with no gift row nearby, such as one sub gifted straight to one person, gets a gift row of its own built from the gifter's name. Turn off **Group gifted subs under the gifter** in the same funnel menu to list every row on its own instead; each gifted sub then says who gifted it. The choice is saved per dock. Gift rows show the tier chip too. Older gifted subs pick up their gifter from StreamElements on the next launch, as long as they are under 60 days old.
-
-Newest alerts stay at the top; older rows drop down. Each row shows the platform logo first, then the event type. Left-click a row to open that user's Twitch viewer card, Kick profile, or YouTube channel page in the system browser (not inside the OBS dock). Both docks paint only the on-screen rows.
-
-**Right-click a pill to delete it.** An X slides out from the right side. Click the X to remove that alert from the dock and from `activity.json`. Right-click again, or wait 5 seconds, and the X hides without deleting. Emulated alerts are saved like real ones, so this is how you clear a test. The watch page does not get this control.
-
-**Drop alerts older than 30 days** is off by default so quieter streams keep a long history. Turn it on to automatically remove events older than 30 days.
-
-**Use connected accounts as backup for StreamElements** is on by default. Turn it off if you do not want native Twitch/Kick/YouTube events as a fallback. The same alert from the other feed is dropped when the user id matches, or when the login and display name collapse to the same letters (`Cool User` and `cooluser`). Follows, raids, and memberships still collapse across the startup backfill. Subs, gifts, cheers, and donations only collapse within two minutes, and only when the amount matches. The same feed sending again (two Twitch cheers, or two StreamElements cheers) is a second spend and stays as two rows. A YouTube member join is a membership. A YouTube subscriber is its own alert, not a member. Subscribers were not shown before 0.9.3.
-
-A Twitch sub keeps its **SUBSCRIPTION** pill, and a second chip beside it shows the plan: **PRIME** in blue for a Prime Gaming sub, or **TIER 1**, **TIER 2**, or **TIER 3**. On-stream alerts show the chip too, except with Show Platform off. StreamElements sends the plan with the sub. With native backup on, Relay also reads Twitch's sub and resub chat notices, because the plain subscribe event never says Prime; when that notice arrives second, it upgrades the row instead of adding another.
-
-Twitch Power-ups paid with Bits (Gigantify an Emote, Message Effects, On-Screen Celebrations) show in the Activity dock as Bits alerts labeled **GIGANTIFY**, **MESSAGE EFFECT**, or **CELEBRATION**. A custom Power-up the streamer made shows as **POWER-UP** with its title, and so does any new built-in Power-up Twitch adds later. A Power-up never fires a normal cheer, so Relay reads them from Twitch directly, even when native backup is off. They stay in the dock and in chat (gigantified emotes). The on-stream alert page skips them: Gigantify and message effects already play in chat, and they are not a StreamElements-style alert box. Cheer on the overlay is a real Bits cheer.
-
-On launch, Relay also loads the last 14 days of StreamElements activity, so an alert that arrived while the app was closed still shows up, and a sub stored earlier without its plan picks up Prime or its tier. For subs and gifts up to 60 days old it only fills in a missing plan or gifter on rows already in the feed; it never adds those older rows back, so an alert you deleted stays deleted.
-
-Hiding or skipping an event in the StreamElements dashboard does **not** remove it here. SE does not publish a hide/delete activity event over the websocket we use.
-
-The flask fires a StreamElements mock activity, the same call the overlay editor makes when Preview LIVE on stream is checked. The row shows up when that event comes back on the activities socket, and it is saved like any other alert. A replay of an alert already in history is dropped, because StreamElements reuses the activity id.
-
-Activity history is stored locally in `data/activity.json` (last 5000 real events by default, or 30 days if that setting is on). Chat history is stored locally in `data/chat.json`. Think of `data/chat.json` as a crash buffer: it lets a backend restart (or OBS refresh) reload the last messages so the dock never comes back empty mid-stream. It is not a full archive or a VOD: messages that arrived while the backend was down are never backfilled. The chat buffer holds the last 5000 messages by default; set `RELAY_CHAT_MAX` in `production.env` to a value from 100 to 1,000,000 to keep more or fewer. Activity uses the same range via `RELAY_ACTIVITY_MAX`. The number is the trade-off: memory and the size of `chat.json` / `activity.json` both scale with it, so a high-volume stream might set 50,000 while a small one can lower it. Installer copies keep `production.env` and `data\` under `%LOCALAPPDATA%\Relay Chat Dock`. Portable zips keep those files beside the exe. Development runs keep them under the project directory. `RELAY_DATA_DIR` overrides any of those. Token, settings, chat, and activity files are written atomically with a `.bak` fallback so a crash during save does not wipe credentials or history. Restarting the backend reloads both files, so the docks are not empty. Past messages from while the backend was down do not appear: Twitch and Kick have no cheap replay, and YouTube liveChat history is skipped when this live chat is already on disk so a restart does not spend extra quota filling the gap.
-
-### On-stream alerts
-
-Click **Alerts** in the companion window to turn on `http://localhost:4173/alerts` (off by default; right-click **Alerts on** to copy the URL). Add it as one OBS **Browser** source. The page is transparent, ignores alerts already in the feed when it loads (so an OBS refresh does not replay), and shows each new alert one at a time in arrival order. The activity pill is the default. Click **Customize** in the companion Alerts section to replace the log with a look editor (Back restores the log). **Save** writes the look. **Reset to default** removes the current look so Default uses the built-in pill again, and a platform or kind tab drops that override. The overlay URL stays output-only: do not add `?edit=` to the browser source. A saved look (graphic, video, placed `{token}` text with a font, or sound) plays instead of the pill. Customize lists Outfit plus the fonts installed on this PC (including ones you installed for your user), and the overlay uses those same family names so OBS on this computer can render them; fields inherit from default → platform → kind → platform+kind, and a look with only a sound still uses the pill. Tokens include `{name}` `{amount}` `{message}` `{kind}` `{platform}` `{months}` `{viewers}` `{plan}` `{gifter}` — empty values collapse, so `{name} cheered {amount}` becomes `Ada cheered 100 Bits` or just `Ada cheered` when there is no amount. Custom files live in `data/alerts/` and are served from `/alerts/assets/`. Clearing a graphic or sound, or Reset to default, drops files that no look still references. The queue holds as many alerts as the activity feed does; past that the oldest waiting ones are dropped. The **Alerts** section in the companion settings has a sound toggle (one short built-in clip per group: follow, sub/member, cheer/KICKs, donation/merch, Super Chat, raid), **Show Platform** (on by default; turn it off to hide platform icons and colors and use generic labels, so a YouTube subscriber reads FOLLOW and a member reads SUBSCRIBER), the display time (default 5 seconds), and platform buttons that open each platform's alert types so you can uncheck the ones to skip. A gift bomb plays as one alert (the gifter); gifted subs under that gift do not each play. A gifted sub with no gift row nearby plays once as a gift. Twitch Power-ups do not play here. Enable **Control audio via OBS** on the browser source or the sound never leaves the page. The pill and custom banners scale with the browser source: its width and height set the size, so a 1000 x 250 source gives a roughly 800 px wide pill, and a bigger source makes a bigger banner. Use a wide, short size like that, place the source where you want alerts, and avoid a tiny one. The flask icon in the Activity dock emulates alerts, which also play here.
-
-![Companion Customize editor for on-stream alert looks](docs/AlertsCustomization.png)
-
-![On-stream alert pill with platform icons and colors](docs/alerts-1.png)
-
-![On-stream alert pill with Show Platform off: generic colors, no platform icon](docs/alerts-2.png)
-
-### Testing alerts
-
-1. Open the Activity dock and click the flask icon. That posts a StreamElements emulate (`POST /activities/{channel}/mock`) for the platform's JWT. The live overlay plays it, and the dock shows the row when the activities socket delivers it. This needs the matching StreamElements JWT.
-2. Overlay **Emulate** with **Preview LIVE on stream** checked is the same call. Without that box, Emulate stays in the editor tab and this dock does not see it. Replaying an activity already in the feed is dropped here, because the id does not change.
-3. Native backup (if the settings checkbox is on): reconnect Twitch so follow/sub/bits EventSub is granted, then follow from an alt. Kick follows/subs appear on the public chat socket. YouTube Super Chats/memberships appear in live chat. YouTube subscribers are SE-only.
-
-## Run the Windows app
-
-Prefer the [prebuilt Windows installer](https://github.com/Milzstream/OBS-Multi-Chat/releases) unless you are changing the code. Double-click `easy.bat`, or from a terminal:
-
-```powershell
-npm run package:win
-npm run installer:win
-```
-
-`easy.bat` and `package:win` fill `deploy\` with the Electron app and `deploy\relay-chat-dock.exe`. Closing that window stops the relay and the OBS docks. It does not need Edge or Chrome installed. `installer:win` needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) and writes `obs-multi-chat-v*-windows-x64-setup.exe`. For a portable run, keep `production.env` and `.env.example` beside the executable, then run:
-
-```powershell
-.\relay-chat-dock.exe
-```
-
-The same command also creates a ready-to-copy `deploy` folder containing the latest executable and frontend `dist` files. Existing values in `deploy/production.env` (including StreamElements JWTs) are preserved; the packager only adds missing keys. Copy that entire folder to the installation computer and run `deploy\relay-chat-dock.exe`.
-
-On launch the exe appends any keys that are in `.env.example` but missing from `production.env`, including commented optional lines such as `# RELAY_ACTIVITY_MAX=5000`. Filled values and keys you already commented stay as they are. Installer updates replace `.env.example` next to the exe; `production.env` in `%LOCALAPPDATA%\Relay Chat Dock` is left alone.
-
-The companion window only opens allowlisted https links, plus this app's own OAuth page. Other addresses stay closed. The app serves the docks at `http://localhost:4173` and binds to loopback (`127.0.0.1`) by default so other devices on the network cannot connect at all. Click **Watch** to share a readonly LAN link; with the default bind that temporarily listens on `0.0.0.0`, and turning Watch off returns to loopback. If `production.env` sets `RELAY_BIND=0.0.0.0` or a LAN IP, that bind stays and Watch only hosts or unhosts `/watch`. Right-click the Watch button to copy the link. Other devices cannot open the chat or activity docks. Installed copies store tokens, settings, chat, activity, and `logs\relay.log` in `%LOCALAPPDATA%\Relay Chat Dock`. A portable folder uses those files beside the exe only when that machine has no existing LocalAppData profile. Start the app before opening OBS.
-
-## Backend endpoints
-
-Loopback (this computer) can call every route with no token. Off this computer the classes are:
-
-- Watch token (`?token=` on the shared link, then the `relay_watch` cookie): `GET /watch`, `GET /api/state`, `GET /events`, and `GET /api/media` only.
-- `RELAY_API_TOKEN` header (`x-relay-token` or `Authorization: Bearer`): other reads and writes, including the JWT routes below. Not accepted from the query string. A matching `Origin` is not enough.
-- This computer only, even with that header: the operator docks (`/`, `/activity`), the companion (`/console`, `/api/console`, `/api/logs`, `/events/logs`, `/api/console/*`), and `POST /api/shutdown`.
-- OAuth (`GET /oauth/:platform`, `GET /oauth/callback`): this computer, or the API token header. A LAN browser cannot replace the stored Twitch, Kick, or YouTube token.
-
-- `GET /watch` - readonly chat and activity page for a shared LAN link
-- `GET /api/state` - current accounts, stream info, recent messages, activity, and settings
-- `GET /events` - Server-Sent Events stream for dock updates
-- `POST /api/messages` - send a message to selected platforms
-- `GET /api/jwts` - companion-internal StreamElements JWTs for Twitch, Kick, and YouTube. Not included in `/api/state`, and not readable with the watch token
-- `POST /api/jwts` - save those JWTs into `production.env` and reconnect StreamElements. Same write rule as the other mutating routes
-- `POST /api/settings` - toggle native backup, ignore-missing-JWT, 30-day drop, translate, per-platform `autoLiveCheck` (`{ Twitch, Kick, YouTube }`; omitted or missing means on), `lanWatch` (hosts `/watch`; rebinds the socket only when `RELAY_BIND` is loopback), and `alerts` (including saved looks)
-- `POST /api/alerts/assets` - upload alert graphic or sound (this computer). JSON `{ name, mime, data }` with a data URL or base64 body. Files are `data/alerts/<uuid>`
-- `GET /alerts/assets/:id` - serve a stored alert file (this computer, same as `/alerts`)
-- `POST /api/moderate` - delete a message, or timeout, ban, or unban a chatter. Twitch and Kick accept an optional `reason` (trimmed, max 500, omitted when blank). YouTube ignores `reason` because `liveChat/bans` has no reason field
-- `POST /api/youtube/privacy` - set a warned YouTube broadcast or archive to public, or dismiss that warning. Only ids the backend is already warning about are accepted
-- `POST /api/open` - open an allowlisted link in the system browser: Twitch profiles and channel-scoped viewer cards (`/popout/<channel>/viewercard/<login>`), Kick profiles, YouTube channel or `@handle` pages, creator dashboards, and YouTube Studio
-- `POST /api/activity/test` - fire a StreamElements emulate for that platform and kind. The overlay plays it. The dock row arrives on the activities socket, not as a local inject. YouTube subscriber uses kind `subscription`
-- `POST /api/activity/delete` - remove one stored activity by id. This computer only
-- `GET /api/categories/:platform` - search Twitch or Kick categories
-- `POST /api/stream-info/:platform` - apply title/category/tags to one platform
-- `POST /api/stream-info` - apply shared title plus per-platform Twitch/Kick category and tags
-- `POST /api/disconnect/:platform` - remove a saved platform connection
-- `POST /api/live-check/:platform` - run that platform's live check immediately, even if Auto is off (does not change the slower automatic YouTube interval)
-- `GET /oauth/:platform` - begin OAuth for `twitch`, `kick`, or `youtube`
-- `GET /oauth/callback` - exchange the provider authorization code server-side
-
-## Current platform status
-
-Twitch reads chat through EventSub WebSockets and sends through the Helix chat API, with Twitch IRC as a fallback for older tokens that cannot call Helix. A Helix send that Twitch drops is not also sent on IRC. The IRC fallback counts as sent only after Twitch echoes a real message id. YouTube OAuth and live detection use the Data API; incoming chat and viewer counts prefer InnerTube so a stream day fits in the default 10,000-unit quota. Kick OAuth, category search, chat sending, viewer polling, and metadata updates use the current public API. Incoming Kick chat is read from Kick's realtime WebSocket after resolving the channel's chatroom id. The old Pusher app is no longer accepted. A stalled YouTube or Kick page fetch times out and retries instead of stopping chat for the rest of the stream. Activity alerts prefer StreamElements JWTs, with optional native backup from those same connections. Stay on the latest [release](https://github.com/Milzstream/OBS-Multi-Chat/releases) when a provider changes; older builds are not guaranteed to keep working.
-
-## For contributors
-
-Operator setup lives in this README. The coding map for humans and coding agents is [AGENTS.md](AGENTS.md). A short process sketch is [docs/architecture.md](docs/architecture.md).
+- [Install](docs/install.md) — installer, portable zip, data folder, updates, and the LAN watch link
+- [Setup](docs/setup.md) — Twitch, Kick, YouTube, translation, and `production.env`
+- [Docks](docs/docks.md) — chat, stream controls, emotes, highlights, and moderation
+- [Activity](docs/activity.md) — the activity dock and how to test alerts
+- [Alerts](docs/alerts.md) — on-stream alerts and the look editor
+- [Develop](docs/develop.md) — run from source, package, and backend endpoints
 
 ## License
 
-This project is source-available under the MIT License with the [Commons Clause](https://commonsclause.com/). See [LICENSE](LICENSE) for the full terms.
+Source-available under the MIT License with the [Commons Clause](https://commonsclause.com/). You may use it on your own stream, including a monetized one. You may not sell it or offer it as a paid product or hosted service. See [LICENSE](LICENSE).
 
-You may use, copy, modify, and share this software for free, including on your own stream even if that stream is monetized.
+## For contributors
 
-You may not sell this software, charge for copies of it, or offer it as a paid product or hosted service.
+Operator setup is in the docs above. The coding map is [AGENTS.md](AGENTS.md). A short process sketch is [docs/architecture.md](docs/architecture.md).
