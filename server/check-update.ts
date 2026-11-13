@@ -28,6 +28,7 @@ export type UpdateHooks = {
   startInstaller?: (setupPath: string) => void
   currentVersion?: string
   latestRelease?: GitHubRelease | null
+  releases?: GitHubRelease[]
   installerCopy?: boolean
   exit?: () => void
 }
@@ -103,9 +104,32 @@ export function windowsYesNoCommand(message: string, title: string) {
 
 export const RELEASE_NOTES_EXCERPT_MAX = 4000
 
+export const LEGACY_NOTES_HEADING = "## What's Changed"
+
+export const NOTES_HEADING = '## Changes'
+
+const NOTE_HEADINGS = [LEGACY_NOTES_HEADING, NOTES_HEADING]
+
+function notesHeadingAt(body: string) {
+  let at = -1
+  for (const heading of NOTE_HEADINGS) {
+    const index = body.indexOf(heading)
+    if (index >= 0 && (at < 0 || index < at)) at = index
+  }
+  return at
+}
+
+function capNotes(text: string, maxLength: number) {
+  if (text.length <= maxLength) return text
+  const cut = text.slice(0, maxLength)
+  const line = cut.lastIndexOf('\n')
+  const trimmed = (line > maxLength * 0.6 ? cut.slice(0, line) : cut).trimEnd()
+  return `${trimmed}\n…`
+}
+
 export function releaseNotesExcerpt(body: string | null | undefined, maxLength = RELEASE_NOTES_EXCERPT_MAX) {
   if (!body) return ''
-  const at = body.indexOf("## What's Changed")
+  const at = notesHeadingAt(body)
   if (at < 0) return ''
   let text = body.slice(at).replace(/\r\n/g, '\n')
   text = text.replace(/^#{1,6}[ \t]+/gm, '')
@@ -113,12 +137,31 @@ export function releaseNotesExcerpt(body: string | null | undefined, maxLength =
   text = text.replace(/__([^_]+)__/g, '$1')
   text = text.replace(/`([^`]*)`/g, '$1')
   text = text.trim()
-  if (!text || text === "What's Changed") return ''
-  if (text.length <= maxLength) return text
-  const cut = text.slice(0, maxLength)
-  const line = cut.lastIndexOf('\n')
-  const trimmed = (line > maxLength * 0.6 ? cut.slice(0, line) : cut).trimEnd()
-  return `${trimmed}\n…`
+  if (!text || text === "What's Changed" || text === 'Changes') return ''
+  return capNotes(text, maxLength)
+}
+
+export function publishedReleaseBody(body: string) {
+  return body.replaceAll(LEGACY_NOTES_HEADING, NOTES_HEADING)
+}
+
+export function releaseNotesSince(currentVersion: string, releases: GitHubRelease[], latestVersion: string, maxLength = RELEASE_NOTES_EXCERPT_MAX) {
+  const seen = new Set<string>()
+  const parts: string[] = []
+  const selected = releases
+    .filter((release) => release && !release.draft && !release.prerelease && release.tag_name)
+    .filter((release) => compareVersions(release.tag_name, currentVersion) > 0)
+    .filter((release) => compareVersions(release.tag_name, latestVersion) <= 0)
+    .sort((a, b) => compareVersions(b.tag_name, a.tag_name))
+  for (const release of selected) {
+    const version = safeReleaseTag(release.tag_name)
+    if (seen.has(version)) continue
+    seen.add(version)
+    const notes = releaseNotesExcerpt(release.body, Number.MAX_SAFE_INTEGER).replace(/^(What's Changed|Changes)\n/, '')
+    if (!notes) continue
+    parts.push(`${version}\n${notes}`)
+  }
+  return capNotes(parts.join('\n\n').trim(), maxLength)
 }
 
 export function updateAvailableMessage(version: string) {
@@ -279,6 +322,23 @@ async function getLatestGitHubRelease(): Promise<GitHubRelease | null> {
   }
 }
 
+async function getGitHubReleases(): Promise<GitHubRelease[] | null> {
+  try {
+    const collected: GitHubRelease[] = []
+    for (let page = 1; page <= 3; page++) {
+      const response = await fetch(`https://api.github.com/repos/Milzstream/OBS-Multi-Chat/releases?per_page=20&page=${page}`)
+      if (!response.ok) return collected.length ? collected : null
+      const batch = await response.json() as GitHubRelease[]
+      if (!Array.isArray(batch) || batch.length === 0) break
+      collected.push(...batch)
+      if (batch.length < 20) break
+    }
+    return collected
+  } catch {
+    return null
+  }
+}
+
 type YesNoSpawn = (
   command: string,
   args: string[],
@@ -366,7 +426,12 @@ export async function checkForUpdates(hooks: UpdateHooks = {}): Promise<void> {
     const setupAsset = pickInstallerAssetRecord(latestRelease.assets)
     const setupUrl = setupAsset?.browser_download_url
     const installerCopy = hooks.installerCopy ?? (isDesktopPackaged() && isInstallerInstall(process.execPath))
-    const excerpt = releaseNotesExcerpt(latestRelease.body)
+    const notesReleases = hooks.releases !== undefined
+      ? hooks.releases
+      : hooks.latestRelease !== undefined
+        ? [latestRelease]
+        : await getGitHubReleases() ?? [latestRelease]
+    const excerpt = releaseNotesSince(currentVersion, notesReleases, latestVersion) || releaseNotesExcerpt(latestRelease.body)
 
     console.log('')
     console.log('  Update available!')
