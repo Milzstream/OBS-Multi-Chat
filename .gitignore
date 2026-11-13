@@ -14,6 +14,7 @@ dist-package/
 deploy/
 deploy-electron/
 release-staging/
+release-notes.md
 
 # Packaged binaries and release zips
 *.exe

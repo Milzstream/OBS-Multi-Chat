@@ -4,7 +4,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { describe, it } from 'node:test'
-import { checkForUpdates, confirmWithSpawn, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, releaseNotesExcerpt, releaseNotesPath, updateAvailableMessage, updatePromptMessage, windowsReleaseNotesCommand, type GitHubRelease } from '../server/check-update.js'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { checkForUpdates, confirmWithSpawn, digestMatches, escapePowerShellHereString, installerDownloadAllowed, installerSetupPath, LEGACY_NOTES_HEADING, publishedReleaseBody, releaseNotesExcerpt, releaseNotesPath, releaseNotesSince, updateAvailableMessage, updatePromptMessage, windowsReleaseNotesCommand, type GitHubRelease } from '../server/check-update.js'
 
 function release(tag: string): GitHubRelease {
   return {
@@ -185,7 +187,7 @@ describe('update check flow', () => {
       installerCopy: true,
       confirm: (prompt) => { message = prompt; return false },
     })
-    assert.match(message, /What's Changed/)
+    assert.match(message, /0\.6\.2\n\* show release notes/)
     assert.match(message, /Full notes: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/releases\/tag\/v0\.6\.2/)
     assert.match(message, /production\.env/)
     assert.doesNotMatch(message, /Installer \(recommended\)/)
@@ -202,6 +204,28 @@ describe('update check flow', () => {
     })
     assert.equal(message, updateAvailableMessage('v0.6.2'))
     assert.doesNotMatch(message, /Full notes/)
+  })
+
+  it('shows notes since the installed version and ignores the old heading string', async () => {
+    let message = ''
+    await checkForUpdates({
+      currentVersion: '1.1.8',
+      latestRelease: downloadable('v1.1.10', 'installer blurb\n\n## Changes\n* newest'),
+      releases: [
+        downloadable('v1.1.7', `${LEGACY_NOTES_HEADING}\n* older`),
+        downloadable('v1.1.8', `${LEGACY_NOTES_HEADING}\n* same`),
+        downloadable('v1.1.9', 'no heading'),
+        downloadable('v1.1.10', 'installer blurb\n\n## Changes\n* newest'),
+      ],
+      installerCopy: true,
+      confirm: (prompt) => { message = prompt; return false },
+    })
+    assert.match(message, /1\.1\.10\n\* newest/)
+    assert.doesNotMatch(message, /1\.1\.9/)
+    assert.doesNotMatch(message, /1\.1\.8/)
+    assert.doesNotMatch(message, /1\.1\.7/)
+    assert.doesNotMatch(message, /installer blurb/)
+    assert.equal(message.includes(LEGACY_NOTES_HEADING), false)
   })
 
   it('logs the same excerpt for a portable copy and does not confirm or start Setup', async () => {
@@ -223,7 +247,7 @@ describe('update check flow', () => {
     }
     assert.deepEqual(started, [])
     const logged = logs.join('\n')
-    assert.match(logged, /What's Changed/)
+    assert.match(logged, /0\.6\.2\n {2}\* show release notes/)
     assert.doesNotMatch(logged, /Installer \(recommended\)/)
   })
 })
@@ -234,12 +258,16 @@ describe('release notes excerpt', () => {
     assert.equal(releaseNotesExcerpt(''), '')
     assert.equal(releaseNotesExcerpt('just a blurb'), '')
     assert.equal(releaseNotesExcerpt("## What's Changed"), '')
+    assert.equal(releaseNotesExcerpt('## Changes'), '')
     const excerpt = releaseNotesExcerpt(releaseBody)
     assert.match(excerpt, /^What's Changed\n/)
     assert.match(excerpt, /Full Changelog: https:\/\/github.com\/Milzstream\/OBS-Multi-Chat\/compare\/v1\.1\.6\.\.\.v1\.1\.7/)
     assert.doesNotMatch(excerpt, /Installer \(recommended\)/)
     assert.doesNotMatch(excerpt, /\*\*/)
     assert.doesNotMatch(excerpt, /`/)
+    const publishedHeading = releaseNotesExcerpt(releaseBody.replace(LEGACY_NOTES_HEADING, '## Changes'))
+    assert.match(publishedHeading, /^Changes\n/)
+    assert.doesNotMatch(publishedHeading, /Installer \(recommended\)/)
     const capped = releaseNotesExcerpt(`${releaseBody}\n${'x'.repeat(5000)}`, 80)
     assert.ok(capped.endsWith('\n…'))
     assert.ok(capped.length <= 82)
@@ -269,5 +297,50 @@ describe('release notes excerpt', () => {
     assert.equal(hostile.includes("title'@"), false)
     assert.equal(hostile.includes("x'@notes"), false)
     assert.match(hostile, /ok' @; calc/)
+  })
+
+  it('renames the heading that hides the prompt on 1.1.7 and 1.1.8', () => {
+    const published = publishedReleaseBody(`${releaseBody}\n${LEGACY_NOTES_HEADING} again`)
+    assert.equal(published.includes(LEGACY_NOTES_HEADING), false)
+    assert.match(published, /## Changes/)
+    assert.match(published, /\* show release notes/)
+  })
+
+  it('lists notes for each newer version and skips drafts, prereleases, and heading-less bodies', () => {
+    const noted = (tag: string, heading: string, extra: Partial<GitHubRelease> = {}): GitHubRelease => ({
+      ...downloadable(tag, ['Windows x64 build', '', heading, `* notes for ${tag}`].join('\n')),
+      ...extra,
+    })
+    const text = releaseNotesSince('1.1.8', [
+      noted('v1.1.7', LEGACY_NOTES_HEADING),
+      noted('v1.1.8', LEGACY_NOTES_HEADING),
+      downloadable('v1.1.9', 'Windows x64 build only'),
+      noted('v1.1.10', '## Changes'),
+      noted('v1.1.10', '## Changes'),
+      noted('v1.1.11', '## Changes', { draft: true }),
+      noted('v1.2.0-beta.1', '## Changes', { prerelease: true }),
+    ], 'v1.1.10')
+    assert.equal(text, '1.1.10\n* notes for v1.1.10')
+  })
+
+  it('writes a release body that does not contain the old heading', () => {
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-notes-'))
+    const generated = path.join(dir, 'generated.md')
+    const out = path.join(dir, 'out.md')
+    fs.writeFileSync(generated, `${LEGACY_NOTES_HEADING}\n* keep this\n`)
+    const result = spawnSync(process.execPath, [
+      path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      path.join(root, 'scripts', 'prepare-release-notes.ts'),
+      generated,
+      out,
+    ], { cwd: root, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    const body = fs.readFileSync(out, 'utf8')
+    assert.equal(body.includes(LEGACY_NOTES_HEADING), false)
+    assert.match(body, /## Changes/)
+    assert.match(body, /Installer \(recommended\)/)
+    assert.match(body, /\* keep this/)
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 })

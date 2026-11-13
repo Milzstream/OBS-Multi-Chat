@@ -181,27 +181,32 @@ jobs:
           "setup=$setup" >> $env:GITHUB_OUTPUT
           Get-Item $zip, $setup | Select-Object Name, Length
 
+      - name: Build release notes
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $generated = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases/generate-notes" -f "tag_name=$tag" -f "target_commitish=$env:GITHUB_SHA" --jq .body
+          if ($LASTEXITCODE -ne 0 -or $null -eq $generated -or $generated -eq "null") {
+            Write-Host "Could not generate release notes; publishing the installer blurb only."
+            $generated = ""
+          }
+          $generatedPath = Join-Path $env:RUNNER_TEMP "generated-notes.md"
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText($generatedPath, [string]$generated, $utf8)
+          npx tsx scripts/prepare-release-notes.ts $generatedPath release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Publish GitHub Release
         if: steps.gate.outputs.publish == 'true'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Relay Chat Dock ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
-          body: |
-            Windows x64 build of Relay Chat Dock.
-
-            **Installer (recommended):** run `obs-multi-chat-v*-windows-x64-setup.exe`. The app window goes in Program Files. Closing that window stops the OBS docks. Fill in `%LOCALAPPDATA%\Relay Chat Dock\production.env`. The installer can add the two OBS docks if those URLs are not already present.
-
-            **Portable:** unzip the archive, fill in `production.env`, and run `relay-chat-dock.exe`. Keep the whole folder together.
-
-            Dock URLs:
-            - Chat      `http://127.0.0.1:4173/`
-            - Activity  `http://127.0.0.1:4173/activity`
-
-            Installed copies can prompt to install the next release. `production.env` and `data\` are kept.
-
-            Do not commit or share `production.env` or the `data` folder.
+          generate_release_notes: false
+          body_path: release-notes.md
           files: |
             ${{ steps.stage.outputs.zip }}
             ${{ steps.stage.outputs.setup }}
