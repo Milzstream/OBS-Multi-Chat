@@ -74,7 +74,7 @@ Leaving Auto on while YouTube is offline all day is about 5,800 units, so unchec
 2. Set the OAuth redirect URL to the callback URL above.
 3. Copy the client ID and client secret.
 
-The app requests `channel:write` so it can update stream metadata.
+The app requests `user:read`, `channel:read`, `channel:write`, `chat:write`, `events:subscribe`, `moderation:ban`, and `moderation:chat_message:manage`. Enable that same set on the Kick application. `user:read` and `channel:read` identify the account. `channel:write` updates stream metadata. `chat:write` sends chat. `events:subscribe` receives chat and activity. `moderation:ban` and `moderation:chat_message:manage` time out, ban, and delete messages. An application with only `channel:write` cannot send or moderate. If Kick is already connected, disconnect and reconnect so those scopes can be granted.
 
 Kick API access can vary by developer account and API version, so the backend accepts `KICK_API_BASE` for the current public API base URL. It defaults to `https://api.kick.com/public/v1`. Incoming Kick chat uses Kick's realtime WebSocket. Sending still uses the official chat API.
 
