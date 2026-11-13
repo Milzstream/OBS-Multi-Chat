@@ -84,6 +84,7 @@ describe('local control authorization', () => {
       path: '/api/settings',
       ip: '127.0.0.1',
       origin: 'http://127.0.0.1:4173',
+      host: '127.0.0.1:4173',
     }, options).ok, true)
     const remote = authorizeLocalControl({
       method: 'POST',

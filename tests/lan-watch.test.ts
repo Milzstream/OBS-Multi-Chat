@@ -12,6 +12,7 @@ import {
   lanWatchUrl,
   listenHostFor,
   pickLanIPv4,
+  requestSiteHost,
   resolveWatchSecret,
   watchLogLine,
   watchTokenFromRequest,
@@ -110,6 +111,7 @@ describe('LAN watch access', () => {
       method: 'GET',
       path: '/api/jwts',
       ip: '127.0.0.1',
+      host: '127.0.0.1:4173',
     }, lan).ok, true)
     assert.equal(authorizeLocalControl({
       method: 'GET',
@@ -137,8 +139,16 @@ describe('LAN watch access', () => {
         path: '/oauth/youtube',
         ip: '::ffff:127.0.0.1',
         referer,
+        host: '127.0.0.1:4173',
       }, lan).ok, true, referer)
     }
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/oauth/callback',
+      ip: '127.0.0.1',
+      referer: 'https://accounts.google.com/',
+      host: '192.168.1.20:4173',
+    }, lan).ok, false)
     assert.equal(authorizeLocalControl({
       method: 'GET',
       path: '/oauth/callback',
@@ -152,6 +162,94 @@ describe('LAN watch access', () => {
       ip: '127.0.0.1',
       referer: 'https://accounts.google.com/',
     }, lan).ok, false)
+  })
+
+  it('does not treat a loopback connection as this computer when the site name is not loopback', () => {
+    assert.equal(requestSiteHost(''), '')
+    assert.equal(requestSiteHost('[::1]:4173'), '::1')
+    assert.equal(requestSiteHost('192.168.1.20:4173'), '192.168.1.20')
+
+    const tricked = authorizeLocalControl({
+      method: 'GET',
+      path: '/api/jwts',
+      ip: '127.0.0.1',
+      origin: 'http://evil.example:4173',
+      host: 'evil.example:4173',
+    }, lan)
+    assert.equal(tricked.ok, false)
+    if (!tricked.ok) assert.equal(tricked.error, 'Sending and settings stay on this computer')
+
+    const shutdown = authorizeLocalControl({
+      method: 'POST',
+      path: '/api/shutdown',
+      ip: '::ffff:127.0.0.1',
+      host: '192.168.1.20:4173',
+    }, lan)
+    assert.equal(shutdown.ok, false)
+    if (!shutdown.ok) assert.equal(shutdown.error, 'Companion and dock controls stay on this computer')
+
+    const dock = authorizeLocalControl({
+      method: 'GET',
+      path: '/',
+      ip: '127.0.0.1',
+      host: '192.168.1.20:4173',
+    }, lan)
+    assert.equal(dock.ok, false)
+
+    const read = authorizeLocalControl({
+      method: 'GET',
+      path: '/api/state',
+      ip: '127.0.0.1',
+      host: '192.168.1.20:4173',
+      origin: 'http://192.168.1.20:4173',
+      watchToken: 'view-secret',
+      watchTokenFrom: 'query',
+    }, lan)
+    assert.equal(read.ok, true)
+
+    const missing = authorizeLocalControl({
+      method: 'GET',
+      path: '/api/jwts',
+      ip: '127.0.0.1',
+    }, lan)
+    assert.equal(missing.ok, false)
+
+    for (const host of ['127.0.0.1:4173', 'localhost:4173', '[::1]:4173']) {
+      assert.equal(authorizeLocalControl({
+        method: 'GET',
+        path: '/api/jwts',
+        ip: '::ffff:127.0.0.1',
+        host,
+      }, lan).ok, true, host)
+    }
+
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/watch',
+      ip: '192.168.1.50',
+      origin: 'http://192.168.1.20:4173',
+      host: '192.168.1.20:4173',
+      watchToken: 'view-secret',
+    }, lan).ok, true)
+
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/assets/index.js',
+      ip: '127.0.0.1',
+      host: 'evil.example:4173',
+    }, { ...lan, lanEnabled: false }).ok, true)
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/',
+      ip: '127.0.0.1',
+      host: 'localhost:4173',
+    }, { ...lan, lanEnabled: false }).ok, true)
+    assert.equal(authorizeLocalControl({
+      method: 'GET',
+      path: '/',
+      ip: '127.0.0.1',
+      host: 'evil.example:4173',
+    }, { ...lan, lanEnabled: false }).ok, false)
   })
 
   it('keeps a view token from the env or a stored file', () => {

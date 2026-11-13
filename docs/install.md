@@ -51,7 +51,7 @@ Account apps, translation, and `production.env` keys are in [Setup](setup.md).
 
 Click **Watch** in the companion window to share chat and activity with a friend on the same Wi-Fi. Click it again to turn sharing off. Turning it on copies a link like `http://192.168.1.20:4173/watch?token=...`. Right-click **Watch on** to copy that link again. The choice is saved. Windows may ask to allow the app on private networks the first time the process listens on the LAN.
 
-Watch on temporarily listens on the network so that link works. Watch off returns to this computer. The chat dock, activity dock, alerts page, and companion stay on this computer either way.
+Watch on temporarily listens on the network so that link works. Watch off returns to this computer. The chat dock, activity dock, alerts page, and companion stay on this computer either way. Open those at `localhost` or `127.0.0.1`. The LAN address only serves the watch link.
 
 Until Watch is on, other devices cannot reach the chat dock, the activity dock, or the live update stream. The companion log prints the Watch URL without the view token; copy it from the button. The view token is created in `data/watch-token` and stays stable. Set `RELAY_WATCH_TOKEN` to choose it yourself.
 
