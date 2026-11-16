@@ -237,13 +237,47 @@ function chatActionItems(action: any): any[] {
 
 export type YouTubeModeration = { action: 'delete' | 'ban'; messageId?: string; userId?: string }
 
+function moderationSources(action: any) {
+  const nested = action?.replayChatItemAction?.actions
+  return Array.isArray(nested) ? [action, ...nested] : [action]
+}
+
+function nodeText(node: any) {
+  if (!node || typeof node !== 'object') return ''
+  if (typeof node.simpleText === 'string') return node.simpleText
+  if (Array.isArray(node.runs)) return node.runs.map((run: any) => String(run?.text || '')).join('')
+  return ''
+}
+
+function tombstoneText(value: unknown) {
+  return /^\[?\s*message (?:deleted|retracted)\s*\]?$/i.test(String(value || '').replace(/\s+/g, ' ').trim())
+}
+
+function isDeletedReplacement(action: any) {
+  const item = action?.replacementItem
+  const nodes = [action, item, item?.liveChatTextMessageRenderer, item?.liveChatPlaceholderItemRenderer]
+  return nodes.some((node) => {
+    if (!node || typeof node !== 'object') return false
+    if (node.deletedStateMessage) return true
+    return tombstoneText(nodeText(node.message)) || tombstoneText(nodeText(node.deletedStateMessage)) || tombstoneText(nodeText(node))
+  })
+}
+
+function pushModeration(result: YouTubeModeration[], action: any) {
+  const deleted = action?.markChatItemAsDeletedAction
+  if (deleted?.targetItemId) result.push({ action: 'delete', messageId: String(deleted.targetItemId) })
+  const removed = action?.removeChatItemAction
+  if (removed?.targetItemId) result.push({ action: 'delete', messageId: String(removed.targetItemId) })
+  const replaced = action?.replaceChatItemAction
+  if (replaced?.targetItemId && isDeletedReplacement(replaced)) result.push({ action: 'delete', messageId: String(replaced.targetItemId) })
+  const authorDeleted = action?.markChatItemsByAuthorAsDeletedAction
+  if (authorDeleted?.externalChannelId) result.push({ action: 'ban', userId: String(authorDeleted.externalChannelId) })
+}
+
 export function parseModerationActions(payload: any): YouTubeModeration[] {
   const result: YouTubeModeration[] = []
   for (const action of liveChatActions(payload)) {
-    const deleted = action?.markChatItemAsDeletedAction
-    if (deleted?.targetItemId) result.push({ action: 'delete', messageId: String(deleted.targetItemId) })
-    const authorDeleted = action?.markChatItemsByAuthorAsDeletedAction
-    if (authorDeleted?.externalChannelId) result.push({ action: 'ban', userId: String(authorDeleted.externalChannelId) })
+    for (const inner of moderationSources(action)) pushModeration(result, inner)
   }
   return result
 }

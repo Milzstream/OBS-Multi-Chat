@@ -133,6 +133,27 @@ describe('YouTube InnerTube moderation', () => {
     ])
   })
 
+  it('parses a removed item, including one replayed, and ignores a replacement that is not a deletion', () => {
+    const removed = parseModerationActions({
+      continuationContents: {
+        liveChatContinuation: {
+          actions: [
+            { removeChatItemAction: { targetItemId: 'm1' } },
+            { replayChatItemAction: { actions: [{ removeChatItemAction: { targetItemId: 'm2' } }] } },
+            { replaceChatItemAction: { targetItemId: 'm3', replacementItem: { liveChatTextMessageRenderer: { message: { runs: [{ text: 'edited' }] } } } } },
+            { replaceChatItemAction: { targetItemId: 'm4', replacementItem: { liveChatPlaceholderItemRenderer: { id: 'm4', timestampUsec: '1' } } } },
+            { replaceChatItemAction: { targetItemId: 'm5', replacementItem: { liveChatTextMessageRenderer: { message: { runs: [{ text: '[message retracted]' }] } } } } },
+          ],
+        },
+      },
+    })
+    assert.deepEqual(removed, [
+      { action: 'delete', messageId: 'm1' },
+      { action: 'delete', messageId: 'm2' },
+      { action: 'delete', messageId: 'm5' },
+    ])
+  })
+
   it('backs off a dead chat on its own and skips a browser that already failed', () => {
     assert.equal(innerTubeRetryDelay(1), 4_000)
     assert.equal(innerTubeRetryDelay(8), 20_000)

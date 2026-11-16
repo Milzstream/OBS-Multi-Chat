@@ -61,8 +61,24 @@ export function kickModerationReason(raw: unknown) {
   return [...cleaned].slice(0, KICK_MODERATION_REASON_MAX).join('')
 }
 
-function messageIdMatches(message: ChatMessage, messageId: string) {
-  return message.id === messageId || Boolean(message.copies?.some((copy) => copy.id === messageId))
+const YOUTUBE_MESSAGE_PREFIX = 'LCC.'
+
+function youtubeBareMessageId(id: string) {
+  return id.startsWith(YOUTUBE_MESSAGE_PREFIX) ? id.slice(YOUTUBE_MESSAGE_PREFIX.length) : id
+}
+
+function youtubeMessageIdsMatch(left: string, right: string) {
+  if (left === right) return true
+  const leftBare = youtubeBareMessageId(left)
+  const rightBare = youtubeBareMessageId(right)
+  return Boolean(leftBare) && leftBare === rightBare && (left !== leftBare || right !== rightBare)
+}
+
+function messageIdMatches(message: ChatMessage, messageId: string, platform?: Platform) {
+  if (message.id === messageId || message.copies?.some((copy) => copy.id === messageId)) return true
+  if (platform !== 'YouTube') return false
+  if ((message.platform === 'YouTube' || message.platforms?.includes('YouTube')) && youtubeMessageIdsMatch(message.id, messageId)) return true
+  return Boolean(message.copies?.some((copy) => copy.platform === 'YouTube' && youtubeMessageIdsMatch(copy.id, messageId)))
 }
 
 export function chatUserMatches(message: ChatMessage, target: { userId?: string; user?: string }) {
@@ -81,6 +97,7 @@ export function messageOnPlatform(message: ChatMessage, platform: Platform) {
 /**
  * Apply one moderation change to the stored history. `delete` strikes the row
  * whose id or copy id matches, and marks it so unban cannot restore it.
+ * A YouTube delete also matches that id with or without the `LCC.` prefix.
  * `ban` and `timeout` strike every stored row from that user on that platform.
  * `unban` restores those rows, not a message deleted on its own.
  */
@@ -89,7 +106,7 @@ export function applyChatModeration(messages: ChatMessage[], change: ChatModerat
     if (!change.messageId) return { messages, changed: false }
     let changed = false
     const next = messages.map((item) => {
-      if (!messageIdMatches(item, change.messageId!)) return item
+      if (!messageIdMatches(item, change.messageId!, change.platform)) return item
       if (item.deleted && item.removed === 'message') return item
       changed = true
       return { ...item, deleted: true, removed: 'message' as const }

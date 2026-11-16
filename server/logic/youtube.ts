@@ -181,11 +181,13 @@ export function youtubeOfficialToActivity(item: any): ActivityEvent | undefined 
   }
 }
 
-/** Map an official Data API moderation event item (`messageDeletedEvent`/`userBannedEvent`) to a moderation change. */
+/** Map an official Data API moderation event (`messageDeletedEvent`, `messageRetractedEvent`, or `userBannedEvent`) to a moderation change. */
 export function youtubeOfficialModeration(item: any): ChatModeration | undefined {
   const type = String(item?.snippet?.type || '')
-  if (type === 'messageDeletedEvent') {
-    const messageId = item?.snippet?.messageDeletedDetails?.deletedMessageId
+  if (type === 'messageDeletedEvent' || type === 'messageRetractedEvent') {
+    const messageId = type === 'messageRetractedEvent'
+      ? item?.snippet?.messageRetractedDetails?.retractedMessageId
+      : item?.snippet?.messageDeletedDetails?.deletedMessageId
     if (!messageId) return
     return { action: 'delete', platform: 'YouTube', messageId: String(messageId) }
   }
