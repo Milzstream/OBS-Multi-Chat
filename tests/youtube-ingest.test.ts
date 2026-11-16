@@ -458,5 +458,7 @@ describe('YouTube official activity', () => {
     assert.equal(banned?.action, 'ban')
     assert.equal(banned?.userId, 'UC1')
     assert.equal(banned?.user, 'Ada')
+    assert.deepEqual(youtubeOfficialModeration({ snippet: { type: 'messageRetractedEvent', messageRetractedDetails: { retractedMessageId: 'm2' } } }), { action: 'delete', platform: 'YouTube', messageId: 'm2' })
+    assert.equal(youtubeOfficialModeration({ snippet: { type: 'messageRetractedEvent', messageRetractedDetails: {} } }), undefined)
   })
 })

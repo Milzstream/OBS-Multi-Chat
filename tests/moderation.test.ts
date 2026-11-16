@@ -90,6 +90,27 @@ describe('chat moderation', () => {
     assert.equal(restored.messages[0].removed, undefined)
   })
 
+  it('matches a YouTube delete id with or without the LCC. prefix', () => {
+    const prefixed = chat({ id: 'LCC.abc', platform: 'YouTube', user: 'Ada', text: 'hi' })
+    const bare = chat({ id: 'abc', platform: 'YouTube', user: 'Ada', text: 'hi' })
+    assert.equal(applyChatModeration([prefixed], { action: 'delete', platform: 'YouTube', messageId: 'abc' }).messages[0].deleted, true)
+    assert.equal(applyChatModeration([bare], { action: 'delete', platform: 'YouTube', messageId: 'LCC.abc' }).messages[0].deleted, true)
+    const copy = chat({
+      id: 'local',
+      platform: 'Kick',
+      platforms: ['Kick', 'YouTube'],
+      user: 'Ada',
+      text: 'hi',
+      copies: [{ platform: 'YouTube', id: 'LCC.abc' }],
+    })
+    assert.equal(applyChatModeration([copy], { action: 'delete', platform: 'YouTube', messageId: 'abc' }).messages[0].deleted, true)
+    const reverse = chat({ id: 'local', platform: 'YouTube', user: 'Ada', text: 'hi', copies: [{ platform: 'YouTube', id: 'abc' }] })
+    assert.equal(applyChatModeration([reverse], { action: 'delete', platform: 'YouTube', messageId: 'LCC.abc' }).messages[0].deleted, true)
+    const kick = chat({ id: 'abc', platform: 'Kick', user: 'Ada', text: 'hi' })
+    assert.equal(applyChatModeration([kick], { action: 'delete', platform: 'YouTube', messageId: 'LCC.abc' }).changed, false)
+    assert.equal(applyChatModeration([prefixed], { action: 'delete', platform: 'Twitch', messageId: 'abc' }).changed, false)
+  })
+
   it('does not line out the same chatter on another platform', () => {
     const kick = chat({ id: '1', platform: 'Kick', user: 'Ada', userId: '9', text: 'hi' })
     const twitch = chat({ id: '2', platform: 'Twitch', user: 'Ada', userId: '99', text: 'hi' })
