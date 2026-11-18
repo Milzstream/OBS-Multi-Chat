@@ -69,9 +69,9 @@ export function exactCategoryMatch<T extends { id: string; name: string }>(query
 }
 
 export function commitTypedCategory<T extends { category: string; categoryId?: string }>(current: T, query: string): T {
-  const text = query.trim()
-  if (current.category.trim().toLowerCase() === text.toLowerCase() && current.categoryId) return { ...current, category: text }
-  const next = { ...current, category: text }
+  const trimmed = query.trim()
+  if (current.category.trim().toLowerCase() === trimmed.toLowerCase() && current.categoryId) return { ...current, category: query }
+  const next = { ...current, category: query }
   delete next.categoryId
   return next
 }
@@ -107,7 +107,7 @@ export function unifiedCategoryQuery(current: string, twitch: string, kick: stri
   const shown = current.trim()
   const twitchName = twitch.trim()
   const kickName = kick.trim()
-  if (shown && (shown === twitchName || shown === kickName)) return shown
+  if (shown && (shown === twitchName || shown === kickName)) return current
   return preferredCategory(twitch, kick)
 }
 

@@ -5,6 +5,7 @@ import type { CategoryOption, Connection, StreamDetails, StreamDetailsByPlatform
 
 /** Twitch/Kick category field. Arrow keys only move the open list; closed input keeps default caret behavior. */
 function StreamFields({ platform, details, disabled, onChange }: { platform: StreamPlatform; details: StreamDetails; disabled: boolean; onChange: (details: StreamDetails) => void }) {
+  const [query, setQuery] = useState(details.category)
   const [options, setOptions] = useState<CategoryOption[]>([])
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(0)
@@ -12,16 +13,20 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
   const pickedRef = useRef(false)
   const visible = options.slice(0, 8)
   useEffect(() => {
-    if (disabled || details.category.trim().length < 2) { setOptions([]); setOpen(false); return }
+    if (typingRef.current) return
+    setQuery(details.category)
+  }, [details.category])
+  useEffect(() => {
+    if (disabled || query.trim().length < 2) { setOptions([]); setOpen(false); return }
     if (pickedRef.current) { pickedRef.current = false; setOpen(false); return }
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
-      void fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(details.category.trim())}`, { signal: controller.signal }).then((response) => response.ok ? response.json() as Promise<CategoryOption[]> : Promise.reject()).then((items) => { setOptions(items); setOpen(typingRef.current && items.length > 0) }).catch((error: { name?: string }) => { if (error.name !== 'AbortError') { setOptions([]); setOpen(false) } })
+      void fetch(`/api/categories/${platform.toLowerCase()}?query=${encodeURIComponent(query.trim())}`, { signal: controller.signal }).then((response) => response.ok ? response.json() as Promise<CategoryOption[]> : Promise.reject()).then((items) => { setOptions(items); setOpen(typingRef.current && items.length > 0) }).catch((error: { name?: string }) => { if (error.name !== 'AbortError') { setOptions([]); setOpen(false) } })
     }, 200)
     return () => { window.clearTimeout(timer); controller.abort() }
-  }, [details.category, disabled, platform])
-  useEffect(() => { setHighlight(0) }, [details.category, open])
-  const pick = (option: CategoryOption) => { pickedRef.current = true; typingRef.current = false; setOpen(false); setOptions([]); onChange({ ...details, category: option.name, categoryId: option.id }) }
+  }, [query, disabled, platform])
+  useEffect(() => { setHighlight(0) }, [query, open])
+  const pick = (option: CategoryOption) => { pickedRef.current = true; typingRef.current = false; setQuery(option.name); setOpen(false); setOptions([]); onChange({ ...details, category: option.name, categoryId: option.id }) }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (!open || visible.length === 0) return
     if (event.key === 'ArrowDown') {
@@ -46,7 +51,7 @@ function StreamFields({ platform, details, disabled, onChange }: { platform: Str
       setOpen(false)
     }
   }
-  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={details.category} onChange={(event) => { pickedRef.current = false; typingRef.current = true; onChange(commitTypedCategory(details, event.target.value)) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
+  return <div className="stream-fields"><div className="stream-fields-heading"><span style={{ color: platformMeta[platform].color }}>{platformIcon(platform, 13)}</span><strong>{platform} category</strong><small>{disabled ? `Connect ${platform}` : 'Platform-specific'}</small></div><input disabled={disabled} autoComplete="off" value={query} onChange={(event) => { pickedRef.current = false; typingRef.current = true; const text = event.target.value; setQuery(text); onChange(commitTypedCategory(details, text)) }} onKeyDown={onKeyDown} onBlur={() => { typingRef.current = false; window.setTimeout(() => setOpen(false), 120) }} placeholder={`${platform} category / game`} aria-expanded={open} aria-autocomplete="list" />{open && visible.length > 0 && <ul className="category-options" role="listbox">{visible.map((option, index) => <li key={option.id}><button type="button" className={index === highlight ? 'active' : undefined} aria-selected={index === highlight} onMouseEnter={() => setHighlight(index)} onMouseDown={(event) => { event.preventDefault(); pick(option) }}>{option.name}</button></li>)}</ul>}</div>
 }
 
 /** Combined Twitch+Kick category search. Shared names are one row; platform-only hits keep their icon. */
