@@ -4,12 +4,13 @@ import WebSocket from 'ws'
 import { fetchTimed, type FetchLike } from './fetch-timed.js'
 
 /**
- * Kick chat, activity, and moderation over Kick's public Pusher WebSocket, plus
- * profile-picture lookups that work around Kick's Cloudflare challenge.
+ * Kick chat, activity, and moderation over Kick's realtime WebSocket
+ * (Centrifugo; Pusher still accepted), plus profile-picture lookups that
+ * work around Kick's Cloudflare challenge.
  *
  * This file owns reading. Sending and OAuth live in server.ts.
  *
- * All payload shapes matched here are the unofficial Pusher message payloads
+ * All payload shapes matched here are the unofficial realtime message payloads
  * that Kick's site uses, not the official Kick REST API.
  */
 
@@ -108,13 +109,52 @@ export function kickRealtimeToken(payload: any) {
   return typeof token === 'string' && token ? token : undefined
 }
 
+/** Kick's anonymous Centrifugo token lasts 45 minutes. The server then waits ~25s and closes the socket. */
+export const KICK_CHAT_LEASE_S = 45 * 60
+/** Don't paint "disconnected" for a close that the 1s reconnect already covers. */
+export const KICK_CHAT_DOWN_GRACE_MS = 8_000
+const KICK_TOKEN_REFRESH_EARLY_S = 15
+
+export function kickConnectionLeaseSeconds(lease?: { expires?: unknown; ttl?: unknown }) {
+  if (lease?.expires === false) return
+  const ttl = Number(lease?.ttl)
+  if (Number.isFinite(ttl) && ttl > 0) return ttl
+  return KICK_CHAT_LEASE_S
+}
+
+/** Refresh shortly before expiry so a slow token fetch still lands inside Centrifugo's grace window. */
+export function kickTokenRefreshDelayMs(ttlSeconds: number) {
+  const ttl = Number(ttlSeconds)
+  if (!Number.isFinite(ttl) || ttl <= 0) return
+  const seconds = ttl > KICK_TOKEN_REFRESH_EARLY_S + 5 ? ttl - KICK_TOKEN_REFRESH_EARLY_S : Math.max(1, Math.floor(ttl * 0.8))
+  return seconds * 1000
+}
+
+export function kickChatDownLongEnough(downSince: number, now: number, graceMs = KICK_CHAT_DOWN_GRACE_MS) {
+  return downSince > 0 && now - downSince >= graceMs
+}
+
+function centrifugoLease(record: any) {
+  const ttl = Number(record?.ttl)
+  return {
+    expires: record?.expires !== false,
+    ttl: Number.isFinite(ttl) && ttl > 0 ? ttl : undefined,
+  }
+}
+
 export function readKickCentrifugoFrame(raw: string) {
   const payload = parseJson(raw)
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return
   if (!Object.keys(payload).length) return { kind: 'ping' as const }
   if (payload.error) return { kind: 'error' as const, message: String(payload.error.message || payload.error.code || 'realtime error') }
-  if (payload.connect) return { kind: 'connected' as const }
+  if (payload.connect) return { kind: 'connected' as const, ...centrifugoLease(payload.connect) }
+  if (payload.refresh) return { kind: 'refreshed' as const, id: Number(payload.id) || 0, ...centrifugoLease(payload.refresh) }
   if (payload.subscribe && payload.id) return { kind: 'subscribed' as const, id: Number(payload.id) }
+  const disconnect = payload.disconnect || payload.push?.disconnect
+  if (disconnect && typeof disconnect === 'object') {
+    const code = Number(disconnect.code)
+    return { kind: 'disconnect' as const, code: Number.isFinite(code) ? code : undefined, reason: String(disconnect.reason || '') }
+  }
   const data = payload.push?.pub?.data
   if (!data || typeof data !== 'object' || !data.event) return
   return {
@@ -488,6 +528,7 @@ export class KickChat {
   private ws?: WebSocket
   private pingTimer?: NodeJS.Timeout
   private reconnectTimer?: NodeJS.Timeout
+  private refreshTimer?: NodeJS.Timeout
   private connecting?: Promise<void>
   private chatroomId?: number
   private slug?: string
@@ -497,12 +538,14 @@ export class KickChat {
   private closed = true
   private attempt = 0
   private hasFailed = false
+  private downSince = 0
+  private commandId = 3
   private provider?: 'centrifugo' | 'pusher'
   private token?: string
 
   get currentChatroomId() { return this.chatroomId }
   get connected() { return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && !this.closed) }
-  get failed() { return this.hasFailed }
+  get failed() { return this.hasFailed && kickChatDownLongEnough(this.downSince, Date.now()) }
 
   async start(slug: string, onMessage: (message: KickChatMessage) => void, cachedChatroomId?: number, onActivity?: (event: KickActivity) => void, onModeration?: (event: KickModeration) => void) {
     this.onMessage = onMessage
@@ -514,6 +557,7 @@ export class KickChat {
       this.chatroomId = cachedChatroomId
       this.attempt = 0
       this.hasFailed = false
+      this.downSince = 0
       await this.disconnectSocket()
     } else if (cachedChatroomId && !this.chatroomId) {
       this.chatroomId = cachedChatroomId
@@ -528,6 +572,7 @@ export class KickChat {
     this.chatroomId = undefined
     this.attempt = 0
     this.hasFailed = false
+    this.downSince = 0
     this.onMessage = undefined
     this.onActivity = undefined
     this.onModeration = undefined
@@ -562,6 +607,7 @@ export class KickChat {
     this.provider = plan.provider
     this.token = plan.token
     console.log(`Kick chat connecting (${this.slug})`)
+    this.commandId = 3
     const socket = new WebSocket(plan.url, { headers: { Origin: 'https://kick.com', 'User-Agent': BROWSER_HEADERS['User-Agent'] } })
     this.ws = socket
     socket.on('open', () => {
@@ -572,6 +618,7 @@ export class KickChat {
     socket.on('close', () => {
       if (this.ws !== socket) return
       this.ws = undefined
+      this.clearTokenRefresh()
       this.scheduleReconnect()
     })
     socket.on('error', (error) => {
@@ -583,7 +630,7 @@ export class KickChat {
   private async realtimePlan() {
     const id = this.chatroomId
     if (!id) throw new Error('Kick chatroom id is missing')
-    const headers = { ...BROWSER_HEADERS, 'Content-Type': 'application/json', Origin: 'https://kick.com', 'x-app-platform': 'web' }
+    const headers = this.realtimeHeaders()
     const connection = await kickPageFetch(`https://web.kick.com/api/v1/realtime/channels/${id}/chat/connection`, {
       method: 'POST',
       headers,
@@ -593,6 +640,10 @@ export class KickChat {
     const plan = kickRealtimePlan(await connection.json())
     if (!plan) throw new Error('Kick realtime returned no connection')
     if (plan.provider === 'pusher') return { ...plan, token: undefined }
+    return { ...plan, token: await this.fetchRealtimeToken(headers) }
+  }
+
+  private async fetchRealtimeToken(headers: Record<string, string>) {
     const auth = await kickPageFetch('https://web.kick.com/api/v1/realtime/auth/connection', {
       method: 'POST',
       headers,
@@ -601,7 +652,11 @@ export class KickChat {
     if (!auth.ok) throw new Error(`Kick realtime token ${auth.status}`)
     const token = kickRealtimeToken(await auth.json())
     if (!token) throw new Error('Kick realtime returned no token')
-    return { ...plan, token }
+    return token
+  }
+
+  private realtimeHeaders() {
+    return { ...BROWSER_HEADERS, 'Content-Type': 'application/json', Origin: 'https://kick.com', 'x-app-platform': 'web' }
   }
 
   private subscribeCentrifugo() {
@@ -611,24 +666,86 @@ export class KickChat {
     this.ws.send(JSON.stringify({ id: 3, subscribe: { channel: `chatroom_${id}` } }))
   }
 
-  /** Handle Pusher or Kick's Centrifugo realtime frames. */
+  /** Handle Pusher or Kick's Centrifugo realtime frames. Centrifugo may batch several JSON objects in one WebSocket frame. */
   private handle(raw: string) {
     if (this.provider === 'centrifugo') {
-      const live = readKickCentrifugoFrame(raw)
-      if (!live) return
-      if (live.kind === 'ping') { this.ws?.send('{}'); return }
-      if (live.kind === 'error') { console.error('Kick chat:', live.message); this.ws?.close(); return }
-      if (live.kind === 'connected') { this.subscribeCentrifugo(); return }
-      if (live.kind === 'subscribed') {
-        if (live.id === 2) { this.attempt = 0; this.hasFailed = false; console.log(`Kick chat connected (${this.slug})`) }
-        return
+      for (const line of raw.split('\n')) {
+        const text = line.trim()
+        if (text) this.handleCentrifugo(text)
       }
-      this.dispatch(readKickSocketFrame(live.frame))
       return
     }
     const frame = readKickSocketFrame(raw)
     if (frame?.handshake === 'error') { console.error('Kick chat:', frame.error); this.ws?.close(); return }
     this.dispatch(frame)
+  }
+
+  private handleCentrifugo(raw: string) {
+    const live = readKickCentrifugoFrame(raw)
+    if (!live) return
+    if (live.kind === 'ping') { this.ws?.send('{}'); return }
+    if (live.kind === 'error') { console.error('Kick chat:', live.message); this.ws?.close(); return }
+    if (live.kind === 'connected') {
+      this.subscribeCentrifugo()
+      this.armTokenRefresh(live)
+      return
+    }
+    if (live.kind === 'refreshed') {
+      console.log(`Kick chat lease refreshed (${this.slug})`)
+      this.armTokenRefresh(live)
+      return
+    }
+    if (live.kind === 'disconnect') {
+      const why = [live.code, live.reason].filter((part) => part != null && part !== '').join(' ')
+      console.error(`Kick chat: ${why || 'server closed the socket'}`)
+      this.ws?.close()
+      return
+    }
+    if (live.kind === 'subscribed') {
+      if (live.id === 2) this.markChatUp()
+      return
+    }
+    if (live.kind === 'publication') this.dispatch(readKickSocketFrame(live.frame))
+  }
+
+  private markChatUp() {
+    this.attempt = 0
+    this.hasFailed = false
+    this.downSince = 0
+    console.log(`Kick chat connected (${this.slug})`)
+  }
+
+  private armTokenRefresh(lease?: { expires?: unknown; ttl?: unknown }) {
+    this.clearTokenRefresh()
+    if (this.closed || this.provider !== 'centrifugo') return
+    const ttl = kickConnectionLeaseSeconds(lease)
+    const delay = ttl ? kickTokenRefreshDelayMs(ttl) : undefined
+    if (!delay) return
+    this.refreshTimer = setTimeout(() => { void this.refreshConnectionToken() }, delay)
+  }
+
+  private async refreshConnectionToken(retry = true) {
+    const socket = this.ws
+    if (this.closed || this.provider !== 'centrifugo' || !socket || socket.readyState !== WebSocket.OPEN) return
+    try {
+      const token = await this.fetchRealtimeToken(this.realtimeHeaders())
+      if (this.closed || this.ws !== socket || socket.readyState !== WebSocket.OPEN) return
+      this.commandId += 1
+      socket.send(JSON.stringify({ id: this.commandId, refresh: { token } }))
+      // Reply carries the next ttl. If it never arrives, refresh again on the known 45-minute lease.
+      this.armTokenRefresh()
+    } catch (error) {
+      if (this.closed || this.ws !== socket) return
+      console.error('Kick chat token refresh:', error instanceof Error ? error.message : error)
+      if (!retry || socket.readyState !== WebSocket.OPEN) return
+      this.clearTokenRefresh()
+      this.refreshTimer = setTimeout(() => { void this.refreshConnectionToken(false) }, 10_000)
+    }
+  }
+
+  private clearTokenRefresh() {
+    if (this.refreshTimer) clearTimeout(this.refreshTimer)
+    this.refreshTimer = undefined
   }
 
   private dispatch(frame: KickSocketFrame | undefined) {
@@ -646,6 +763,7 @@ export class KickChat {
     if (frame.handshake === 'subscribed') {
       this.attempt = 0
       this.hasFailed = false
+      this.downSince = 0
       if (String(frame.channel || '').includes('.v2')) console.log(`Kick chat connected (${this.slug})`)
       return
     }
@@ -664,6 +782,7 @@ export class KickChat {
   private scheduleReconnect() {
     if (this.closed || this.reconnectTimer) return
     this.hasFailed = true
+    if (!this.downSince) this.downSince = Date.now()
     const delay = Math.min(15_000, 1_000 * 2 ** this.attempt++)
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined
@@ -674,6 +793,7 @@ export class KickChat {
   private async disconnectSocket() {
     if (this.pingTimer) clearInterval(this.pingTimer)
     this.pingTimer = undefined
+    this.clearTokenRefresh()
     const socket = this.ws
     this.ws = undefined
     dropSocket(socket)
