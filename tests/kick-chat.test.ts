@@ -7,7 +7,7 @@ import {
   looksLikePlaceholder,
   shouldWarnKickChatDown,
 } from '../server/logic.js'
-import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, kickRealtimePlan, kickRealtimeToken, kickSocketShouldStay, parseJson, parseKickChatMessage, pickName, readKickCentrifugoFrame, readKickSocketFrame } from '../server/kick-chat.js'
+import { chatroomIdFrom, createFlushLock, dropSocket, isKickSlug, kickAvatarFromSender, kickChannelPowershell, kickChatDownLongEnough, kickConnectionLeaseSeconds, kickEventToActivity, kickEventToModeration, kickPageFetch, kickProfilePicFromChannel, kickRealtimePlan, kickRealtimeToken, kickSocketShouldStay, kickTokenRefreshDelayMs, parseJson, parseKickChatMessage, pickName, readKickCentrifugoFrame, readKickSocketFrame } from '../server/kick-chat.js'
 
 describe('Kick chat and activity', () => {
   it('treats a non-OK Kick status response as a failed check, not as offline', () => {
@@ -61,6 +61,20 @@ describe('Kick chat and activity', () => {
     assert.equal(kickRealtimeToken({ data: { token: 'jwt' } }), 'jwt')
     assert.equal(readKickCentrifugoFrame('{}')?.kind, 'ping')
     assert.equal(readKickCentrifugoFrame('{"id":1,"connect":{}}')?.kind, 'connected')
+    const leased = readKickCentrifugoFrame('{"id":1,"connect":{"expires":true,"ttl":2700}}')
+    assert.equal(leased?.kind, 'connected')
+    if (leased?.kind === 'connected') assert.equal(kickConnectionLeaseSeconds(leased), 2700)
+    assert.equal(kickConnectionLeaseSeconds({ expires: false, ttl: 2700 }), undefined)
+    assert.equal(kickConnectionLeaseSeconds({}), 45 * 60)
+    assert.equal(kickTokenRefreshDelayMs(2700), 2_685_000)
+    assert.equal(kickChatDownLongEnough(1_000, 8_999), false)
+    assert.equal(kickChatDownLongEnough(1_000, 9_000), true)
+    const refreshed = readKickCentrifugoFrame('{"id":4,"refresh":{"expires":true,"ttl":2700}}')
+    assert.equal(refreshed?.kind, 'refreshed')
+    if (refreshed?.kind === 'refreshed') assert.equal(refreshed.ttl, 2700)
+    const dropped = readKickCentrifugoFrame('{"push":{"disconnect":{"code":3005,"reason":"expired"}}}')
+    assert.equal(dropped?.kind, 'disconnect')
+    if (dropped?.kind === 'disconnect') assert.equal(dropped.reason, 'expired')
     assert.equal(readKickCentrifugoFrame('{"id":2,"subscribe":{}}')?.kind, 'subscribed')
     const publication = readKickCentrifugoFrame(JSON.stringify({ push: { channel: 'chatrooms.44.v2', pub: { data: { event: 'App\\Events\\ChatMessageEvent', data: { id: 'm1', content: 'hi', sender: { username: 'Ada' } } } } } }))
     assert.equal(publication?.kind, 'publication')
